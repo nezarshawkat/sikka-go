@@ -1,4 +1,4 @@
-declare module 'react-map-gl/mapbox' {
+declare module 'react-map-gl' {
   import { ComponentType, ReactNode } from 'react';
 
   export interface ViewState {
