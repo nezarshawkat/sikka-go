@@ -16,7 +16,7 @@ export default defineConfig(({ mode }) => ({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
-      "react-map-gl": "react-map-gl/mapbox",
+      "react-map-gl": path.resolve(__dirname, "node_modules/react-map-gl/dist/mapbox.js"),
     },
     dedupe: ["react", "react-dom", "react/jsx-runtime", "react/jsx-dev-runtime", "@tanstack/react-query", "@tanstack/query-core"],
   },
