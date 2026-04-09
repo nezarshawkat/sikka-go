@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Search, User, MapPin, Navigation } from 'lucide-react';
 import { motion } from 'framer-motion';
-import Map, { Marker, GeolocateControl, NavigationControl } from 'react-map-gl';
+import Map, { Marker, GeolocateControl, NavigationControl } from 'react-map-gl/mapbox';
 import 'mapbox-gl/dist/mapbox-gl.css';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || '';

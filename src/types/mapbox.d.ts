@@ -1,4 +1,4 @@
-declare module 'react-map-gl' {
+declare module 'react-map-gl/mapbox' {
   import { ComponentType, ReactNode } from 'react';
 
   export interface ViewState {
@@ -7,7 +7,6 @@ declare module 'react-map-gl' {
     zoom: number;
     bearing?: number;
     pitch?: number;
-    padding?: { top: number; bottom: number; left: number; right: number };
   }
 
   export interface MapProps {
