@@ -1,0 +1,117 @@
+import { useState } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useAuth } from '@/contexts/AuthContext';
+import { t } from '@/lib/i18n';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Card, CardContent } from '@/components/ui/card';
+import { motion } from 'framer-motion';
+import { ArrowLeft, Wallet, Clock, MapPin, ChevronRight } from 'lucide-react';
+
+type TripType = 'economic' | 'comfortable' | 'premium';
+
+const TripPlan = () => {
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const { language } = useAuth();
+  const destination = searchParams.get('destination') || '';
+
+  const [tripType, setTripType] = useState<TripType>('economic');
+  const [budget, setBudget] = useState('');
+
+  const tripTypes: { value: TripType; icon: string; color: string }[] = [
+    { value: 'economic', icon: '💰', color: 'border-green-400' },
+    { value: 'comfortable', icon: '🛋️', color: 'border-blue-400' },
+    { value: 'premium', icon: '✨', color: 'border-yellow-400' },
+  ];
+
+  const handlePlanTrip = () => {
+    navigate(`/trip-result?destination=${encodeURIComponent(destination)}&type=${tripType}&budget=${budget}`);
+  };
+
+  return (
+    <div className="min-h-screen bg-background">
+      {/* Header */}
+      <div className="sticky top-0 bg-card/95 backdrop-blur-sm border-b z-10 p-4 flex items-center gap-3">
+        <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
+          <ArrowLeft className="h-5 w-5" />
+        </Button>
+        <div>
+          <p className="text-sm text-muted-foreground">{t('searchDestination', language)}</p>
+          <p className="font-semibold text-foreground">{destination}</p>
+        </div>
+      </div>
+
+      <div className="p-4 space-y-6">
+        {/* Destination card */}
+        <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }}>
+          <Card>
+            <CardContent className="p-4 flex items-center gap-3">
+              <div className="h-10 w-10 rounded-full bg-destructive/10 flex items-center justify-center shrink-0">
+                <MapPin className="h-5 w-5 text-destructive" />
+              </div>
+              <div className="flex-1">
+                <p className="text-xs text-muted-foreground">Destination</p>
+                <p className="font-medium text-foreground">{destination}</p>
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        {/* Trip type */}
+        <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.1 }}>
+          <p className="text-sm font-medium text-foreground mb-3">{t('tripType', language)}</p>
+          <div className="grid grid-cols-3 gap-3">
+            {tripTypes.map(({ value, icon, color }) => (
+              <button
+                key={value}
+                onClick={() => setTripType(value)}
+                className={`p-4 rounded-xl border-2 text-center transition-all ${
+                  tripType === value
+                    ? `${color} bg-primary/5`
+                    : 'border-border bg-card'
+                }`}
+              >
+                <span className="text-2xl block mb-1">{icon}</span>
+                <span className="text-xs font-medium text-foreground">{t(value, language)}</span>
+              </button>
+            ))}
+          </div>
+        </motion.div>
+
+        {/* Budget */}
+        <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.2 }}>
+          <p className="text-sm font-medium text-foreground mb-3">{t('budget', language)}</p>
+          <div className="relative">
+            <Wallet className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              type="number"
+              placeholder="100"
+              value={budget}
+              onChange={(e) => setBudget(e.target.value)}
+              className="pl-10 h-12 text-base"
+              dir="ltr"
+            />
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+              {t('egp', language)}
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
+            <Clock className="h-3 w-3" />
+            {t('recommendedBudget', language)}: 50–150 {t('egp', language)}
+          </p>
+        </motion.div>
+
+        {/* Plan button */}
+        <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.3 }}>
+          <Button onClick={handlePlanTrip} className="w-full h-14 text-base rounded-xl gap-2">
+            {t('planTrip', language)}
+            <ChevronRight className="h-5 w-5" />
+          </Button>
+        </motion.div>
+      </div>
+    </div>
+  );
+};
+
+export default TripPlan;
