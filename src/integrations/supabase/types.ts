@@ -14,16 +14,361 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      locations: {
+        Row: {
+          city: string
+          created_at: string
+          id: string
+          is_station: boolean
+          latitude: number
+          longitude: number
+          name_ar: string
+          name_en: string
+        }
+        Insert: {
+          city?: string
+          created_at?: string
+          id?: string
+          is_station?: boolean
+          latitude: number
+          longitude: number
+          name_ar: string
+          name_en: string
+        }
+        Update: {
+          city?: string
+          created_at?: string
+          id?: string
+          is_station?: boolean
+          latitude?: number
+          longitude?: number
+          name_ar?: string
+          name_en?: string
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          created_at: string
+          display_name: string | null
+          id: string
+          language: string
+          nationality: string
+          phone: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          language?: string
+          nationality?: string
+          phone?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          language?: string
+          nationality?: string
+          phone?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      reviews: {
+        Row: {
+          comment: string | null
+          created_at: string
+          id: string
+          rating: number
+          transport_type_id: string
+          trip_segment_id: string
+          user_id: string
+        }
+        Insert: {
+          comment?: string | null
+          created_at?: string
+          id?: string
+          rating: number
+          transport_type_id: string
+          trip_segment_id: string
+          user_id: string
+        }
+        Update: {
+          comment?: string | null
+          created_at?: string
+          id?: string
+          rating?: number
+          transport_type_id?: string
+          trip_segment_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reviews_transport_type_id_fkey"
+            columns: ["transport_type_id"]
+            isOneToOne: false
+            referencedRelation: "transport_types"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reviews_trip_segment_id_fkey"
+            columns: ["trip_segment_id"]
+            isOneToOne: false
+            referencedRelation: "trip_segments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      transport_routes: {
+        Row: {
+          created_at: string
+          distance_km: number
+          duration_minutes: number | null
+          end_location_id: string
+          id: string
+          is_active: boolean
+          price_egp: number
+          start_location_id: string
+          transport_type_id: string
+        }
+        Insert: {
+          created_at?: string
+          distance_km: number
+          duration_minutes?: number | null
+          end_location_id: string
+          id?: string
+          is_active?: boolean
+          price_egp: number
+          start_location_id: string
+          transport_type_id: string
+        }
+        Update: {
+          created_at?: string
+          distance_km?: number
+          duration_minutes?: number | null
+          end_location_id?: string
+          id?: string
+          is_active?: boolean
+          price_egp?: number
+          start_location_id?: string
+          transport_type_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "transport_routes_end_location_id_fkey"
+            columns: ["end_location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "transport_routes_start_location_id_fkey"
+            columns: ["start_location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "transport_routes_transport_type_id_fkey"
+            columns: ["transport_type_id"]
+            isOneToOne: false
+            referencedRelation: "transport_types"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      transport_types: {
+        Row: {
+          average_speed_kmh: number
+          base_price_egp: number
+          color: string
+          created_at: string
+          foreigner_allowed: boolean
+          icon: string
+          id: string
+          is_active: boolean
+          name_ar: string
+          name_en: string
+          price_per_km_egp: number
+        }
+        Insert: {
+          average_speed_kmh?: number
+          base_price_egp?: number
+          color?: string
+          created_at?: string
+          foreigner_allowed?: boolean
+          icon?: string
+          id?: string
+          is_active?: boolean
+          name_ar: string
+          name_en: string
+          price_per_km_egp?: number
+        }
+        Update: {
+          average_speed_kmh?: number
+          base_price_egp?: number
+          color?: string
+          created_at?: string
+          foreigner_allowed?: boolean
+          icon?: string
+          id?: string
+          is_active?: boolean
+          name_ar?: string
+          name_en?: string
+          price_per_km_egp?: number
+        }
+        Relationships: []
+      }
+      trip_segments: {
+        Row: {
+          cost_egp: number
+          created_at: string
+          duration_minutes: number
+          end_lat: number
+          end_lng: number
+          end_name: string
+          id: string
+          segment_order: number
+          start_lat: number
+          start_lng: number
+          start_name: string
+          transport_type_id: string
+          trip_id: string
+        }
+        Insert: {
+          cost_egp?: number
+          created_at?: string
+          duration_minutes?: number
+          end_lat: number
+          end_lng: number
+          end_name: string
+          id?: string
+          segment_order: number
+          start_lat: number
+          start_lng: number
+          start_name: string
+          transport_type_id: string
+          trip_id: string
+        }
+        Update: {
+          cost_egp?: number
+          created_at?: string
+          duration_minutes?: number
+          end_lat?: number
+          end_lng?: number
+          end_name?: string
+          id?: string
+          segment_order?: number
+          start_lat?: number
+          start_lng?: number
+          start_name?: string
+          transport_type_id?: string
+          trip_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trip_segments_transport_type_id_fkey"
+            columns: ["transport_type_id"]
+            isOneToOne: false
+            referencedRelation: "transport_types"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "trip_segments_trip_id_fkey"
+            columns: ["trip_id"]
+            isOneToOne: false
+            referencedRelation: "trips"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      trips: {
+        Row: {
+          budget_egp: number | null
+          created_at: string
+          destination_name: string | null
+          end_lat: number
+          end_lng: number
+          id: string
+          start_lat: number
+          start_lng: number
+          status: string
+          total_cost_egp: number | null
+          total_time_minutes: number | null
+          trip_type: string
+          user_id: string
+        }
+        Insert: {
+          budget_egp?: number | null
+          created_at?: string
+          destination_name?: string | null
+          end_lat: number
+          end_lng: number
+          id?: string
+          start_lat: number
+          start_lng: number
+          status?: string
+          total_cost_egp?: number | null
+          total_time_minutes?: number | null
+          trip_type?: string
+          user_id: string
+        }
+        Update: {
+          budget_egp?: number | null
+          created_at?: string
+          destination_name?: string | null
+          end_lat?: number
+          end_lng?: number
+          id?: string
+          start_lat?: number
+          start_lng?: number
+          status?: string
+          total_cost_egp?: number | null
+          total_time_minutes?: number | null
+          trip_type?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_roles: {
+        Row: {
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "admin" | "user"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +495,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["admin", "user"],
+    },
   },
 } as const
