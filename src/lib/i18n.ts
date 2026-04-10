@@ -18,7 +18,10 @@ const translations = {
     adminLogin: 'Admin Login',
     email: 'Email',
     password: 'Password',
+    username: 'Username',
     login: 'Login',
+    country: 'Country',
+    searchCountry: 'Search country...',
     logout: 'Logout',
     back: 'Back',
 
@@ -94,7 +97,10 @@ const translations = {
     adminLogin: 'دخول المسؤول',
     email: 'البريد الإلكتروني',
     password: 'كلمة المرور',
+    username: 'اسم المستخدم',
     login: 'تسجيل الدخول',
+    country: 'الدولة',
+    searchCountry: 'ابحث عن دولة...',
     logout: 'تسجيل الخروج',
     back: 'رجوع',
 
