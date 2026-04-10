@@ -9,6 +9,7 @@ import { t, Language } from '@/lib/i18n';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Phone, Shield, ArrowLeft, Globe, Users } from 'lucide-react';
 import { toast } from 'sonner';
+import CountryCodeSelect, { countries, Country } from '@/components/auth/CountryCodeSelect';
 
 type Step = 'language' | 'phone' | 'otp' | 'nationality' | 'admin';
 
@@ -16,10 +17,11 @@ const Auth = () => {
   const { language, setLanguage, session } = useAuth();
   const navigate = useNavigate();
   const [step, setStep] = useState<Step>('language');
-  const [phone, setPhone] = useState('');
+  const [selectedCountry, setSelectedCountry] = useState<Country>(countries[0]); // Egypt
+  const [phoneNumber, setPhoneNumber] = useState('');
   const [otp, setOtp] = useState('');
   const [nationality, setNationality] = useState<'egyptian' | 'foreigner'>('egyptian');
-  const [adminEmail, setAdminEmail] = useState('');
+  const [adminUsername, setAdminUsername] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
@@ -28,29 +30,72 @@ const Auth = () => {
     return null;
   }
 
+  const fullPhone = `${selectedCountry.dial}${phoneNumber}`;
+
+  const handlePhoneInput = (value: string) => {
+    // Only allow digits
+    const digits = value.replace(/\D/g, '');
+    setPhoneNumber(digits);
+  };
+
   const handleSendOtp = async () => {
-    if (!phone.trim()) return;
-    setIsLoading(true);
-    const { error } = await supabase.auth.signInWithOtp({ phone });
-    setIsLoading(false);
-    if (error) {
-      toast.error(error.message);
-    } else {
-      toast.success('OTP sent!');
-      setStep('otp');
+    if (!phoneNumber.trim() || phoneNumber.length < 6) {
+      toast.error(language === 'ar' ? 'أدخل رقم هاتف صحيح' : 'Enter a valid phone number');
+      return;
     }
+    setIsLoading(true);
+    try {
+      const res = await supabase.functions.invoke('send-otp', {
+        body: { phone: fullPhone },
+      });
+      if (res.error || res.data?.error) {
+        toast.error(res.data?.error || res.error?.message || 'Failed to send OTP');
+      } else {
+        toast.success(language === 'ar' ? 'تم إرسال رمز التحقق!' : 'Verification code sent!');
+        setStep('otp');
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to send OTP');
+    }
+    setIsLoading(false);
   };
 
   const handleVerifyOtp = async () => {
-    if (!otp.trim()) return;
+    if (otp.length !== 6) return;
     setIsLoading(true);
-    const { error } = await supabase.auth.verifyOtp({ phone, token: otp, type: 'sms' });
-    setIsLoading(false);
-    if (error) {
-      toast.error(error.message);
-    } else {
-      setStep('nationality');
+    try {
+      const res = await supabase.functions.invoke('verify-otp', {
+        body: { phone: fullPhone, code: otp },
+      });
+      if (res.error || res.data?.error) {
+        toast.error(res.data?.error || res.error?.message || 'Invalid code');
+      } else {
+        // Use the verification URL to sign in
+        if (res.data?.verification_url) {
+          const url = new URL(res.data.verification_url);
+          const token_hash = url.searchParams.get('token') || res.data.token_hash;
+          if (token_hash) {
+            const { error } = await supabase.auth.verifyOtp({
+              token_hash,
+              type: 'magiclink',
+            });
+            if (error) {
+              toast.error(error.message);
+              setIsLoading(false);
+              return;
+            }
+          }
+        }
+        if (res.data?.is_new) {
+          setStep('nationality');
+        } else {
+          navigate('/');
+        }
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Verification failed');
     }
+    setIsLoading(false);
   };
 
   const handleSetNationality = async () => {
@@ -67,10 +112,11 @@ const Auth = () => {
   };
 
   const handleAdminLogin = async () => {
-    if (!adminEmail.trim() || !adminPassword.trim()) return;
+    if (!adminUsername.trim() || !adminPassword.trim()) return;
     setIsLoading(true);
+    const email = `${adminUsername}@sikka.admin`;
     const { error } = await supabase.auth.signInWithPassword({
-      email: adminEmail,
+      email,
       password: adminPassword,
     });
     setIsLoading(false);
@@ -89,7 +135,6 @@ const Auth = () => {
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-background px-4">
-      {/* Logo / Brand */}
       <motion.div
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
@@ -145,15 +190,30 @@ const Auth = () => {
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
-                <Input
-                  type="tel"
-                  placeholder={t('enterPhone', language)}
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  dir="ltr"
-                  className="text-base"
-                />
-                <Button onClick={handleSendOtp} disabled={isLoading} className="w-full">
+                {/* Country display */}
+                <div className="flex items-center gap-2 p-2 rounded-md bg-muted/50 text-sm">
+                  <span className="text-lg">{selectedCountry.flag}</span>
+                  <span className="font-medium">{selectedCountry.name}</span>
+                </div>
+
+                {/* Phone input with country code */}
+                <div className="flex gap-2" dir="ltr">
+                  <CountryCodeSelect
+                    selected={selectedCountry}
+                    onSelect={setSelectedCountry}
+                  />
+                  <Input
+                    type="tel"
+                    inputMode="numeric"
+                    placeholder={t('enterPhone', language)}
+                    value={phoneNumber}
+                    onChange={(e) => handlePhoneInput(e.target.value)}
+                    dir="ltr"
+                    className="text-base flex-1"
+                  />
+                </div>
+
+                <Button onClick={handleSendOtp} disabled={isLoading || phoneNumber.length < 6} className="w-full">
                   {isLoading ? '...' : t('sendOtp', language)}
                 </Button>
               </CardContent>
@@ -173,17 +233,20 @@ const Auth = () => {
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
+                <p className="text-sm text-muted-foreground text-center">
+                  {language === 'ar' ? `تم إرسال الرمز إلى ${fullPhone}` : `Code sent to ${fullPhone}`}
+                </p>
                 <Input
                   type="text"
                   inputMode="numeric"
                   maxLength={6}
                   placeholder="000000"
                   value={otp}
-                  onChange={(e) => setOtp(e.target.value)}
+                  onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
                   dir="ltr"
                   className="text-center text-2xl tracking-widest"
                 />
-                <Button onClick={handleVerifyOtp} disabled={isLoading} className="w-full">
+                <Button onClick={handleVerifyOtp} disabled={isLoading || otp.length !== 6} className="w-full">
                   {isLoading ? '...' : t('verifyOtp', language)}
                 </Button>
               </CardContent>
@@ -239,10 +302,10 @@ const Auth = () => {
               </CardHeader>
               <CardContent className="space-y-4">
                 <Input
-                  type="email"
-                  placeholder={t('email', language)}
-                  value={adminEmail}
-                  onChange={(e) => setAdminEmail(e.target.value)}
+                  type="text"
+                  placeholder={t('username', language)}
+                  value={adminUsername}
+                  onChange={(e) => setAdminUsername(e.target.value)}
                   dir="ltr"
                 />
                 <Input
@@ -261,7 +324,6 @@ const Auth = () => {
         )}
       </AnimatePresence>
 
-      {/* Admin entry */}
       {step !== 'admin' && (
         <button
           onClick={() => setStep('admin')}
