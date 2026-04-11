@@ -193,9 +193,12 @@ export type Database = {
           icon: string
           id: string
           is_active: boolean
+          max_distance_minutes: number
+          min_distance_minutes: number
           name_ar: string
           name_en: string
           price_per_km_egp: number
+          service_level: string
         }
         Insert: {
           average_speed_kmh?: number
@@ -206,9 +209,12 @@ export type Database = {
           icon?: string
           id?: string
           is_active?: boolean
+          max_distance_minutes?: number
+          min_distance_minutes?: number
           name_ar: string
           name_en: string
           price_per_km_egp?: number
+          service_level?: string
         }
         Update: {
           average_speed_kmh?: number
@@ -219,9 +225,12 @@ export type Database = {
           icon?: string
           id?: string
           is_active?: boolean
+          max_distance_minutes?: number
+          min_distance_minutes?: number
           name_ar?: string
           name_en?: string
           price_per_km_egp?: number
+          service_level?: string
         }
         Relationships: []
       }
