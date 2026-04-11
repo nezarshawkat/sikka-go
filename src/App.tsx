@@ -8,6 +8,7 @@ import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import Profile from "./pages/Profile";
 import TripPlan from "./pages/TripPlan";
+import TripResult from "./pages/TripResult";
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import AdminTransport from "./pages/admin/AdminTransport";
 import AdminLocations from "./pages/admin/AdminLocations";
