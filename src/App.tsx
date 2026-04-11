@@ -31,6 +31,7 @@ const App = () => (
             <Route path="/auth" element={<Auth />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/plan" element={<TripPlan />} />
+            <Route path="/trip-result" element={<TripResult />} />
             <Route path="/admin" element={<AdminDashboard />}>
               <Route index element={<AdminAnalytics />} />
               <Route path="transport" element={<AdminTransport />} />
