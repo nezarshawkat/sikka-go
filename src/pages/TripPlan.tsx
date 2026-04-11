@@ -1,12 +1,14 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { t } from '@/lib/i18n';
+import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Wallet, Clock, MapPin, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Wallet, Clock, MapPin, ChevronRight, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 
 type TripType = 'economic' | 'comfortable' | 'premium';
 
@@ -14,10 +16,42 @@ const TripPlan = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { language } = useAuth();
+
   const destination = searchParams.get('destination') || '';
+  const destLat = parseFloat(searchParams.get('destLat') || '0');
+  const destLng = parseFloat(searchParams.get('destLng') || '0');
+  const startLat = parseFloat(searchParams.get('lat') || '30.0444');
+  const startLng = parseFloat(searchParams.get('lng') || '31.2357');
 
   const [tripType, setTripType] = useState<TripType>('economic');
   const [budget, setBudget] = useState('');
+  const [isPlanning, setIsPlanning] = useState(false);
+
+  // Calculate distance for budget estimation
+  const distanceKm = useMemo(() => {
+    const R = 6371;
+    const dLat = (destLat - startLat) * Math.PI / 180;
+    const dLng = (destLng - startLng) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(startLat * Math.PI / 180) * Math.cos(destLat * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }, [startLat, startLng, destLat, destLng]);
+
+  // Dynamic budget ranges based on distance and trip type
+  const budgetRange = useMemo(() => {
+    const base = Math.max(distanceKm * 1.5, 5);
+    const ranges: Record<TripType, { min: number; max: number }> = {
+      economic: { min: Math.round(base * 1), max: Math.round(base * 3) },
+      comfortable: { min: Math.round(base * 2.5), max: Math.round(base * 6) },
+      premium: { min: Math.round(base * 5), max: Math.round(base * 15) },
+    };
+    return ranges[tripType];
+  }, [distanceKm, tripType]);
+
+  // Auto-fill budget mid-point when trip type changes
+  useEffect(() => {
+    const mid = Math.round((budgetRange.min + budgetRange.max) / 2);
+    setBudget(String(mid));
+  }, [tripType, budgetRange]);
 
   const tripTypes: { value: TripType; icon: string; color: string }[] = [
     { value: 'economic', icon: '💰', color: 'border-green-400' },
@@ -25,20 +59,49 @@ const TripPlan = () => {
     { value: 'premium', icon: '✨', color: 'border-yellow-400' },
   ];
 
-  const handlePlanTrip = () => {
-    navigate(`/trip-result?destination=${encodeURIComponent(destination)}&type=${tripType}&budget=${budget}`);
+  const handlePlanTrip = async () => {
+    setIsPlanning(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('plan-trip', {
+        body: {
+          startLat,
+          startLng,
+          endLat: destLat,
+          endLng: destLng,
+          tripType,
+          budget: budget ? parseFloat(budget) : null,
+          language,
+        },
+      });
+
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      // Store plan in sessionStorage and navigate
+      sessionStorage.setItem('tripPlan', JSON.stringify({
+        ...data,
+        destination,
+        tripType,
+        startLat, startLng, destLat, destLng,
+      }));
+      navigate('/trip-result');
+    } catch (err: any) {
+      console.error('Plan error:', err);
+      toast.error(err.message || 'Failed to plan trip');
+    } finally {
+      setIsPlanning(false);
+    }
   };
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
       <div className="sticky top-0 bg-card/95 backdrop-blur-sm border-b z-10 p-4 flex items-center gap-3">
         <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
           <ArrowLeft className="h-5 w-5" />
         </Button>
         <div>
           <p className="text-sm text-muted-foreground">{t('searchDestination', language)}</p>
-          <p className="font-semibold text-foreground">{destination}</p>
+          <p className="font-semibold text-foreground truncate max-w-[250px]">{destination}</p>
         </div>
       </div>
 
@@ -52,7 +115,8 @@ const TripPlan = () => {
               </div>
               <div className="flex-1">
                 <p className="text-xs text-muted-foreground">Destination</p>
-                <p className="font-medium text-foreground">{destination}</p>
+                <p className="font-medium text-foreground truncate">{destination}</p>
+                <p className="text-xs text-muted-foreground">{distanceKm.toFixed(1)} km away</p>
               </div>
             </CardContent>
           </Card>
@@ -67,9 +131,7 @@ const TripPlan = () => {
                 key={value}
                 onClick={() => setTripType(value)}
                 className={`p-4 rounded-xl border-2 text-center transition-all ${
-                  tripType === value
-                    ? `${color} bg-primary/5`
-                    : 'border-border bg-card'
+                  tripType === value ? `${color} bg-primary/5` : 'border-border bg-card'
                 }`}
               >
                 <span className="text-2xl block mb-1">{icon}</span>
@@ -86,7 +148,7 @@ const TripPlan = () => {
             <Wallet className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               type="number"
-              placeholder="100"
+              placeholder={String(budgetRange.min)}
               value={budget}
               onChange={(e) => setBudget(e.target.value)}
               className="pl-10 h-12 text-base"
@@ -98,15 +160,24 @@ const TripPlan = () => {
           </div>
           <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
             <Clock className="h-3 w-3" />
-            {t('recommendedBudget', language)}: 50–150 {t('egp', language)}
+            {t('recommendedBudget', language)}: {budgetRange.min}–{budgetRange.max} {t('egp', language)}
           </p>
         </motion.div>
 
         {/* Plan button */}
         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.3 }}>
-          <Button onClick={handlePlanTrip} className="w-full h-14 text-base rounded-xl gap-2">
-            {t('planTrip', language)}
-            <ChevronRight className="h-5 w-5" />
+          <Button onClick={handlePlanTrip} disabled={isPlanning} className="w-full h-14 text-base rounded-xl gap-2">
+            {isPlanning ? (
+              <>
+                <Loader2 className="h-5 w-5 animate-spin" />
+                {t('settingUp', language)}
+              </>
+            ) : (
+              <>
+                {t('planTrip', language)}
+                <ChevronRight className="h-5 w-5" />
+              </>
+            )}
           </Button>
         </motion.div>
       </div>
