@@ -1,32 +1,26 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { t } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Search, User, MapPin, Navigation } from 'lucide-react';
+import { User, MapPin, Navigation } from 'lucide-react';
 import { motion } from 'framer-motion';
 import Map, { Marker, GeolocateControl, NavigationControl } from 'react-map-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
+import LocationAutocomplete from '@/components/LocationAutocomplete';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
-
 const CAIRO_CENTER = { latitude: 30.0444, longitude: 31.2357 };
 
 const Index = () => {
   const { user, isLoading, language, profile } = useAuth();
   const navigate = useNavigate();
-  const [viewState, setViewState] = useState({
-    ...CAIRO_CENTER,
-    zoom: 12,
-  });
+  const [viewState, setViewState] = useState({ ...CAIRO_CENTER, zoom: 12 });
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
-    if (!isLoading && !user) {
-      navigate('/auth');
-    }
+    if (!isLoading && !user) navigate('/auth');
   }, [user, isLoading, navigate]);
 
   useEffect(() => {
@@ -37,19 +31,10 @@ const Index = () => {
           setUserLocation(loc);
           setViewState((v) => ({ ...v, latitude: loc.lat, longitude: loc.lng }));
         },
-        () => {
-          // Default to Cairo
-          setUserLocation({ lat: CAIRO_CENTER.latitude, lng: CAIRO_CENTER.longitude });
-        }
+        () => setUserLocation({ lat: CAIRO_CENTER.latitude, lng: CAIRO_CENTER.longitude })
       );
     }
   }, []);
-
-  const handleSearch = useCallback(() => {
-    if (searchQuery.trim()) {
-      navigate(`/plan?destination=${encodeURIComponent(searchQuery)}&lat=${userLocation?.lat || CAIRO_CENTER.latitude}&lng=${userLocation?.lng || CAIRO_CENTER.longitude}`);
-    }
-  }, [searchQuery, userLocation, navigate]);
 
   if (isLoading) {
     return (
@@ -61,7 +46,6 @@ const Index = () => {
 
   return (
     <div className="h-screen w-screen relative overflow-hidden">
-      {/* Map */}
       {MAPBOX_TOKEN ? (
         <Map
           {...viewState}
@@ -86,28 +70,22 @@ const Index = () => {
           <div className="text-center text-muted-foreground">
             <MapPin className="h-12 w-12 mx-auto mb-2" />
             <p className="text-sm">Map requires Mapbox token</p>
-            <p className="text-xs mt-1">Add VITE_MAPBOX_TOKEN to secrets</p>
           </div>
         </div>
       )}
 
       {/* Search bar overlay */}
       <div className="absolute top-0 left-0 right-0 p-4 safe-area-top">
-        <motion.div
-          initial={{ y: -20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          className="flex items-center gap-2"
-        >
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder={t('searchDestination', language)}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-              className="pl-10 bg-card/95 backdrop-blur-sm shadow-lg border-0 h-12 text-base rounded-xl"
-            />
-          </div>
+        <motion.div initial={{ y: -20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="flex items-center gap-2">
+          <LocationAutocomplete
+            value={searchQuery}
+            onChange={setSearchQuery}
+            onSelect={(suggestion) => {
+              navigate(`/plan?destination=${encodeURIComponent(suggestion.place_name)}&destLat=${suggestion.center[1]}&destLng=${suggestion.center[0]}&lat=${userLocation?.lat || CAIRO_CENTER.latitude}&lng=${userLocation?.lng || CAIRO_CENTER.longitude}`);
+            }}
+            placeholder={t('searchDestination', language)}
+            className="flex-1"
+          />
           <Button
             variant="outline"
             size="icon"
@@ -119,23 +97,15 @@ const Index = () => {
         </motion.div>
       </div>
 
-      {/* Current location pill */}
       {userLocation && (
-        <motion.div
-          initial={{ y: 20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 0.3 }}
-          className="absolute bottom-6 left-4 right-4"
-        >
+        <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.3 }} className="absolute bottom-6 left-4 right-4">
           <div className="bg-card/95 backdrop-blur-sm rounded-xl shadow-lg p-4 flex items-center gap-3">
             <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
               <Navigation className="h-5 w-5 text-primary" />
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-foreground">{t('myLocation', language)}</p>
-              <p className="text-xs text-muted-foreground truncate">
-                {userLocation.lat.toFixed(4)}, {userLocation.lng.toFixed(4)}
-              </p>
+              <p className="text-xs text-muted-foreground truncate">{userLocation.lat.toFixed(4)}, {userLocation.lng.toFixed(4)}</p>
             </div>
           </div>
         </motion.div>
