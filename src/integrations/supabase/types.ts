@@ -14,6 +14,45 @@ export type Database = {
   }
   public: {
     Tables: {
+      bus_routes: {
+        Row: {
+          bus_number: string
+          created_at: string
+          from_location: string
+          id: string
+          is_active: boolean
+          price_egp: number
+          to_location: string
+          transport_type: string
+          updated_at: string
+          via: string | null
+        }
+        Insert: {
+          bus_number: string
+          created_at?: string
+          from_location: string
+          id?: string
+          is_active?: boolean
+          price_egp?: number
+          to_location: string
+          transport_type?: string
+          updated_at?: string
+          via?: string | null
+        }
+        Update: {
+          bus_number?: string
+          created_at?: string
+          from_location?: string
+          id?: string
+          is_active?: boolean
+          price_egp?: number
+          to_location?: string
+          transport_type?: string
+          updated_at?: string
+          via?: string | null
+        }
+        Relationships: []
+      }
       locations: {
         Row: {
           city: string
@@ -231,6 +270,42 @@ export type Database = {
           name_en?: string
           price_per_km_egp?: number
           service_level?: string
+        }
+        Relationships: []
+      }
+      trip_patterns: {
+        Row: {
+          chosen_transports: string[]
+          created_at: string
+          distance_km: number | null
+          end_area: string
+          id: string
+          start_area: string
+          total_cost_egp: number | null
+          trip_type: string
+          user_id: string
+        }
+        Insert: {
+          chosen_transports?: string[]
+          created_at?: string
+          distance_km?: number | null
+          end_area: string
+          id?: string
+          start_area: string
+          total_cost_egp?: number | null
+          trip_type?: string
+          user_id: string
+        }
+        Update: {
+          chosen_transports?: string[]
+          created_at?: string
+          distance_km?: number | null
+          end_area?: string
+          id?: string
+          start_area?: string
+          total_cost_egp?: number | null
+          trip_type?: string
+          user_id?: string
         }
         Relationships: []
       }
