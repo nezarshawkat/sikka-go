@@ -4,7 +4,7 @@ import { supabase } from '@/integrations/supabase/client';
 import type { Language } from '@/lib/i18n';
 
 interface Profile {
-  language: Language;
+  language: string;
   nationality: 'egyptian' | 'foreigner';
   display_name: string | null;
   phone: string | null;

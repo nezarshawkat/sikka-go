@@ -8,7 +8,7 @@ const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc2
 interface Suggestion {
   id: string;
   place_name: string;
-  center: [number, number]; // [lng, lat]
+  center: [number, number];
   text: string;
 }
 
@@ -50,7 +50,7 @@ const LocationAutocomplete = ({ value, onChange, onSelect, placeholder, classNam
       setIsLoading(true);
       try {
         const res = await fetch(
-          `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(value)}.json?access_token=${MAPBOX_TOKEN}&country=eg&language=en,ar&limit=5&types=place,locality,neighborhood,address,poi`
+          `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(value)}.json?access_token=${MAPBOX_TOKEN}&language=en,ar&limit=7&types=country,region,place,district,locality,neighborhood,address,poi`
         );
         const data = await res.json();
         if (data.features) {
@@ -85,7 +85,7 @@ const LocationAutocomplete = ({ value, onChange, onSelect, placeholder, classNam
       </div>
 
       {isOpen && suggestions.length > 0 && (
-        <div className="absolute top-full left-0 right-0 mt-1 bg-card rounded-xl shadow-xl border z-50 overflow-hidden">
+        <div className="absolute top-full left-0 right-0 mt-1 bg-card rounded-xl shadow-xl border z-50 overflow-hidden max-h-[300px] overflow-y-auto">
           {suggestions.map((s) => (
             <button
               key={s.id}

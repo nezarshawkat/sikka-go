@@ -8,15 +8,29 @@ import { motion } from 'framer-motion';
 import Map, { Marker, GeolocateControl, NavigationControl } from 'react-map-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import LocationAutocomplete from '@/components/LocationAutocomplete';
+import ThemeToggle from '@/components/ThemeToggle';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
 const CAIRO_CENTER = { latitude: 30.0444, longitude: 31.2357 };
 
+const reverseGeocode = async (lat: number, lng: number): Promise<string> => {
+  try {
+    const res = await fetch(
+      `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${MAPBOX_TOKEN}&language=en,ar&limit=1&types=address,neighborhood,locality,place`
+    );
+    const data = await res.json();
+    return data.features?.[0]?.place_name || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+  } catch {
+    return `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+  }
+};
+
 const Index = () => {
-  const { user, isLoading, language, profile } = useAuth();
+  const { user, isLoading, language } = useAuth();
   const navigate = useNavigate();
-  const [viewState, setViewState] = useState({ ...CAIRO_CENTER, zoom: 12 });
+  const [viewState, setViewState] = useState({ ...CAIRO_CENTER, zoom: 14 });
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [locationName, setLocationName] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
@@ -26,12 +40,17 @@ const Index = () => {
   useEffect(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
-        (pos) => {
+        async (pos) => {
           const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
           setUserLocation(loc);
           setViewState((v) => ({ ...v, latitude: loc.lat, longitude: loc.lng }));
+          const name = await reverseGeocode(loc.lat, loc.lng);
+          setLocationName(name);
         },
-        () => setUserLocation({ lat: CAIRO_CENTER.latitude, lng: CAIRO_CENTER.longitude })
+        () => {
+          setUserLocation({ lat: CAIRO_CENTER.latitude, lng: CAIRO_CENTER.longitude });
+          setLocationName('Cairo, Egypt');
+        }
       );
     }
   }, []);
@@ -51,7 +70,7 @@ const Index = () => {
           {...viewState}
           onMove={(evt) => setViewState(evt.viewState)}
           mapboxAccessToken={MAPBOX_TOKEN}
-          mapStyle="mapbox://styles/mapbox/light-v11"
+          mapStyle="mapbox://styles/mapbox/streets-v12"
           style={{ width: '100%', height: '100%' }}
         >
           <GeolocateControl position="bottom-right" trackUserLocation />
@@ -86,6 +105,7 @@ const Index = () => {
             placeholder={t('searchDestination', language)}
             className="flex-1"
           />
+          <ThemeToggle className="h-12 w-12 rounded-xl bg-card/95 backdrop-blur-sm shadow-lg border-0 shrink-0" />
           <Button
             variant="outline"
             size="icon"
@@ -105,7 +125,7 @@ const Index = () => {
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-foreground">{t('myLocation', language)}</p>
-              <p className="text-xs text-muted-foreground truncate">{userLocation.lat.toFixed(4)}, {userLocation.lng.toFixed(4)}</p>
+              <p className="text-xs text-muted-foreground truncate">{locationName || `${userLocation.lat.toFixed(4)}, ${userLocation.lng.toFixed(4)}`}</p>
             </div>
           </div>
         </motion.div>

@@ -27,7 +27,6 @@ const TripPlan = () => {
   const [budget, setBudget] = useState('');
   const [isPlanning, setIsPlanning] = useState(false);
 
-  // Calculate distance for budget estimation
   const distanceKm = useMemo(() => {
     const R = 6371;
     const dLat = (destLat - startLat) * Math.PI / 180;
@@ -36,7 +35,6 @@ const TripPlan = () => {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }, [startLat, startLng, destLat, destLng]);
 
-  // Dynamic budget ranges based on distance and trip type
   const budgetRange = useMemo(() => {
     const base = Math.max(distanceKm * 1.5, 5);
     const ranges: Record<TripType, { min: number; max: number }> = {
@@ -47,7 +45,6 @@ const TripPlan = () => {
     return ranges[tripType];
   }, [distanceKm, tripType]);
 
-  // Auto-fill budget mid-point when trip type changes
   useEffect(() => {
     const mid = Math.round((budgetRange.min + budgetRange.max) / 2);
     setBudget(String(mid));
@@ -64,10 +61,8 @@ const TripPlan = () => {
     try {
       const { data, error } = await supabase.functions.invoke('plan-trip', {
         body: {
-          startLat,
-          startLng,
-          endLat: destLat,
-          endLng: destLng,
+          startLat, startLng,
+          endLat: destLat, endLng: destLng,
           tripType,
           budget: budget ? parseFloat(budget) : null,
           language,
@@ -77,7 +72,6 @@ const TripPlan = () => {
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
 
-      // Store plan in sessionStorage and navigate
       sessionStorage.setItem('tripPlan', JSON.stringify({
         ...data,
         destination,
@@ -96,7 +90,7 @@ const TripPlan = () => {
   return (
     <div className="min-h-screen bg-background">
       <div className="sticky top-0 bg-card/95 backdrop-blur-sm border-b z-10 p-4 flex items-center gap-3">
-        <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
+        <Button variant="ghost" size="icon" onClick={() => navigate('/')}>
           <ArrowLeft className="h-5 w-5" />
         </Button>
         <div>
@@ -106,7 +100,6 @@ const TripPlan = () => {
       </div>
 
       <div className="p-4 space-y-6">
-        {/* Destination card */}
         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }}>
           <Card>
             <CardContent className="p-4 flex items-center gap-3">
@@ -122,7 +115,6 @@ const TripPlan = () => {
           </Card>
         </motion.div>
 
-        {/* Trip type */}
         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.1 }}>
           <p className="text-sm font-medium text-foreground mb-3">{t('tripType', language)}</p>
           <div className="grid grid-cols-3 gap-3">
@@ -141,7 +133,6 @@ const TripPlan = () => {
           </div>
         </motion.div>
 
-        {/* Budget */}
         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.2 }}>
           <p className="text-sm font-medium text-foreground mb-3">{t('budget', language)}</p>
           <div className="relative">
@@ -164,7 +155,6 @@ const TripPlan = () => {
           </p>
         </motion.div>
 
-        {/* Plan button */}
         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.3 }}>
           <Button onClick={handlePlanTrip} disabled={isPlanning} className="w-full h-14 text-base rounded-xl gap-2">
             {isPlanning ? (

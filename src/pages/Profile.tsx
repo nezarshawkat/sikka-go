@@ -3,8 +3,10 @@ import { useAuth } from '@/contexts/AuthContext';
 import { t } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { ArrowLeft, Globe, LogOut, Shield, User } from 'lucide-react';
+import { ArrowLeft, LogOut, Shield, User } from 'lucide-react';
 import { motion } from 'framer-motion';
+import LanguageSelect from '@/components/LanguageSelect';
+import ThemeToggle from '@/components/ThemeToggle';
 
 const Profile = () => {
   const { user, profile, isAdmin, language, setLanguage, signOut } = useAuth();
@@ -18,10 +20,13 @@ const Profile = () => {
   return (
     <div className="min-h-screen bg-background">
       <div className="sticky top-0 bg-card/95 backdrop-blur-sm border-b z-10 p-4 flex items-center gap-3">
-        <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
+        <Button variant="ghost" size="icon" onClick={() => navigate('/')}>
           <ArrowLeft className="h-5 w-5" />
         </Button>
         <h1 className="font-semibold text-lg">{t('profile', language)}</h1>
+        <div className="ml-auto">
+          <ThemeToggle />
+        </div>
       </div>
 
       <div className="p-4 space-y-4">
@@ -49,28 +54,12 @@ const Profile = () => {
         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.1 }}>
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm text-muted-foreground flex items-center gap-2">
-                <Globe className="h-4 w-4" />
-                {t('selectLanguage', language)}
+              <CardTitle className="text-sm text-muted-foreground">
+                {t('language', language)}
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-2">
-              <Button
-                variant={language === 'en' ? 'default' : 'outline'}
-                size="sm"
-                className="w-full justify-start"
-                onClick={() => setLanguage('en')}
-              >
-                🇬🇧 English
-              </Button>
-              <Button
-                variant={language === 'ar' ? 'default' : 'outline'}
-                size="sm"
-                className="w-full justify-start"
-                onClick={() => setLanguage('ar')}
-              >
-                🇪🇬 العربية
-              </Button>
+            <CardContent>
+              <LanguageSelect value={language} onChange={setLanguage} className="w-full" />
             </CardContent>
           </Card>
         </motion.div>
