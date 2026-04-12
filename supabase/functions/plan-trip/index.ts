@@ -5,6 +5,14 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
 
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -15,19 +23,12 @@ Deno.serve(async (req) => {
 
     if (!startLat || !startLng || !endLat || !endLng || !tripType) {
       return new Response(JSON.stringify({ error: 'Missing required fields' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    // Calculate distance using Haversine formula
-    const R = 6371;
-    const dLat = (endLat - startLat) * Math.PI / 180;
-    const dLng = (endLng - startLng) * Math.PI / 180;
-    const a = Math.sin(dLat / 2) ** 2 + Math.cos(startLat * Math.PI / 180) * Math.cos(endLat * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
-    const distanceKm = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const distanceKm = haversineKm(startLat, startLng, endLat, endLng);
 
-    // Fetch transport types from DB
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
@@ -39,65 +40,54 @@ Deno.serve(async (req) => {
 
     if (dbError) throw dbError;
 
-    // Use AI to plan the optimal route
     const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
     if (!LOVABLE_API_KEY) throw new Error('LOVABLE_API_KEY not configured');
 
-    const systemPrompt = `You are an Egyptian transportation route planner. Given transport options, distance, trip type, and budget, create an optimal multi-segment route.
+    const systemPrompt = `You are an Egyptian transportation route planner AI. You must create COMPLETE routes from start to destination.
 
-Rules:
-- Trip types: "economic" = cheapest options, "comfortable" = balanced, "premium" = best comfort
-- Filter transports by service_level matching or near the trip type
-- Consider distance categories: short (0-30 min), medium (30-60 min), long (60+ min)
-- Each segment needs: transport_type_id, start_name, end_name, estimated cost and duration
-- Mix transport modes for optimal routes (e.g., tuk-tuk to metro station, then metro)
-- Stay within or near the budget if provided
-- For short trips (<5km), prefer: tuk-tuk, taxi, bus
-- For medium trips (5-30km), prefer: metro, bus, monorail
-- For long trips (>30km), prefer: train, long-distance bus, flight
-- Provide 1-3 segments that make geographical sense
-- Also provide 2-3 alternative transport options per segment
+CRITICAL RULES:
+1. The route MUST be fully connected - from the user's exact starting location to their exact destination
+2. If a single transport cannot cover the full journey, you MUST add connecting segments
+3. Consider what transport is accessible from the user's CURRENT position (urban vs rural, near metro station, etc)
+4. Each segment's end_name must match the next segment's start_name
+5. Tuk-tuks only operate in specific neighborhoods (not on highways or between cities)
+6. Microbuses operate on fixed routes between specific areas
+7. Metro only in Cairo (3 lines), Monorail connects 6th October and New Capital
+8. For taxi pricing: base fare + per-km rate. Uber/Careem use surge pricing
+9. Bus numbers matter - use real CTA bus numbers when possible
 
-Return JSON with this exact structure:
-{
-  "segments": [
-    {
-      "transport_type_id": "uuid",
-      "transport_name": "name",
-      "start_name": "location name",
-      "end_name": "location name", 
-      "cost_egp": number,
-      "duration_minutes": number,
-      "alternatives": [
-        { "transport_type_id": "uuid", "transport_name": "name", "cost_egp": number, "duration_minutes": number }
-      ]
-    }
-  ],
-  "total_cost_egp": number,
-  "total_duration_minutes": number,
-  "budget_range": { "min": number, "max": number }
-}`;
+Service levels:
+- economic: tuk-tuk, public bus, microbus (cheapest options)
+- comfortable: metro, monorail, white taxi, inter-city bus (balanced)
+- premium: Uber/Careem, train 1st class/VIP, domestic flight (best comfort)
+
+Distance categories:
+- Short (0-5km): tuk-tuk, taxi, bus, walking connection
+- Medium (5-30km): metro, monorail, bus, taxi
+- Long (30km+): train, inter-city bus (SuperJet/Go Bus), domestic flight
+
+Taxi pricing algorithm:
+- White taxi: 10 EGP flag + 3.5 EGP/km
+- Uber/Careem: 15 EGP base + 4.5 EGP/km + surge factor (1.0-2.5x)
+
+Return JSON via the create_trip_plan function. ENSURE the route is COMPLETE and CONNECTED.`;
 
     const userPrompt = `Plan a ${tripType} trip:
+- Start: ${startLat}, ${startLng}
+- End: ${endLat}, ${endLng}
 - Distance: ${distanceKm.toFixed(1)} km
 - Budget: ${budget ? budget + ' EGP' : 'not specified'}
 - Language: ${language || 'en'}
 
 Available transport types:
 ${JSON.stringify(transportTypes?.map(t => ({
-  id: t.id,
-  name: t.name_en,
-  name_ar: t.name_ar,
-  speed: t.average_speed_kmh,
-  base_price: t.base_price_egp,
-  price_per_km: t.price_per_km_egp,
-  service_level: t.service_level,
-  min_dist_min: t.min_distance_minutes,
-  max_dist_min: t.max_distance_minutes,
-  foreigner_allowed: t.foreigner_allowed,
+  id: t.id, name: t.name_en, name_ar: t.name_ar,
+  speed: t.average_speed_kmh, base_price: t.base_price_egp,
+  price_per_km: t.price_per_km_egp, service_level: t.service_level,
+  min_dist_min: t.min_distance_minutes, max_dist_min: t.max_distance_minutes,
 })), null, 2)}
 
-Create a practical route plan.`;
+IMPORTANT: Create a COMPLETE connected route. Every segment must connect to the next. The first segment starts where the user IS, the last segment ends at their destination.`;
 
     const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
@@ -115,7 +105,7 @@ Create a practical route plan.`;
           type: 'function',
           function: {
             name: 'create_trip_plan',
-            description: 'Create a structured trip plan with segments and alternatives',
+            description: 'Create a complete, connected trip plan',
             parameters: {
               type: 'object',
               properties: {
@@ -151,10 +141,7 @@ Create a practical route plan.`;
                 total_duration_minutes: { type: 'number' },
                 budget_range: {
                   type: 'object',
-                  properties: {
-                    min: { type: 'number' },
-                    max: { type: 'number' },
-                  },
+                  properties: { min: { type: 'number' }, max: { type: 'number' } },
                   required: ['min', 'max'],
                 },
               },
@@ -191,14 +178,12 @@ Create a practical route plan.`;
         ? JSON.parse(toolCall.function.arguments)
         : toolCall.function.arguments;
     } else {
-      // Fallback: try parsing content
       const content = aiData.choices?.[0]?.message?.content || '';
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       if (jsonMatch) plan = JSON.parse(jsonMatch[0]);
       else throw new Error('Could not parse AI response');
     }
 
-    // Enrich with transport type details
     const enrichedSegments = plan.segments.map((seg: any) => {
       const tt = transportTypes?.find(t => t.id === seg.transport_type_id);
       return {
@@ -224,8 +209,7 @@ Create a practical route plan.`;
   } catch (error) {
     console.error('plan-trip error:', error);
     return new Response(JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 });
