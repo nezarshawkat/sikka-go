@@ -9,8 +9,6 @@ import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { Search, Plus, X, Eye, EyeOff, Pencil, Trash2, MapPin, Layers, ChevronDown, ChevronUp, Save, Flame } from 'lucide-react';
 import Map, { Source, Layer, Marker, NavigationControl } from 'react-map-gl';
-// @ts-ignore - Popup export works at runtime
-const { Popup } = await import('react-map-gl');
 import 'mapbox-gl/dist/mapbox-gl.css';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
