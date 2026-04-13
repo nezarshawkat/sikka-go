@@ -605,16 +605,13 @@ const AdminMap = () => {
             );
           })}
 
-          {/* Mawqef popup */}
+          {/* Mawqef popup as Marker overlay */}
           {selectedMawqef && (
-            <Popup
-              latitude={selectedMawqef.latitude}
-              longitude={selectedMawqef.longitude}
-              onClose={() => setSelectedMawqef(null)}
-              closeOnClick={false}
-              className="[&_.mapboxgl-popup-content]:bg-card [&_.mapboxgl-popup-content]:text-foreground [&_.mapboxgl-popup-content]:rounded-xl [&_.mapboxgl-popup-content]:shadow-xl [&_.mapboxgl-popup-content]:p-3"
-            >
-              <div className="min-w-[200px]">
+            <Marker latitude={selectedMawqef.latitude} longitude={selectedMawqef.longitude} anchor="bottom">
+              <div className="bg-card text-foreground rounded-xl shadow-xl p-3 min-w-[200px] relative -translate-y-2">
+                <button className="absolute top-1 right-1 text-muted-foreground hover:text-foreground" onClick={() => setSelectedMawqef(null)}>
+                  <X className="h-3 w-3" />
+                </button>
                 <p className="font-semibold text-sm">{selectedMawqef.name_en}</p>
                 <p className="text-xs text-muted-foreground">{selectedMawqef.name_ar}</p>
                 {selectedMawqef.description_en && <p className="text-xs mt-1">{selectedMawqef.description_en}</p>}
@@ -626,7 +623,7 @@ const AdminMap = () => {
                   ))}
                 </div>
               </div>
-            </Popup>
+            </Marker>
           )}
         </Map>
 
