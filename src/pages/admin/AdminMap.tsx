@@ -539,7 +539,7 @@ const AdminMap = () => {
           {/* Draw points markers */}
           {isDrawing && drawPoints.map((pt, i) => (
             <Marker key={`dp-${i}`} latitude={pt[1]} longitude={pt[0]}>
-              <div className="h-3 w-3 rounded-full bg-red-500 border border-white" />
+              <div className="h-3 w-3 rounded-full bg-destructive border border-background" />
             </Marker>
           ))}
 
