@@ -15,6 +15,7 @@ import AdminLocations from "./pages/admin/AdminLocations";
 import AdminRoutes from "./pages/admin/AdminRoutes";
 import AdminReviews from "./pages/admin/AdminReviews";
 import AdminAnalytics from "./pages/admin/AdminAnalytics";
+import AdminMap from "./pages/admin/AdminMap";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -33,7 +34,8 @@ const App = () => (
             <Route path="/plan" element={<TripPlan />} />
             <Route path="/trip-result" element={<TripResult />} />
             <Route path="/admin" element={<AdminDashboard />}>
-              <Route index element={<AdminAnalytics />} />
+              <Route index element={<AdminMap />} />
+              <Route path="map" element={<AdminMap />} />
               <Route path="transport" element={<AdminTransport />} />
               <Route path="locations" element={<AdminLocations />} />
               <Route path="routes" element={<AdminRoutes />} />
