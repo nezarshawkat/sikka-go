@@ -86,6 +86,48 @@ export type Database = {
         }
         Relationships: []
       }
+      mawaqef: {
+        Row: {
+          city: string
+          created_at: string
+          description_ar: string | null
+          description_en: string | null
+          id: string
+          is_active: boolean
+          latitude: number
+          longitude: number
+          name_ar: string
+          name_en: string
+          transport_type_ids: string[]
+        }
+        Insert: {
+          city?: string
+          created_at?: string
+          description_ar?: string | null
+          description_en?: string | null
+          id?: string
+          is_active?: boolean
+          latitude: number
+          longitude: number
+          name_ar: string
+          name_en: string
+          transport_type_ids?: string[]
+        }
+        Update: {
+          city?: string
+          created_at?: string
+          description_ar?: string | null
+          description_en?: string | null
+          id?: string
+          is_active?: boolean
+          latitude?: number
+          longitude?: number
+          name_ar?: string
+          name_en?: string
+          transport_type_ids?: string[]
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
@@ -160,6 +202,106 @@ export type Database = {
             columns: ["trip_segment_id"]
             isOneToOne: false
             referencedRelation: "trip_segments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      transit_lines: {
+        Row: {
+          created_at: string
+          frequency_minutes: number | null
+          from_area: string
+          has_fixed_stops: boolean
+          id: string
+          is_active: boolean
+          line_number: string
+          name_ar: string
+          name_en: string
+          price_egp: number
+          route_path: Json | null
+          to_area: string
+          transport_type_id: string
+          updated_at: string
+          via_stops: string[]
+        }
+        Insert: {
+          created_at?: string
+          frequency_minutes?: number | null
+          from_area: string
+          has_fixed_stops?: boolean
+          id?: string
+          is_active?: boolean
+          line_number: string
+          name_ar?: string
+          name_en?: string
+          price_egp?: number
+          route_path?: Json | null
+          to_area: string
+          transport_type_id: string
+          updated_at?: string
+          via_stops?: string[]
+        }
+        Update: {
+          created_at?: string
+          frequency_minutes?: number | null
+          from_area?: string
+          has_fixed_stops?: boolean
+          id?: string
+          is_active?: boolean
+          line_number?: string
+          name_ar?: string
+          name_en?: string
+          price_egp?: number
+          route_path?: Json | null
+          to_area?: string
+          transport_type_id?: string
+          updated_at?: string
+          via_stops?: string[]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "transit_lines_transport_type_id_fkey"
+            columns: ["transport_type_id"]
+            isOneToOne: false
+            referencedRelation: "transport_types"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      transport_heatmaps: {
+        Row: {
+          created_at: string
+          id: string
+          intensity: number
+          latitude: number
+          longitude: number
+          radius_km: number
+          transport_type_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          intensity?: number
+          latitude: number
+          longitude: number
+          radius_km?: number
+          transport_type_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          intensity?: number
+          latitude?: number
+          longitude?: number
+          radius_km?: number
+          transport_type_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "transport_heatmaps_transport_type_id_fkey"
+            columns: ["transport_type_id"]
+            isOneToOne: false
+            referencedRelation: "transport_types"
             referencedColumns: ["id"]
           },
         ]
