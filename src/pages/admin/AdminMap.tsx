@@ -8,7 +8,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { Search, Plus, X, Eye, EyeOff, Pencil, Trash2, MapPin, Layers, ChevronDown, ChevronUp, Save, Flame } from 'lucide-react';
-import Map, { Source, Layer, Marker, Popup, NavigationControl } from 'react-map-gl';
+import Map, { Source, Layer, Marker, NavigationControl } from 'react-map-gl';
+import type { default as MapboxPopup } from 'react-map-gl';
+import { Popup } from 'react-map-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
