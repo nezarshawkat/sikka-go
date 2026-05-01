@@ -36,18 +36,19 @@ const TripPlan = () => {
   }, [startLat, startLng, destLat, destLng]);
 
   const budgetRange = useMemo(() => {
-    const base = Math.max(distanceKm * 1.5, 5);
+    const busFare = distanceKm > 25 ? 25 : 13;
+    const metroFare = distanceKm > 23 ? 20 : distanceKm > 9 ? 15 : 8;
+    const taxiFare = 15 + distanceKm * 4.5;
     const ranges: Record<TripType, { min: number; max: number }> = {
-      economic: { min: Math.round(base * 1), max: Math.round(base * 3) },
-      comfortable: { min: Math.round(base * 2.5), max: Math.round(base * 6) },
-      premium: { min: Math.round(base * 5), max: Math.round(base * 15) },
+      economic: { min: Math.round(Math.min(busFare, metroFare)), max: Math.round(Math.max(25, busFare + 15)) },
+      comfortable: { min: Math.round(Math.min(metroFare, 25)), max: Math.round(Math.max(45, metroFare + 30)) },
+      premium: { min: Math.round(taxiFare), max: Math.round(taxiFare * 1.35) },
     };
     return ranges[tripType];
   }, [distanceKm, tripType]);
 
   useEffect(() => {
-    const mid = Math.round((budgetRange.min + budgetRange.max) / 2);
-    setBudget(String(mid));
+    setBudget(String(budgetRange.min));
   }, [tripType, budgetRange]);
 
   const tripTypes: { value: TripType; icon: string; color: string }[] = [
