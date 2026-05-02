@@ -2,15 +2,15 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { transportTypesTable, transitLinesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { requireAdmin } from "../middlewares/requireAdmin";
 
 const router = Router();
 
-// Seed transport types and Cairo metro/monorail/train lines
-router.post("/", async (req, res) => {
+// Admin-only — seed transport types and Cairo metro/monorail/train lines
+router.post("/", requireAdmin, async (req, res) => {
   try {
     const results: string[] = [];
 
-    // 1. Ensure core transport types exist
     const types = [
       { nameEn: "Metro", nameAr: "مترو", icon: "metro", color: "#8B5CF6", basePriceEgp: "10", pricePerKmEgp: "0", averageSpeedKmh: "40", foreignerAllowed: true, isActive: true },
       { nameEn: "Monorail", nameAr: "مونوريل", icon: "monorail", color: "#EC4899", basePriceEgp: "20", pricePerKmEgp: "0", averageSpeedKmh: "50", foreignerAllowed: true, isActive: true },
@@ -34,7 +34,6 @@ router.post("/", async (req, res) => {
       }
     }
 
-    // 2. Cairo Metro lines
     const metroLines = [
       {
         nameEn: "Metro Line 1", nameAr: "مترو خط 1",

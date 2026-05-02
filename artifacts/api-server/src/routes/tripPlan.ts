@@ -2,10 +2,11 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { transportTypesTable, transitLinesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { requireAuth } from "../middlewares/requireAuth";
 
 const router = Router();
 
-router.post("/", async (req, res) => {
+router.post("/", requireAuth, async (req, res) => {
   const { startLat, startLng, endLat, endLng, tripType, budget, language } = req.body;
 
   const distanceKm = (() => {

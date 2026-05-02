@@ -25,9 +25,10 @@ router.post("/send-otp", async (req, res) => {
 
   await db.insert(otpCodesTable).values({ phone, code, expiresAt });
 
-  console.log(`[OTP] Code for ${phone}: ${code}`);
-
-  res.json({ success: true, dev_code: process.env.NODE_ENV !== "production" ? code : undefined });
+  // In development only: return the code in the response so the UI can show it as a toast.
+  // Never log OTP codes — they are sensitive authentication data.
+  const devCode = process.env.NODE_ENV !== "production" ? code : undefined;
+  res.json({ success: true, dev_code: devCode });
 });
 
 router.post("/verify-otp", async (req, res) => {
@@ -78,8 +79,15 @@ router.post("/admin-login", async (req, res) => {
     return res.status(400).json({ error: "Username and password required" });
   }
 
-  const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
-  const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "Sikka@Admin@2024!";
+  // Fail closed in production if env vars are not configured.
+  // In development, fall back to defaults so the app works out of the box.
+  const isDev = process.env.NODE_ENV !== "production";
+  const ADMIN_USERNAME = process.env.ADMIN_USERNAME ?? (isDev ? "admin" : null);
+  const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? (isDev ? "Sikka@Admin@2024!" : null);
+
+  if (!ADMIN_USERNAME || !ADMIN_PASSWORD) {
+    return res.status(503).json({ error: "Admin authentication is not configured on this server" });
+  }
 
   if (username.trim() !== ADMIN_USERNAME || password !== ADMIN_PASSWORD) {
     return res.status(401).json({ error: "Invalid credentials" });

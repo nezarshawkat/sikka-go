@@ -2,15 +2,18 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { transportTypesTable } from "@workspace/db";
 import { eq, asc } from "drizzle-orm";
+import { requireAdmin } from "../middlewares/requireAdmin";
 
 const router = Router();
 
+// Public read
 router.get("/", async (_req, res) => {
   const rows = await db.select().from(transportTypesTable).orderBy(asc(transportTypesTable.nameEn));
   res.json(rows);
 });
 
-router.post("/", async (req, res) => {
+// Admin-only writes
+router.post("/", requireAdmin, async (req, res) => {
   const { nameEn, nameAr, icon, color, averageSpeedKmh, basePriceEgp, pricePerKmEgp, serviceLevel, foreignerAllowed } = req.body;
   const [row] = await db.insert(transportTypesTable).values({
     nameEn: nameEn || "New Transport",
@@ -26,7 +29,7 @@ router.post("/", async (req, res) => {
   res.json(row);
 });
 
-router.put("/:id", async (req, res) => {
+router.put("/:id", requireAdmin, async (req, res) => {
   const { id } = req.params;
   const updates: Record<string, any> = {};
   const allowed = ["nameEn", "nameAr", "icon", "color", "averageSpeedKmh", "basePriceEgp", "pricePerKmEgp", "isActive", "foreignerAllowed", "serviceLevel", "minDistanceMinutes", "maxDistanceMinutes"];
@@ -37,7 +40,7 @@ router.put("/:id", async (req, res) => {
   res.json(row);
 });
 
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requireAdmin, async (req, res) => {
   await db.delete(transportTypesTable).where(eq(transportTypesTable.id, req.params.id));
   res.json({ success: true });
 });

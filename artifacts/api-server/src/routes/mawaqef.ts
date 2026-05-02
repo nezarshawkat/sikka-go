@@ -2,9 +2,11 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { mawaqefTable } from "@workspace/db";
 import { eq, asc } from "drizzle-orm";
+import { requireAdmin } from "../middlewares/requireAdmin";
 
 const router = Router();
 
+// Public read
 router.get("/", async (req, res) => {
   const { active } = req.query;
   if (active === "true") {
@@ -15,7 +17,8 @@ router.get("/", async (req, res) => {
   res.json(rows);
 });
 
-router.post("/", async (req, res) => {
+// Admin-only writes
+router.post("/", requireAdmin, async (req, res) => {
   const { nameEn, nameAr, city, latitude, longitude, transportTypeIds, descriptionEn, descriptionAr } = req.body;
   const [row] = await db.insert(mawaqefTable).values({
     nameEn, nameAr, city: city || "cairo",
@@ -26,7 +29,7 @@ router.post("/", async (req, res) => {
   res.json(row);
 });
 
-router.put("/:id", async (req, res) => {
+router.put("/:id", requireAdmin, async (req, res) => {
   const updates: Record<string, any> = {};
   const allowed = ["nameEn", "nameAr", "city", "latitude", "longitude", "transportTypeIds", "isActive", "descriptionEn", "descriptionAr"];
   for (const key of allowed) {
@@ -36,7 +39,7 @@ router.put("/:id", async (req, res) => {
   res.json(row);
 });
 
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requireAdmin, async (req, res) => {
   await db.delete(mawaqefTable).where(eq(mawaqefTable.id, req.params.id));
   res.json({ success: true });
 });

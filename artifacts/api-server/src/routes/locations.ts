@@ -2,15 +2,18 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { locationsTable } from "@workspace/db";
 import { eq, asc } from "drizzle-orm";
+import { requireAdmin } from "../middlewares/requireAdmin";
 
 const router = Router();
 
+// Public read
 router.get("/", async (_req, res) => {
   const rows = await db.select().from(locationsTable).orderBy(asc(locationsTable.nameEn));
   res.json(rows);
 });
 
-router.post("/", async (req, res) => {
+// Admin-only writes
+router.post("/", requireAdmin, async (req, res) => {
   const { nameEn, nameAr, latitude, longitude, city, isStation } = req.body;
   const [row] = await db.insert(locationsTable).values({
     nameEn: nameEn || "New Location",
@@ -23,7 +26,7 @@ router.post("/", async (req, res) => {
   res.json(row);
 });
 
-router.put("/:id", async (req, res) => {
+router.put("/:id", requireAdmin, async (req, res) => {
   const updates: Record<string, any> = {};
   const allowed = ["nameEn", "nameAr", "latitude", "longitude", "city", "isStation"];
   for (const key of allowed) {
@@ -33,7 +36,7 @@ router.put("/:id", async (req, res) => {
   res.json(row);
 });
 
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requireAdmin, async (req, res) => {
   await db.delete(locationsTable).where(eq(locationsTable.id, req.params.id));
   res.json({ success: true });
 });

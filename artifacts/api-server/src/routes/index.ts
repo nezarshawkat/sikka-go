@@ -16,19 +16,26 @@ import { sessionAuth } from "../middlewares/sessionAuth";
 
 const router: IRouter = Router();
 
+// Public — no auth needed
 router.use(healthRouter);
 router.use("/auth", authRouter);
+
+// Populate req.userId from Bearer token on all remaining routes
 router.use(sessionAuth);
-router.use("/profile", profileRouter);
+
+// Resources: auth enforcement is applied per-method inside each router file
 router.use("/transport-types", transportTypesRouter);
 router.use("/transit-lines", transitLinesRouter);
 router.use("/locations", locationsRouter);
 router.use("/mawaqef", mawaqefRouter);
-router.use("/reviews", reviewsRouter);
-router.use("/trips/plan", tripPlanRouter);
-router.use("/trips", tripsRouter);
 router.use("/heatmaps", heatmapsRouter);
+router.use("/reviews", reviewsRouter);
 router.use("/analytics", analyticsRouter);
 router.use("/admin/seed-cairo-transit", seedCairoTransitRouter);
+
+// User-scoped routes
+router.use("/profile", profileRouter);
+router.use("/trips/plan", tripPlanRouter);
+router.use("/trips", tripsRouter);
 
 export default router;

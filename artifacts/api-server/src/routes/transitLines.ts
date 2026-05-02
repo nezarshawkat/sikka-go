@@ -2,21 +2,23 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { transitLinesTable } from "@workspace/db";
 import { eq, asc } from "drizzle-orm";
+import { requireAdmin } from "../middlewares/requireAdmin";
 
 const router = Router();
 
+// Public read
 router.get("/", async (req, res) => {
   const { active } = req.query;
-  let query = db.select().from(transitLinesTable).orderBy(asc(transitLinesTable.lineNumber));
   if (active === "true") {
     const rows = await db.select().from(transitLinesTable).where(eq(transitLinesTable.isActive, true)).orderBy(asc(transitLinesTable.lineNumber));
     return res.json(rows);
   }
-  const rows = await query;
+  const rows = await db.select().from(transitLinesTable).orderBy(asc(transitLinesTable.lineNumber));
   res.json(rows);
 });
 
-router.post("/", async (req, res) => {
+// Admin-only writes
+router.post("/", requireAdmin, async (req, res) => {
   const { transportTypeId, lineNumber, nameEn, nameAr, fromArea, toArea, viaStops, routePath, priceEgp, frequencyMinutes, hasFixedStops } = req.body;
   const [row] = await db.insert(transitLinesTable).values({
     transportTypeId,
@@ -34,7 +36,7 @@ router.post("/", async (req, res) => {
   res.json(row);
 });
 
-router.put("/:id", async (req, res) => {
+router.put("/:id", requireAdmin, async (req, res) => {
   const updates: Record<string, any> = { updatedAt: new Date() };
   const allowed = ["lineNumber", "nameEn", "nameAr", "fromArea", "toArea", "viaStops", "routePath", "priceEgp", "frequencyMinutes", "hasFixedStops", "isActive", "transportTypeId"];
   for (const key of allowed) {
@@ -44,7 +46,7 @@ router.put("/:id", async (req, res) => {
   res.json(row);
 });
 
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requireAdmin, async (req, res) => {
   await db.delete(transitLinesTable).where(eq(transitLinesTable.id, req.params.id));
   res.json({ success: true });
 });

@@ -2,10 +2,12 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { profilesTable, tripsTable, reviewsTable, transitLinesTable } from "@workspace/db";
 import { count } from "drizzle-orm";
+import { requireAdmin } from "../middlewares/requireAdmin";
 
 const router = Router();
 
-router.get("/", async (_req, res) => {
+// Admin-only — analytics exposes aggregate user/trip data
+router.get("/", requireAdmin, async (_req, res) => {
   const [users, trips, reviews, routes] = await Promise.all([
     db.select({ count: count() }).from(profilesTable),
     db.select({ count: count() }).from(tripsTable),
