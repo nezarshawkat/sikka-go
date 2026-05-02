@@ -40,5 +40,3 @@ externalPort = 80
 [userenv.shared]
 
 [userenv.development]
-ADMIN_USERNAME = "admin"
-ADMIN_PASSWORD = "Nezar@Sikka"
