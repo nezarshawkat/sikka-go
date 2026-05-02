@@ -13,13 +13,13 @@ const AdminDashboard = () => {
   const location = useLocation();
   const [isSeeding, setIsSeeding] = useState(false);
 
-  interface SeedResult { success: boolean; results: string[] }
+  interface SeedResult { success: boolean; seeded: number; skipped: number; results: string[] }
   const handleSeedCairo = async () => {
     setIsSeeding(true);
     try {
-      const res = await api.post<SeedResult>('/admin/seed-cairo-transit', {});
-      const seeded = res.results?.filter((r) => r.startsWith('Seeded')).length ?? 0;
-      const skipped = res.results?.filter((r) => r.startsWith('Skipped')).length ?? 0;
+      const res = await api.post<SeedResult>('/admin/seed-cairo', {});
+      const seeded = res.seeded ?? res.results?.filter((r) => r.startsWith('Seeded')).length ?? 0;
+      const skipped = res.skipped ?? res.results?.filter((r) => r.startsWith('Skip')).length ?? 0;
       toast.success(`Seeded ${seeded} routes${skipped ? `, ${skipped} already existed` : ''}`);
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Seed failed');
