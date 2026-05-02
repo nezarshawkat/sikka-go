@@ -1,4 +1,4 @@
-modules = ["nodejs-24", "python-3.11"]
+modules = ["nodejs-24", "python-3.11", "postgresql-16"]
 
 [deployment]
 router = "application"
@@ -38,5 +38,9 @@ externalPort = 80
 [userenv]
 
 [userenv.shared]
+VITE_CLERK_PUBLISHABLE_KEY = "pk_test_Y2hhcm1lZC1nYXItMjMuY2xlcmsuYWNjb3VudHMuZGV2JA"
 
 [userenv.development]
+
+[nix]
+channel = "stable-25_05"

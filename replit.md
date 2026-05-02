@@ -12,8 +12,8 @@ pnpm workspace monorepo using TypeScript. Sikka is a Cairo transit planning app 
 - **TypeScript version**: 5.9
 - **API framework**: Express 5 (api-server on port 8080)
 - **Database**: Replit PostgreSQL + Drizzle ORM (`lib/db`)
-- **Auth (users)**: Phone OTP via api-server (`otp_codes` + `phone_sessions` tables)
-- **Auth (admin)**: Username/password via `POST /api/auth/admin-login` (credentials in Replit Secrets: `ADMIN_USERNAME`, `ADMIN_PASSWORD`)
+- **Auth (users)**: Clerk (`@clerk/clerk-sdk-node` on API, `@clerk/clerk-react` on frontend)
+- **Auth (admin)**: Clerk user + `POST /api/auth/setup-admin` grants isAdmin role (credentials in Replit Secrets: `ADMIN_USERNAME`, `ADMIN_PASSWORD`)
 - **Frontend**: React + Vite (`artifacts/sikka`, port 18322)
 - **Map**: Mapbox GL JS (`react-map-gl/mapbox`)
 
@@ -33,20 +33,17 @@ pnpm workspace monorepo using TypeScript. Sikka is a Cairo transit planning app 
 
 ### Auth Flow
 
-- **Regular users**: Phone OTP → `POST /api/auth/send-otp` → `POST /api/auth/verify-otp` → Bearer token stored in `localStorage` key `sikka_phone_token`
-- **Admin users**: `POST /api/auth/admin-login` with username + password → session token; credentials stored as Replit Secrets
-- **Dev OTP**: In non-production, the OTP code is returned as `dev_code` in the response and shown as a toast in the UI
+- **Regular users**: Clerk sign-in (email + Google OAuth) → `useUser()` in frontend → `clerkAuth` middleware on API reads `Authorization: Bearer <session_token>`
+- **Admin users**: Any Clerk user can call `POST /api/auth/setup-admin` with `{username, password}` matching Replit Secrets to gain `isAdmin: true` on their profile
+- **Profile auto-creation**: `GET /api/profile` creates the profile row on first access for new Clerk users
+- **Clerk env vars**: `CLERK_SECRET_KEY`, `CLERK_PUBLISHABLE_KEY`, `VITE_CLERK_PUBLISHABLE_KEY`
 
 ### API Routes
 
 | Route | Description |
 |---|---|
-| `POST /api/auth/send-otp` | Send OTP to phone |
-| `POST /api/auth/verify-otp` | Verify OTP, returns session token |
-| `GET /api/auth/session` | Validate Bearer token, return user info |
-| `POST /api/auth/logout` | Delete session |
-| `POST /api/auth/admin-login` | Admin login (username + password) |
-| `GET/PUT /api/profile` | User profile |
+| `POST /api/auth/setup-admin` | Grant admin role to authenticated Clerk user |
+| `GET/PUT /api/profile` | User profile (auto-creates on first GET) |
 | `GET/POST/PUT/DELETE /api/transport-types` | Transport types |
 | `GET/POST/PUT/DELETE /api/transit-lines` | Transit lines |
 | `GET/POST/PUT/DELETE /api/locations` | Locations |
@@ -61,23 +58,28 @@ pnpm workspace monorepo using TypeScript. Sikka is a Cairo transit planning app 
 
 All Drizzle columns use camelCase in JS/TS. API responses are camelCase.
 
-- `profiles`, `user_roles`, `otp_codes`, `phone_sessions`
+- `profiles`, `user_roles`, `otp_codes`, `phone_sessions` (otp/phone tables unused but kept)
 - `transport_types`, `transit_lines`, `locations`, `mawaqef`
 - `trips`, `trip_segments`, `reviews`, `transport_heatmaps`
 - `trip_notifications`, `trip_shares`
 
-### Transport Types
+**Unique constraint**: `transit_lines(transport_type_id, line_number)` — added to prevent duplicate route entries.
 
-- **Metro**: Fixed stop-pair routes (Lines 1, 2, 3)
-- **Monorail**: Fixed stop-pair routes (East, West)
-- **Train**: Fixed stop-pair routes (intercity)
-- **CTA Bus** (أتوبيس الهيئة): Government big buses, 13 EGP, board anywhere
-- **NTA Bus** (أتوبيس النقل الجماعي): Private mini-bus companies, 19–25 EGP, board anywhere — ~110 Cairo routes from March 2026 PDF
-- **Serfis** (السرفيس): Shared fixed-route taxis, ~10 EGP, board anywhere — 20 common Cairo routes
-- **Microbus**: Variable routes with via stops
-- **Tuktuk**: Heatmap-only (no fixed routes)
-- **White Taxi**: Heatmap-only (no fixed routes)
-- **Uber / Careem**: Always provided as fallback in AI trip plans
+### Transport Types (seeded in DB)
+
+| Name | Arabic | Price | Routes |
+|---|---|---|---|
+| Metro | مترو | fixed | 77 stop-pair routes (Lines 1-3) |
+| Train | قطار | fixed | 28 intercity routes |
+| Monorail | مونوريل | fixed | 16 stop-pair routes |
+| NTA Bus | أتوبيس النقل الجماعي | 19 EGP | 110 Cairo routes |
+| CTA Bus | أتوبيس الهيئة | 13 EGP | 31 Alexandria (APTA) routes |
+| Serfis | سرفيس | 5 EGP + 0.5/km | 20 Cairo routes |
+| Bus (CTA) | أتوبيس الهيئة | legacy | 0 (legacy type, superseded by CTA Bus) |
+| Microbus | ميكروباص | variable | variable routes via stops |
+| Tuktuk | توك توك | heatmap only | no fixed routes |
+| White Taxi | تاكسي أبيض | heatmap only | no fixed routes |
+| Uber / Careem | أوبر / كريم | dynamic | always provided as AI fallback |
 
 ### Seed Endpoints (admin only)
 
@@ -98,12 +100,15 @@ All Drizzle columns use camelCase in JS/TS. API responses are camelCase.
 
 ### Key Files
 
-- `artifacts/sikka/src/contexts/AuthContext.tsx` — Phone OTP session auth context
-- `artifacts/sikka/src/pages/Auth.tsx` — Language selector + phone OTP flow + admin login UI
-- `artifacts/sikka/src/lib/api.ts` — Fetch wrapper (reads Bearer token from localStorage)
-- `artifacts/sikka/src/App.tsx` — App router + auth provider
-- `artifacts/api-server/src/routes/auth.ts` — OTP send/verify/session/logout + admin-login
-- `artifacts/api-server/src/routes/index.ts` — All routes wired
+- `artifacts/sikka/src/contexts/AuthContext.tsx` — Clerk-based auth context (`useUser`, `useClerkAuth`)
+- `artifacts/sikka/src/pages/SignIn.tsx` / `SignUp.tsx` — Clerk branded sign-in/up pages
+- `artifacts/sikka/src/lib/api.ts` — Fetch wrapper (Clerk session token via `getToken()`)
+- `artifacts/sikka/src/App.tsx` — `ClerkProvider` wrapping `AppRoutes` inside `BrowserRouter`
+- `artifacts/api-server/src/middlewares/clerkAuth.ts` — Clerk middleware (sets `req.userId`)
+- `artifacts/api-server/src/app.ts` — Express app with Clerk proxy + middleware
+- `artifacts/api-server/src/routes/auth.ts` — `setup-admin` endpoint
+- `artifacts/api-server/src/routes/profile.ts` — Auto-creates profile on first access
+- `artifacts/api-server/src/routes/index.ts` — All routes wired with `clerkAuth`
 - `lib/db/src/schema/sikka.ts` — Full 14-table Drizzle schema
 - `artifacts/api-server/src/routes/seedCairo.ts` — Cairo seed: Metro/Monorail/Train/CTA Bus/NTA Bus (~110 routes)/Serfis
 - `artifacts/api-server/src/routes/seedAlexandria.ts` — Alexandria APTA 31 routes
@@ -111,8 +116,11 @@ All Drizzle columns use camelCase in JS/TS. API responses are camelCase.
 
 ### Environment Variables / Secrets
 
-- `ADMIN_USERNAME` — Admin login username (Replit Secret)
-- `ADMIN_PASSWORD` — Admin login password (Replit Secret)
+- `CLERK_SECRET_KEY` — Clerk backend secret key (Replit Secret)
+- `CLERK_PUBLISHABLE_KEY` — Clerk publishable key (Replit Secret)
+- `VITE_CLERK_PUBLISHABLE_KEY` — Clerk publishable key for Vite frontend (Replit Secret)
+- `ADMIN_USERNAME` — Admin setup username (Replit Secret)
+- `ADMIN_PASSWORD` — Admin setup password (Replit Secret)
 - `DATABASE_URL` — Replit PostgreSQL connection string (auto-provided)
 - `VITE_MAPBOX_TOKEN` — Mapbox access token
 - `OPENAI_API_KEY` — OpenAI key for trip planning (optional, falls back gracefully)

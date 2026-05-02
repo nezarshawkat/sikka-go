@@ -13,7 +13,7 @@ import analyticsRouter from "./analytics";
 import tripPlanRouter from "./tripPlan";
 import seedCairoRouter from "./seedCairo";
 import seedAlexandriaRouter from "./seedAlexandria";
-import { sessionAuth } from "../middlewares/sessionAuth";
+import { clerkAuth } from "../middlewares/clerkAuth";
 
 const router: IRouter = Router();
 
@@ -21,8 +21,8 @@ const router: IRouter = Router();
 router.use(healthRouter);
 router.use("/auth", authRouter);
 
-// Populate req.userId from Bearer token on all remaining routes
-router.use(sessionAuth);
+// Populate req.userId from Clerk session on all remaining routes
+router.use(clerkAuth);
 
 // Resources: auth enforcement is applied per-method inside each router file
 router.use("/transport-types", transportTypesRouter);

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { profilesTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { profilesTable, userRolesTable } from "@workspace/db";
+import { and, eq } from "drizzle-orm";
 import { requireAuth } from "../middlewares/requireAuth";
 
 const router = Router();
@@ -14,12 +14,26 @@ interface ProfileUpdate {
 }
 
 router.get("/", requireAuth, async (req, res) => {
-  const [profile] = await db.select().from(profilesTable).where(eq(profilesTable.userId, req.userId!)).limit(1);
+  let [profile] = await db
+    .select()
+    .from(profilesTable)
+    .where(eq(profilesTable.userId, req.userId!))
+    .limit(1);
+
   if (!profile) {
-    res.status(404).json({ error: "Profile not found" });
-    return;
+    [profile] = await db
+      .insert(profilesTable)
+      .values({ userId: req.userId!, language: "en", nationality: "egyptian" })
+      .returning();
   }
-  res.json(profile);
+
+  const [roleRow] = await db
+    .select()
+    .from(userRolesTable)
+    .where(and(eq(userRolesTable.userId, req.userId!), eq(userRolesTable.role, "admin")))
+    .limit(1);
+
+  res.json({ ...profile, isAdmin: !!roleRow });
 });
 
 router.put("/", requireAuth, async (req, res) => {
@@ -28,7 +42,27 @@ router.put("/", requireAuth, async (req, res) => {
   if (language !== undefined) updates.language = language;
   if (nationality !== undefined) updates.nationality = nationality;
   if (displayName !== undefined) updates.displayName = displayName;
-  const [updated] = await db.update(profilesTable).set(updates).where(eq(profilesTable.userId, req.userId!)).returning();
+
+  const [existing] = await db
+    .select()
+    .from(profilesTable)
+    .where(eq(profilesTable.userId, req.userId!))
+    .limit(1);
+
+  if (!existing) {
+    const [created] = await db
+      .insert(profilesTable)
+      .values({ userId: req.userId!, language: "en", nationality: "egyptian", ...updates })
+      .returning();
+    res.json(created);
+    return;
+  }
+
+  const [updated] = await db
+    .update(profilesTable)
+    .set(updates)
+    .where(eq(profilesTable.userId, req.userId!))
+    .returning();
   res.json(updated);
 });
 
