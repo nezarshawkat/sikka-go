@@ -37,7 +37,7 @@ const Profile = () => {
                 <User className="h-7 w-7 text-primary" />
               </div>
               <div>
-                <p className="font-semibold text-foreground">{profile?.display_name || user?.phone || user?.email || 'User'}</p>
+                <p className="font-semibold text-foreground">{profile?.displayName ?? profile?.phone ?? user?.id?.replace(/^(?:phone|admin):/, '') ?? 'User'}</p>
                 <p className="text-sm text-muted-foreground capitalize">{profile?.nationality || 'egyptian'}</p>
               </div>
               {isAdmin && (

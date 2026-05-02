@@ -83,9 +83,8 @@ router.post("/admin-login", async (req, res) => {
     return;
   }
 
-  const isProd = process.env.NODE_ENV === "production";
-  const ADMIN_USERNAME = process.env.ADMIN_USERNAME ?? (isProd ? null : "admin");
-  const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? (isProd ? null : "Sikka@Admin@2024!");
+  const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
+  const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 
   if (!ADMIN_USERNAME || !ADMIN_PASSWORD) {
     res.status(503).json({ error: "Admin authentication is not configured on this server" });

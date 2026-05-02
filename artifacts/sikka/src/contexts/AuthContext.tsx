@@ -2,11 +2,11 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import type { Language } from '@/lib/i18n';
 
-interface Profile {
+export interface Profile {
+  displayName: string | null;
+  phone: string | null;
   language: string;
   nationality: 'egyptian' | 'foreigner';
-  display_name: string | null;
-  phone: string | null;
 }
 
 interface PhoneUser {
