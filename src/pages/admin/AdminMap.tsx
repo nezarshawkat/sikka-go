@@ -525,8 +525,9 @@ const AdminMap = () => {
             return (
               <Marker key={`icon-${line.id}`} latitude={mid[1]} longitude={mid[0]}>
                 <button onClick={e => { e.stopPropagation(); setDetailLine(line); setSelectedLine(line); }} className="group">
-                  <div className="h-7 w-7 rounded-full flex items-center justify-center text-xs shadow-lg border-2 border-background group-hover:scale-125 transition-transform" style={{ backgroundColor: color }}>
-                    {ICONS[tt?.icon || 'bus']}
+                  <div className="flex items-center gap-1 pl-0.5 pr-2 py-0.5 rounded-full shadow-lg border-2 border-background group-hover:scale-110 transition-transform" style={{ backgroundColor: color }}>
+                    <div className="h-6 w-6 rounded-full flex items-center justify-center text-xs bg-background/20">{ICONS[tt?.icon || 'bus']}</div>
+                    <span className="text-[11px] font-bold text-white whitespace-nowrap">{line.line_number || tt?.name_en?.slice(0, 6)}</span>
                   </div>
                 </button>
               </Marker>
