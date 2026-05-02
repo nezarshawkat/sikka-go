@@ -72,6 +72,49 @@ router.post("/verify-otp", async (req, res) => {
   res.json({ success: true, token, userId, isNew, profile });
 });
 
+router.post("/admin-login", async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ error: "Username and password required" });
+  }
+
+  const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
+  const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "Sikka@Admin@2024!";
+
+  if (username.trim() !== ADMIN_USERNAME || password !== ADMIN_PASSWORD) {
+    return res.status(401).json({ error: "Invalid credentials" });
+  }
+
+  const userId = `admin:${username.trim()}`;
+
+  let [profile] = await db.select().from(profilesTable).where(eq(profilesTable.userId, userId)).limit(1);
+  if (!profile) {
+    [profile] = await db.insert(profilesTable).values({
+      userId,
+      phone: null,
+      language: "en",
+      nationality: "egyptian",
+      displayName: "Admin",
+    }).returning();
+  }
+
+  const [existingRole] = await db
+    .select()
+    .from(userRolesTable)
+    .where(and(eq(userRolesTable.userId, userId), eq(userRolesTable.role, "admin")))
+    .limit(1);
+
+  if (!existingRole) {
+    await db.insert(userRolesTable).values({ userId, role: "admin" });
+  }
+
+  const token = generateToken();
+  const sessionExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+  await db.insert(phoneSessionsTable).values({ userId, token, expiresAt: sessionExpiry });
+
+  res.json({ success: true, token, userId, isAdmin: true, profile });
+});
+
 router.get("/session", async (req, res) => {
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith("Bearer ")) {

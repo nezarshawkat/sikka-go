@@ -120,9 +120,24 @@ const AdminMap = () => {
     const key = stop.trim().toLowerCase();
     if (key in geocodeCacheRef.current) return geocodeCacheRef.current[key];
     try {
-      const res = await fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(`${stop}, Egypt`)}.json?access_token=${MAPBOX_TOKEN}&country=eg&language=ar,en&limit=1&types=poi,address,neighborhood,locality,place,district`);
+      // Cairo center for proximity bias: 30.0444, 31.2357
+      const query = `${stop.trim()}, Cairo, Egypt`;
+      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json`
+        + `?access_token=${MAPBOX_TOKEN}`
+        + `&country=eg`
+        + `&language=ar,en`
+        + `&limit=3`
+        + `&proximity=31.2357,30.0444`
+        + `&types=poi,address,neighborhood,locality,place,district`;
+      const res = await fetch(url);
       const data = await res.json();
-      const center = data.features?.[0]?.center as [number, number] | undefined;
+      // Prefer results within ~50km of Cairo center
+      const features = data.features as Array<{ center: [number, number]; relevance: number }> | undefined;
+      const inCairo = features?.find(f => {
+        const [lng, lat] = f.center;
+        return Math.abs(lat - 30.0444) < 0.5 && Math.abs(lng - 31.2357) < 0.5;
+      });
+      const center = (inCairo || features?.[0])?.center;
       geocodeCacheRef.current[key] = center || null;
       return center || null;
     } catch (err) {

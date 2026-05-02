@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { t } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
-import { User, MapPin, Navigation } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { User, MapPin, Navigation, Bus, Clock, Wallet, ChevronRight, X } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import Map, { Marker, GeolocateControl, NavigationControl } from 'react-map-gl/mapbox';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import LocationAutocomplete from '@/components/LocationAutocomplete';
@@ -25,6 +25,18 @@ const reverseGeocode = async (lat: number, lng: number): Promise<string> => {
   }
 };
 
+const ICONS: Record<string, string> = {
+  bus: '🚌', train: '🚆', car: '🚕', bike: '🛺', ship: '🚢', plane: '✈️', metro: '🚇', monorail: '🚝', walk: '🚶',
+};
+
+interface TripSegment {
+  transport_name: string; line_number?: string; start_name: string; end_name: string;
+  cost_egp: number; duration_minutes: number; icon: string; color: string; info?: string;
+}
+interface ActiveTrip {
+  segments: TripSegment[]; total_cost_egp: number; total_duration_minutes: number; destination: string;
+}
+
 const Index = () => {
   const { user, isLoading, language } = useAuth();
   const navigate = useNavigate();
@@ -32,10 +44,27 @@ const Index = () => {
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [locationName, setLocationName] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [activeTrip, setActiveTrip] = useState<ActiveTrip | null>(null);
+  const [currentSegIdx, setCurrentSegIdx] = useState(0);
+  const [showTripPanel, setShowTripPanel] = useState(false);
 
   useEffect(() => {
     if (!isLoading && !user) navigate('/auth');
   }, [user, isLoading, navigate]);
+
+  useEffect(() => {
+    // Load active trip from sessionStorage
+    const stored = sessionStorage.getItem('tripPlan');
+    if (stored) {
+      try {
+        const plan = JSON.parse(stored);
+        if (plan?.segments?.length) {
+          setActiveTrip(plan);
+          setShowTripPanel(true);
+        }
+      } catch {}
+    }
+  }, []);
 
   useEffect(() => {
     if (navigator.geolocation) {
@@ -54,6 +83,15 @@ const Index = () => {
       );
     }
   }, []);
+
+  const clearTrip = () => {
+    sessionStorage.removeItem('tripPlan');
+    setActiveTrip(null);
+    setShowTripPanel(false);
+    setCurrentSegIdx(0);
+  };
+
+  const currentSeg = activeTrip?.segments?.[currentSegIdx] ?? null;
 
   if (isLoading) {
     return (
@@ -117,19 +155,117 @@ const Index = () => {
         </motion.div>
       </div>
 
-      {userLocation && (
-        <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.3 }} className="absolute bottom-6 left-4 right-4">
-          <div className="bg-card/95 backdrop-blur-sm rounded-xl shadow-lg p-4 flex items-center gap-3">
-            <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-              <Navigation className="h-5 w-5 text-primary" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-foreground">{t('myLocation', language)}</p>
-              <p className="text-xs text-muted-foreground truncate">{locationName || `${userLocation.lat.toFixed(4)}, ${userLocation.lng.toFixed(4)}`}</p>
-            </div>
-          </div>
-        </motion.div>
-      )}
+      {/* Bottom panel — active trip guide OR location info */}
+      <div className="absolute bottom-6 left-4 right-4">
+        <AnimatePresence mode="wait">
+          {showTripPanel && activeTrip && currentSeg ? (
+            <motion.div
+              key="trip-guide"
+              initial={{ y: 60, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 60, opacity: 0 }}
+              className="bg-card/98 backdrop-blur-sm rounded-2xl shadow-xl border overflow-hidden"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-4 pt-3 pb-2 border-b">
+                <div className="flex items-center gap-2">
+                  <span className="text-xl">{ICONS[currentSeg.icon] || '🚌'}</span>
+                  <div>
+                    <p className="text-sm font-semibold text-foreground leading-tight">{currentSeg.transport_name}</p>
+                    {currentSeg.line_number && (
+                      <span className="text-xs font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: currentSeg.color + '20', color: currentSeg.color }}>
+                        #{currentSeg.line_number}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="text-xs text-muted-foreground">
+                    {currentSegIdx + 1}/{activeTrip.segments.length}
+                  </span>
+                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={clearTrip}>
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+
+              {/* Route info */}
+              <div className="px-4 py-3 space-y-2">
+                <div className="flex items-center gap-2 text-sm">
+                  <div className="flex flex-col items-center gap-0.5">
+                    <div className="h-2 w-2 rounded-full bg-primary" />
+                    <div className="h-6 w-px bg-border" />
+                    <div className="h-2 w-2 rounded-full border-2 border-primary" />
+                  </div>
+                  <div className="flex-1 flex flex-col gap-2">
+                    <span className="text-foreground font-medium leading-none">{currentSeg.start_name}</span>
+                    <span className="text-muted-foreground leading-none">{currentSeg.end_name}</span>
+                  </div>
+                  <div className="text-right">
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <Clock className="h-3 w-3" />
+                      {currentSeg.duration_minutes} min
+                    </div>
+                    <div className="flex items-center gap-1 text-xs font-semibold text-primary">
+                      <Wallet className="h-3 w-3" />
+                      {currentSeg.cost_egp} EGP
+                    </div>
+                  </div>
+                </div>
+
+                {/* Pickup tip */}
+                {currentSeg.info && (
+                  <div className="flex items-start gap-2 bg-primary/5 rounded-lg px-3 py-2">
+                    <Bus className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
+                    <p className="text-xs text-foreground/80 leading-snug">{currentSeg.info}</p>
+                  </div>
+                )}
+
+                {/* Trip totals + next segment */}
+                <div className="flex items-center gap-2 pt-1">
+                  <div className="flex-1 flex items-center gap-3 text-xs text-muted-foreground">
+                    <span>Total: <strong className="text-foreground">{activeTrip.total_cost_egp} EGP</strong></span>
+                    <span>{activeTrip.total_duration_minutes} min</span>
+                  </div>
+                  <div className="flex gap-1">
+                    {currentSegIdx > 0 && (
+                      <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setCurrentSegIdx(i => i - 1)}>
+                        ←
+                      </Button>
+                    )}
+                    {currentSegIdx < activeTrip.segments.length - 1 ? (
+                      <Button size="sm" className="h-7 px-3 text-xs gap-1" onClick={() => setCurrentSegIdx(i => i + 1)}>
+                        Next <ChevronRight className="h-3 w-3" />
+                      </Button>
+                    ) : (
+                      <Button size="sm" variant="outline" className="h-7 px-3 text-xs" onClick={clearTrip}>
+                        Done ✓
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          ) : userLocation ? (
+            <motion.div
+              key="location"
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 20, opacity: 0 }}
+              transition={{ delay: 0.3 }}
+              className="bg-card/95 backdrop-blur-sm rounded-xl shadow-lg p-4 flex items-center gap-3"
+            >
+              <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                <Navigation className="h-5 w-5 text-primary" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-foreground">{t('myLocation', language)}</p>
+                <p className="text-xs text-muted-foreground truncate">{locationName || `${userLocation.lat.toFixed(4)}, ${userLocation.lng.toFixed(4)}`}</p>
+              </div>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
+      </div>
     </div>
   );
 };

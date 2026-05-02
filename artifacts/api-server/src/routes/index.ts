@@ -11,6 +11,7 @@ import tripsRouter from "./trips";
 import heatmapsRouter from "./heatmaps";
 import analyticsRouter from "./analytics";
 import tripPlanRouter from "./tripPlan";
+import seedCairoTransitRouter from "./seedCairoTransit";
 import { sessionAuth } from "../middlewares/sessionAuth";
 
 const router: IRouter = Router();
@@ -28,5 +29,6 @@ router.use("/trips/plan", tripPlanRouter);
 router.use("/trips", tripsRouter);
 router.use("/heatmaps", heatmapsRouter);
 router.use("/analytics", analyticsRouter);
+router.use("/admin/seed-cairo-transit", seedCairoTransitRouter);
 
 export default router;

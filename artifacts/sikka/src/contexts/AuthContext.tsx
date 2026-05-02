@@ -24,7 +24,7 @@ interface AuthContextType {
   language: Language;
   setLanguage: (lang: Language) => void;
   signOut: () => Promise<void>;
-  setPhoneSession: (token: string, userId: string, profile: Profile | null) => void;
+  setPhoneSession: (token: string, userId: string, profile: Profile | null, isAdmin?: boolean) => void;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -93,10 +93,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     document.documentElement.lang = language;
   }, [language]);
 
-  const setPhoneSession = (token: string, userId: string, prof: Profile | null) => {
+  const setPhoneSession = (token: string, userId: string, prof: Profile | null, adminFlag?: boolean) => {
     localStorage.setItem('sikka_phone_token', token);
     setPhoneUser({ userId, profile: prof });
     setProfile(prof);
+    if (adminFlag) setIsAdmin(true);
   };
 
   const signOut = async () => {
