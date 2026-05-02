@@ -566,7 +566,17 @@ const AdminMap = () => {
                   <div className="flex justify-between"><span className="text-muted-foreground">Stops</span><span>{detailLine.has_fixed_stops ? 'Fixed stops' : 'Stop anywhere'}</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">Map</span><span>{getLineGeometry(detailLine) ? 'Visible route path' : 'Generating from stops'}</span></div>
                 </div>
-                <DialogFooter className="gap-2">
+                <DialogFooter className="gap-2 flex-wrap">
+                  <Button variant="outline" size="sm" className="gap-1" onClick={async () => {
+                    toast.info('Regenerating path along real streets...');
+                    const path = await buildPathFromLineText(detailLine);
+                    if (!path) { toast.error('Could not geocode the stops — add more via stops'); return; }
+                    const { error } = await supabase.from('transit_lines').update({ route_path: path }).eq('id', detailLine.id);
+                    if (error) { toast.error(error.message); return; }
+                    toast.success('Path regenerated and snapped to roads');
+                    setGeneratedPaths(prev => ({ ...prev, [detailLine.id]: path }));
+                    fetchData();
+                  }}><RouteIcon className="h-3 w-3" /> Regenerate path</Button>
                   <Button variant="outline" size="sm" className="gap-1" onClick={() => { setDetailLine(null); openEditForm(detailLine); }}><Pencil className="h-3 w-3" /> Edit</Button>
                   <Button variant="destructive" size="sm" className="gap-1" onClick={() => deleteLine(detailLine.id)}><Trash2 className="h-3 w-3" /> Delete</Button>
                 </DialogFooter>
