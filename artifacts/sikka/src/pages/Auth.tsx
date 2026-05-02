@@ -7,11 +7,18 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/contexts/AuthContext';
 import { t, Language } from '@/lib/i18n';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Phone, Shield, ArrowLeft, Users } from 'lucide-react';
+import { Phone, Shield, ArrowLeft, Users, Globe } from 'lucide-react';
 import { toast } from 'sonner';
 import CountryCodeSelect, { countries, Country } from '@/components/auth/CountryCodeSelect';
-import LanguageSelect from '@/components/LanguageSelect';
 import { api } from '@/lib/api';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { languageNames } from '@/lib/i18n';
 
 type Step = 'language' | 'phone' | 'otp' | 'nationality' | 'admin';
 
@@ -31,6 +38,8 @@ const slideVariants = {
   exit: { x: -50, opacity: 0 },
 };
 
+const languageEntries = Object.entries(languageNames) as [Language, string][];
+
 const Auth = () => {
   const { user: clerkUser } = useUser();
   const { signIn, setActive, isLoaded: signInLoaded } = useSignIn();
@@ -47,6 +56,7 @@ const Auth = () => {
     return 'language';
   });
 
+  const [selectedLang, setSelectedLang] = useState<Language | ''>('');
   const [selectedCountry, setSelectedCountry] = useState<Country>(countries[0]);
   const [phoneNumber, setPhoneNumber] = useState('');
   const [otp, setOtp] = useState('');
@@ -82,7 +92,8 @@ const Auth = () => {
     setPhoneNumber(normalized.replace(/\D/g, ''));
   };
 
-  const handleLanguageSelect = (lang: Language) => {
+  const handleLanguageChange = (lang: Language) => {
+    setSelectedLang(lang);
     setLanguage(lang);
     setStep('phone');
   };
@@ -151,18 +162,17 @@ const Auth = () => {
     }
   };
 
-  const handleAdminSetup = async () => {
+  const handleAdminLogin = async () => {
     if (!adminUsername.trim() || !adminPassword.trim()) return;
-    if (!clerkUser) {
-      toast.error(language === 'ar' ? 'يجب تسجيل الدخول أولاً' : 'You must be signed in first');
-      setStep('phone');
-      return;
-    }
     setIsLoading(true);
     try {
-      await api.post('/auth/setup-admin', { username: adminUsername, password: adminPassword });
+      const res = await api.post<{ adminToken: string }>('/auth/admin-login', {
+        username: adminUsername,
+        password: adminPassword,
+      });
+      localStorage.setItem('sikka_admin_token', res.adminToken);
       await refreshProfile();
-      toast.success(language === 'ar' ? 'تم منح صلاحيات المسؤول' : 'Admin access granted!');
+      toast.success(language === 'ar' ? 'مرحباً بك، مسؤول!' : 'Welcome, Admin!');
       navigate('/admin');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : (language === 'ar' ? 'بيانات غير صحيحة' : 'Invalid credentials'));
@@ -197,11 +207,24 @@ const Auth = () => {
                 <CardTitle className="text-lg">{t('selectLanguage', language)}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                <LanguageSelect
-                  value={language}
-                  onChange={(lang) => { setLanguage(lang); setStep('phone'); }}
-                  className="w-full"
-                />
+                <Select
+                  value={selectedLang}
+                  onValueChange={(v) => handleLanguageChange(v as Language)}
+                >
+                  <SelectTrigger className="w-full">
+                    <div className="flex items-center gap-2">
+                      <Globe className="h-4 w-4" />
+                      <SelectValue placeholder="Select language" />
+                    </div>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {languageEntries.map(([code, name]) => (
+                      <SelectItem key={code} value={code}>
+                        {name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </CardContent>
             </Card>
           </motion.div>
@@ -391,17 +414,19 @@ const Auth = () => {
                   value={adminUsername}
                   onChange={(e) => setAdminUsername(e.target.value)}
                   dir="ltr"
+                  autoComplete="username"
                 />
                 <Input
                   type="password"
                   placeholder={t('password', language)}
                   value={adminPassword}
                   onChange={(e) => setAdminPassword(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleAdminSetup()}
+                  onKeyDown={(e) => e.key === 'Enter' && handleAdminLogin()}
                   dir="ltr"
+                  autoComplete="current-password"
                 />
                 <Button
-                  onClick={handleAdminSetup}
+                  onClick={handleAdminLogin}
                   disabled={isLoading || !adminUsername.trim() || !adminPassword.trim()}
                   className="w-full"
                 >

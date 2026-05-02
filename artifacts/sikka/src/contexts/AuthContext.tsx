@@ -33,7 +33,9 @@ const AuthContext = createContext<AuthContextType>({
   refreshProfile: async () => {},
 });
 
-export const useAuth = () => useContext(AuthContext);
+export function useAuth() {
+  return useContext(AuthContext);
+}
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user: clerkUser, isLoaded: userLoaded } = useUser();
@@ -46,8 +48,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return (localStorage.getItem('sikka-lang') as Language) || 'en';
   });
 
+  const adminToken = typeof window !== 'undefined' ? localStorage.getItem('sikka_admin_token') : null;
+
   const fetchProfile = useCallback(async () => {
-    if (!clerkUser) {
+    const hasAdminToken = !!localStorage.getItem('sikka_admin_token');
+    if (!clerkUser && !hasAdminToken) {
       setProfile(null);
       setIsAdmin(false);
       setProfileLoaded(true);
@@ -78,7 +83,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.setItem('sikka-lang', lang);
     document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
     document.documentElement.lang = lang;
-    if (clerkUser) {
+    if (clerkUser || localStorage.getItem('sikka_admin_token')) {
       api.put('/profile', { language: lang }).catch(() => {});
     }
   };
@@ -89,13 +94,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [language]);
 
   const signOut = async () => {
-    await clerkSignOut();
+    const token = localStorage.getItem('sikka_admin_token');
+    if (token) {
+      try {
+        await api.post('/auth/admin-logout', {});
+      } catch {}
+      localStorage.removeItem('sikka_admin_token');
+    }
+    if (clerkUser) {
+      await clerkSignOut();
+    }
     setProfile(null);
     setIsAdmin(false);
   };
 
-  const isLoading = !userLoaded || (!!clerkUser && !profileLoaded);
-  const effectiveUser = clerkUser ? { id: clerkUser.id } : null;
+  const hasAdminSession = !!adminToken;
+  const effectiveUser = clerkUser
+    ? { id: clerkUser.id }
+    : hasAdminSession
+    ? { id: 'sikka-admin' }
+    : null;
+
+  const isLoading = !userLoaded || (!!effectiveUser && !profileLoaded);
 
   return (
     <AuthContext.Provider value={{
