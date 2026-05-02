@@ -464,7 +464,23 @@ const AdminMap = () => {
           {routesGeoJSON.features.length > 0 && (
             <Source id="routes" type="geojson" data={routesGeoJSON}>
               <Layer id="route-lines" type="line" paint={{ 'line-color': ['get', 'color'], 'line-width': ['case', ['==', ['get', 'selected'], 1], 6, 3], 'line-opacity': ['case', ['==', ['get', 'selected'], 1], 1, 0.78] }} />
-              <Layer id="route-labels" type="symbol" layout={{ 'symbol-placement': 'line-center', 'text-field': ['get', 'name'], 'text-size': 11, 'text-font': ['DIN Pro Medium', 'Arial Unicode MS Regular'] }} paint={{ 'text-color': '#fff', 'text-halo-color': ['get', 'color'], 'text-halo-width': 2 }} />
+              <Layer id="route-labels" type="symbol"
+                layout={{
+                  'symbol-placement': 'line',
+                  'symbol-spacing': 220,
+                  'text-field': ['get', 'name'],
+                  'text-size': 14,
+                  'text-font': ['DIN Pro Bold', 'Arial Unicode MS Bold'],
+                  'text-allow-overlap': false,
+                  'text-padding': 4,
+                  'text-keep-upright': true,
+                }}
+                paint={{
+                  'text-color': '#ffffff',
+                  'text-halo-color': ['get', 'color'],
+                  'text-halo-width': 3,
+                  'text-halo-blur': 0.5,
+                }} />
             </Source>
           )}
 
