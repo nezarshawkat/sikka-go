@@ -246,25 +246,30 @@ const TripResult = () => {
                 );
               })}
 
-              {/* Popup for clicked segment */}
+              {/* Popup-like Marker for clicked segment */}
               {popupSeg && popupMid && (
-                <Popup latitude={popupMid[1]} longitude={popupMid[0]} anchor="top" onClose={() => setPopupSegIndex(null)} closeOnClick={false} maxWidth="280px">
-                  <div className="space-y-2 p-1">
-                    <div className="flex items-center gap-2">
-                      <div className="h-8 w-8 rounded-full flex items-center justify-center text-lg" style={{ backgroundColor: popupSeg.color + '20', border: `2px solid ${popupSeg.color}` }}>{getIcon(popupSeg.icon)}</div>
-                      <div>
-                        {popupSeg.line_number && <Badge variant="outline" style={{ borderColor: popupSeg.color, color: popupSeg.color }}>{popupSeg.line_number}</Badge>}
-                        <p className="text-sm font-semibold">{popupSeg.transport_name}</p>
+                <Marker latitude={popupMid[1]} longitude={popupMid[0]} anchor="bottom" offset={[0, -36]}>
+                  <div className="bg-card border rounded-lg shadow-xl p-3 w-64 text-foreground relative">
+                    <button onClick={() => setPopupSegIndex(null)} className="absolute top-1 right-1 h-5 w-5 rounded-full hover:bg-accent flex items-center justify-center">
+                      <X className="h-3 w-3" />
+                    </button>
+                    <div className="flex items-center gap-2 pr-5">
+                      <div className="h-8 w-8 rounded-full flex items-center justify-center text-lg shrink-0" style={{ backgroundColor: popupSeg.color + '20', border: `2px solid ${popupSeg.color}` }}>{getIcon(popupSeg.icon)}</div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1 flex-wrap">
+                          {popupSeg.line_number && <Badge variant="outline" className="text-[10px] h-4 px-1" style={{ borderColor: popupSeg.color, color: popupSeg.color }}>{popupSeg.line_number}</Badge>}
+                          <p className="text-sm font-semibold truncate">{popupSeg.transport_name}</p>
+                        </div>
                       </div>
                     </div>
-                    <p className="text-xs text-muted-foreground">{popupSeg.start_name} → {popupSeg.end_name}</p>
-                    <div className="flex items-center gap-3 text-xs">
+                    <p className="text-xs text-muted-foreground mt-2">{popupSeg.start_name} → {popupSeg.end_name}</p>
+                    <div className="flex items-center gap-3 text-xs mt-1">
                       <span>⏱ {Math.round(popupSeg.duration_minutes)} min</span>
                       <span>💰 {Math.round(popupSeg.cost_egp)} EGP</span>
                     </div>
-                    {popupSeg.info && <p className="text-[11px] text-muted-foreground border-t pt-1">{popupSeg.info}</p>}
+                    {popupSeg.info && <p className="text-[11px] text-muted-foreground border-t pt-1 mt-2">{popupSeg.info}</p>}
                   </div>
-                </Popup>
+                </Marker>
               )}
 
               <Marker latitude={plan.startLat} longitude={plan.startLng}>
