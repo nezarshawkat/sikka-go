@@ -9,6 +9,11 @@ export async function apiFetch<T = unknown>(
     ...(options.headers as Record<string, string>),
   };
 
+  const adminToken = localStorage.getItem("sikka_admin_token");
+  if (adminToken) {
+    headers["X-Admin-Token"] = adminToken;
+  }
+
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers,
