@@ -11,7 +11,8 @@ import tripsRouter from "./trips";
 import heatmapsRouter from "./heatmaps";
 import analyticsRouter from "./analytics";
 import tripPlanRouter from "./tripPlan";
-import seedCairoTransitRouter from "./seedCairoTransit";
+import seedCairoRouter from "./seedCairo";
+import seedAlexandriaRouter from "./seedAlexandria";
 import { sessionAuth } from "../middlewares/sessionAuth";
 
 const router: IRouter = Router();
@@ -31,7 +32,15 @@ router.use("/mawaqef", mawaqefRouter);
 router.use("/heatmaps", heatmapsRouter);
 router.use("/reviews", reviewsRouter);
 router.use("/analytics", analyticsRouter);
-router.use("/admin/seed-cairo-transit", seedCairoTransitRouter);
+
+// Seed endpoints — admin-only, governorate-specific
+// POST /api/admin/seed-cairo              — Metro, Monorail, Train, NTA Bus, Serfis
+// POST /api/admin/seed-cairo?section=nta  — NTA Bus only
+// POST /api/admin/seed-cairo?generatePaths=true — also geocode + snap to roads
+// POST /api/admin/seed-alexandria         — Alexandria APTA routes
+// POST /api/admin/seed-alexandria?generatePaths=true
+router.use("/admin/seed-cairo", seedCairoRouter);
+router.use("/admin/seed-alexandria", seedAlexandriaRouter);
 
 // User-scoped routes
 router.use("/profile", profileRouter);

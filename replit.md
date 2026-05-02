@@ -68,13 +68,33 @@ All Drizzle columns use camelCase in JS/TS. API responses are camelCase.
 
 ### Transport Types
 
-- **Metro**: Fixed stop-pair routes (Lines 1, 2, 3) — heatmap not used
-- **Monorail**: Fixed stop-pair routes (East, West) — heatmap not used
-- **Train**: Fixed stop-pair routes (intercity) — heatmap not used
+- **Metro**: Fixed stop-pair routes (Lines 1, 2, 3)
+- **Monorail**: Fixed stop-pair routes (East, West)
+- **Train**: Fixed stop-pair routes (intercity)
+- **CTA Bus** (أتوبيس الهيئة): Government big buses, 13 EGP, board anywhere
+- **NTA Bus** (أتوبيس النقل الجماعي): Private mini-bus companies, 19–25 EGP, board anywhere — ~110 Cairo routes from March 2026 PDF
+- **Serfis** (السرفيس): Shared fixed-route taxis, ~10 EGP, board anywhere — 20 common Cairo routes
 - **Microbus**: Variable routes with via stops
 - **Tuktuk**: Heatmap-only (no fixed routes)
 - **White Taxi**: Heatmap-only (no fixed routes)
 - **Uber / Careem**: Always provided as fallback in AI trip plans
+
+### Seed Endpoints (admin only)
+
+| Endpoint | Description |
+|---|---|
+| `POST /api/admin/seed-cairo` | All Cairo types + Metro/Monorail/Train/NTA Bus/Serfis |
+| `POST /api/admin/seed-cairo?section=nta` | NTA Bus routes only |
+| `POST /api/admin/seed-cairo?section=serfis` | Serfis routes only |
+| `POST /api/admin/seed-cairo?generatePaths=true` | Also geocode + snap to roads via Mapbox |
+| `POST /api/admin/seed-alexandria` | Alexandria APTA routes (CTA Bus type, 31 routes) |
+| `POST /api/admin/seed-alexandria?generatePaths=true` | Also geocode + snap to roads |
+
+### Route Path Generation
+
+- Client-side: `buildPathFromLineText` in AdminMap.tsx — geocodes stops + Mapbox Directions snap-to-roads
+- Server-side: `artifacts/api-server/src/utils/routePathGenerator.ts` — same logic, used by seed endpoints with `?generatePaths=true`
+- All bus/serfis routes use `hasFixedStops: false` — users board/alight anywhere along the route
 
 ### Key Files
 
@@ -85,7 +105,9 @@ All Drizzle columns use camelCase in JS/TS. API responses are camelCase.
 - `artifacts/api-server/src/routes/auth.ts` — OTP send/verify/session/logout + admin-login
 - `artifacts/api-server/src/routes/index.ts` — All routes wired
 - `lib/db/src/schema/sikka.ts` — Full 14-table Drizzle schema
-- `artifacts/api-server/src/routes/seedCairoTransit.ts` — Transit seed data (metro/monorail/train individual stop pairs)
+- `artifacts/api-server/src/routes/seedCairo.ts` — Cairo seed: Metro/Monorail/Train/CTA Bus/NTA Bus (~110 routes)/Serfis
+- `artifacts/api-server/src/routes/seedAlexandria.ts` — Alexandria APTA 31 routes
+- `artifacts/api-server/src/utils/routePathGenerator.ts` — Server-side geocode + snap-to-roads
 
 ### Environment Variables / Secrets
 

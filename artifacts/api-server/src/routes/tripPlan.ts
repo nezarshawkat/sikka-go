@@ -20,68 +20,82 @@ router.post("/", requireAuth, async (req, res) => {
   const transportTypes = await db.select().from(transportTypesTable).where(eq(transportTypesTable.isActive, true));
   const transitLines   = await db.select().from(transitLinesTable).where(eq(transitLinesTable.isActive, true));
 
-  // White Taxi and Tuktuk are heatmap-only — never used as route segments
-  // CTA/PTA Bus is removed. Filter both out from route options.
+  // Heatmap-only types — never used as route segments
+  const HEATMAP_ONLY = ["white taxi", "tuktuk"];
   const routeTypes = transportTypes.filter(t => {
     const n = t.nameEn.toLowerCase();
-    return !n.includes("white taxi") && !n.includes("tuktuk") && !n.includes("cta") && !n.includes("public transport authority");
+    return !HEATMAP_ONLY.some(h => n.includes(h));
   });
 
-  const uberType  = transportTypes.find(t => t.nameEn.toLowerCase().includes("uber"));
-  const taxiEst   = Math.round(15 + distanceKm * (uberType?.pricePerKmEgp ?? 4));
+  const uberType = transportTypes.find(t => t.nameEn.toLowerCase().includes("uber"));
+  const taxiEst  = Math.round(15 + distanceKm * (uberType?.pricePerKmEgp ?? 4));
 
   const transportContext = routeTypes.map(t =>
     `- ${t.nameEn} (${t.nameAr}): base ${t.basePriceEgp} EGP + ${t.pricePerKmEgp} EGP/km, speed ${t.averageSpeedKmh} km/h`
   ).join("\n");
 
-  // Gather metro/monorail/train lines as individual stop pairs
+  // Fixed-stop lines (Metro / Monorail / Train) — for AI chaining
   const fixedLines = transitLines
     .filter(l => {
       const type = routeTypes.find(t => t.id === l.transportTypeId);
-      return type && (
-        type.nameEn.toLowerCase().includes("metro") ||
-        type.nameEn.toLowerCase().includes("monorail") ||
-        type.nameEn.toLowerCase().includes("train")
-      );
+      if (!type) return false;
+      const n = type.nameEn.toLowerCase();
+      return n.includes("metro") || n.includes("monorail") || n.includes("train");
     })
     .slice(0, 60)
     .map(l => {
       const typeName = routeTypes.find(t => t.id === l.transportTypeId)?.nameEn ?? "Transit";
-      return `- [${typeName}] ${l.lineNumber}: ${l.fromArea} → ${l.toArea} (${l.priceEgp} EGP per segment)`;
+      return `- [${typeName}] ${l.lineNumber}: ${l.fromArea} → ${l.toArea} (${l.priceEgp} EGP)`;
     });
 
-  const microbusLines = transitLines
-    .filter(l => routeTypes.find(t => t.id === l.transportTypeId && t.nameEn.toLowerCase().includes("microbus")))
-    .slice(0, 20)
-    .map(l => `- Line ${l.lineNumber}: ${l.fromArea} → ${l.toArea} via ${(l.viaStops || []).slice(0, 3).join(", ")} (${l.priceEgp} EGP)`);
+  // Bus & Serfis lines passing near start/end areas (sample relevant ones)
+  const busLines = transitLines
+    .filter(l => {
+      const type = routeTypes.find(t => t.id === l.transportTypeId);
+      if (!type) return false;
+      const n = type.nameEn.toLowerCase();
+      return n.includes("bus") || n.includes("serfis") || n.includes("microbus");
+    })
+    .slice(0, 25)
+    .map(l => {
+      const typeName = routeTypes.find(t => t.id === l.transportTypeId)?.nameEn ?? "Bus";
+      const via = (l.viaStops ?? []).slice(0, 4).join(" → ");
+      return `- [${typeName}] Line ${l.lineNumber}: ${l.fromArea} → ${l.toArea}${via ? ` via ${via}` : ""} (${l.priceEgp} EGP)`;
+    });
 
-  const allLinesContext = [...fixedLines, ...microbusLines].join("\n");
+  const allLinesContext = [...fixedLines, ...busLines].join("\n");
   const isArabic = language === "ar";
 
-  const prompt = `You are an expert Cairo transit planner with deep knowledge of Cairo's streets, neighborhoods, and transport network. Plan the optimal trip in ${isArabic ? "Arabic" : "English"}.
+  const prompt = `You are an expert Cairo transit planner with deep local knowledge. Plan the optimal trip in ${isArabic ? "Arabic" : "English"}.
 
-KEY RULES — follow these exactly:
-1. ALL place names refer to Cairo (القاهرة), Egypt unless stated otherwise. Never confuse similar names from other cities.
-2. Use real geography: Heliopolis/Masr El Gedida is northeast Cairo, Maadi is south, Dokki/Mohandessin is west, Downtown is center. DO NOT place a location where it does not belong.
-3. ALWAYS include Uber/Careem as the fallback if no transit route covers a gap (estimated ~${taxiEst} EGP total).
-4. Fill short gaps (<600m) with walking. Fill 600m–3km gaps with tuktuk (~5–15 EGP) if budget is tight, or Uber/Careem otherwise.
-5. Budget priority: economic = bus/microbus first, metro second; comfortable = metro preferred; premium = Uber/Careem preferred.
-6. Plan segments that cover the COMPLETE journey from start to end — no missing gaps.
-7. Coincident routes: if two routes overlap your path, prefer the one that takes you furthest toward the destination.
-8. The metro, monorail, and train run on fixed stops. Chain their stop-pair segments together to build the full ride.
-9. Microbus and bus fares: flat fare 3–13 EGP depending on distance. Metro: 10–20 EGP per trip (zone-based). Uber/Careem: ~${taxiEst} EGP estimated.
-10. White Taxi is heatmap-only — never suggest it as a route. Use "Uber / Careem" for app-based taxis.
+KEY RULES — follow exactly:
+1. ALL places refer to Cairo (القاهرة), Egypt unless stated otherwise.
+2. Use real Cairo geography: Heliopolis/Masr El Gedida is northeast, Maadi is south, Dokki/Mohandessin is west, Downtown is center, New Cairo/5th Settlement is east.
+3. ALWAYS include Uber/Careem as a fallback alternative (~${taxiEst} EGP total for the full trip).
+4. Fill gaps <600 m with walking. Fill 600 m–3 km gaps with Serfis or Microbus (~5–10 EGP) or Uber.
+5. Budget priority: economic = NTA Bus/Serfis first, metro second; comfortable = metro preferred; premium = Uber/Careem.
+6. Plan segments covering the COMPLETE journey — no missing gaps.
+7. Coincident routes: prefer the route that takes the passenger furthest toward the destination.
+8. Metro and Monorail run on fixed stops — chain their stop-pair segments to build the full ride.
+9. NTA Bus (شركات النقل الجماعي): passengers board/alight anywhere along the route (not fixed stops). Price 19–25 EGP.
+10. CTA Bus (هيئة): big government buses, slower, price 13 EGP, board anywhere.
+11. Serfis (السرفيس): shared taxi on a fixed route, price ~10 EGP, fast, board anywhere.
+12. White Taxi is heatmap-only — NEVER suggest it. Use "Uber / Careem" for app-based taxis.
+13. Alexandria routes (ALEX-*) are only relevant if the trip destination is in Alexandria.
 
 Trip details:
 - Distance: ${distanceKm.toFixed(1)} km
-- Trip type: ${tripType} (economic = cheapest, comfortable = balanced, premium = fastest)
+- Trip type: ${tripType}
 - Budget: ${budget ? budget + " EGP" : "flexible"}
 
-Available transport modes:
-${transportContext || `- Microbus: 3 EGP, fast and common\n- Metro: 10–20 EGP, very fast\n- Uber/Careem: ~${taxiEst} EGP`}
+Available transport types:
+${transportContext}
 
-Fixed-stop transit lines in the database (chain these for metro/monorail/train rides):
-${allLinesContext || "(No fixed lines — use Cairo transit knowledge and Uber/Careem as fallback)"}
+Fixed-stop transit lines (Metro/Monorail/Train — chain segments for full route):
+${fixedLines.join("\n") || "(none loaded)"}
+
+Bus/Serfis/Microbus lines (passengers board anywhere on these routes):
+${busLines.join("\n") || "(none loaded — use Cairo transit knowledge)"}
 
 Return a JSON object with EXACTLY this structure (no markdown, no extra keys):
 {
@@ -89,15 +103,15 @@ Return a JSON object with EXACTLY this structure (no markdown, no extra keys):
     {
       "transport_type_id": "metro",
       "transport_name": "Cairo Metro – Line 2",
-      "start_name": "Station or area name in ${isArabic ? "Arabic" : "English"}",
-      "end_name": "Station or area name in ${isArabic ? "Arabic" : "English"}",
+      "start_name": "Station or area in ${isArabic ? "Arabic" : "English"}",
+      "end_name": "Station or area in ${isArabic ? "Arabic" : "English"}",
       "cost_egp": 10,
       "duration_minutes": 12,
       "color": "#8B5CF6",
       "icon": "metro",
       "line_id": null,
       "line_number": "M2",
-      "info": "Board at [station]. Exit at [station]. Platform: [direction].",
+      "info": "Board at [stop/area]. Alight at [stop/area]. [Directions for passenger.]",
       "route_geometry": null,
       "alternatives": [
         { "transport_type_id": "car", "transport_name": "Uber / Careem", "cost_egp": ${taxiEst}, "duration_minutes": ${Math.round(distanceKm * 2.5)}, "color": "#06B6D4", "icon": "car" }
@@ -110,16 +124,14 @@ Return a JSON object with EXACTLY this structure (no markdown, no extra keys):
   "distance_km": ${distanceKm.toFixed(1)}
 }
 
-Icon values: bus, metro, train, car, bike (tuktuk), walk, monorail.
+Icon values: bus, metro, train, car, bike, walk, monorail.
 Plan 1–5 segments. Return ONLY valid JSON.`;
 
   try {
     const apiKey = process.env.OPENAI_API_KEY;
     const baseUrl = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
 
-    if (!apiKey) {
-      return res.json(generateFallbackPlan(distanceKm, tripType, taxiEst));
-    }
+    if (!apiKey) return res.json(generateFallbackPlan(distanceKm, tripType, taxiEst));
 
     const response = await fetch(`${baseUrl}/chat/completions`, {
       method: "POST",
@@ -150,18 +162,14 @@ function generateFallbackPlan(distanceKm: number, tripType: string, taxiEst: num
     cost_egp: taxiEst, duration_minutes: Math.round(distanceKm * 2.5),
     color: "#06B6D4", icon: "car",
   };
-
   const segments = tripType === "premium"
-    ? [{ transport_type_id: "car", transport_name: "Uber / Careem", start_name: "Your Location", end_name: "Destination", cost_egp: taxiEst, duration_minutes: Math.round(distanceKm * 2.5), color: "#06B6D4", icon: "car", line_id: null, line_number: "", info: "Open Uber or Careem app. Show the driver your destination on the map.", route_geometry: null, alternatives: [] }]
+    ? [{ transport_type_id: "car", transport_name: "Uber / Careem", start_name: "Your Location", end_name: "Destination", cost_egp: taxiEst, duration_minutes: Math.round(distanceKm * 2.5), color: "#06B6D4", icon: "car", line_id: null, line_number: "", info: "Open Uber or Careem app and enter your destination.", route_geometry: null, alternatives: [] }]
     : tripType === "economic"
-    ? [
-        { transport_type_id: "bus", transport_name: "Microbus", start_name: "Your Location", end_name: "Near Destination", cost_egp: Math.min(13, Math.round(3 + distanceKm * 0.8)), duration_minutes: Math.round(distanceKm * 3.5), color: "#10B981", icon: "bus", line_id: null, line_number: "", info: "Ask any microbus driver for your destination area — they run fixed routes. If unavailable, use Uber/Careem.", route_geometry: null, alternatives: [taxiAlt] },
-      ]
+    ? [{ transport_type_id: "bus", transport_name: "NTA Bus / Serfis", start_name: "Your Location", end_name: "Near Destination", cost_egp: 19, duration_minutes: Math.round(distanceKm * 3.5), color: "#2563EB", icon: "bus", line_id: null, line_number: "", info: "Ask any bus or serfis driver for your destination area. Price 19–25 EGP.", route_geometry: null, alternatives: [taxiAlt] }]
     : [
-        { transport_type_id: "metro", transport_name: "Cairo Metro", start_name: "Your Location", end_name: "Nearest Metro Station", cost_egp: 10, duration_minutes: Math.round(distanceKm * 2), color: "#8B5CF6", icon: "metro", line_id: null, line_number: "", info: "Buy ticket at station kiosk (10–20 EGP). Fastest option in Cairo.", route_geometry: null, alternatives: [taxiAlt] },
-        { transport_type_id: "bus", transport_name: "Microbus", start_name: "Metro Station Exit", end_name: "Destination", cost_egp: 5, duration_minutes: Math.round(distanceKm * 1.5), color: "#10B981", icon: "bus", line_id: null, line_number: "", info: "Take a microbus or tuktuk for the final leg.", route_geometry: null, alternatives: [] },
+        { transport_type_id: "metro", transport_name: "Cairo Metro", start_name: "Nearest Metro Station", end_name: "Closest Station to Destination", cost_egp: 10, duration_minutes: Math.round(distanceKm * 2), color: "#8B5CF6", icon: "metro", line_id: null, line_number: "", info: "Buy ticket at station kiosk (10–20 EGP). Fastest option in Cairo.", route_geometry: null, alternatives: [taxiAlt] },
+        { transport_type_id: "bus", transport_name: "Serfis / Microbus", start_name: "Metro Station Exit", end_name: "Destination", cost_egp: 10, duration_minutes: Math.round(distanceKm * 1.5), color: "#16A34A", icon: "bus", line_id: null, line_number: "", info: "Take a serfis or microbus for the final leg (~10 EGP).", route_geometry: null, alternatives: [] },
       ];
-
   const totalCost = segments.reduce((s, seg) => s + seg.cost_egp, 0);
   const totalTime = segments.reduce((s, seg) => s + seg.duration_minutes, 0);
   return { segments, total_cost_egp: totalCost, total_duration_minutes: totalTime, budget_range: { min: Math.round(totalCost * 0.8), max: Math.round(totalCost * 1.3) }, distance_km: parseFloat(distanceKm.toFixed(1)) };
