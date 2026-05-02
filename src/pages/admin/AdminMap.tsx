@@ -464,7 +464,23 @@ const AdminMap = () => {
           {routesGeoJSON.features.length > 0 && (
             <Source id="routes" type="geojson" data={routesGeoJSON}>
               <Layer id="route-lines" type="line" paint={{ 'line-color': ['get', 'color'], 'line-width': ['case', ['==', ['get', 'selected'], 1], 6, 3], 'line-opacity': ['case', ['==', ['get', 'selected'], 1], 1, 0.78] }} />
-              <Layer id="route-labels" type="symbol" layout={{ 'symbol-placement': 'line-center', 'text-field': ['get', 'name'], 'text-size': 11, 'text-font': ['DIN Pro Medium', 'Arial Unicode MS Regular'] }} paint={{ 'text-color': '#fff', 'text-halo-color': ['get', 'color'], 'text-halo-width': 2 }} />
+              <Layer id="route-labels" type="symbol"
+                layout={{
+                  'symbol-placement': 'line',
+                  'symbol-spacing': 220,
+                  'text-field': ['get', 'name'],
+                  'text-size': 14,
+                  'text-font': ['DIN Pro Bold', 'Arial Unicode MS Bold'],
+                  'text-allow-overlap': false,
+                  'text-padding': 4,
+                  'text-keep-upright': true,
+                }}
+                paint={{
+                  'text-color': '#ffffff',
+                  'text-halo-color': ['get', 'color'],
+                  'text-halo-width': 3,
+                  'text-halo-blur': 0.5,
+                }} />
             </Source>
           )}
 
@@ -509,8 +525,9 @@ const AdminMap = () => {
             return (
               <Marker key={`icon-${line.id}`} latitude={mid[1]} longitude={mid[0]}>
                 <button onClick={e => { e.stopPropagation(); setDetailLine(line); setSelectedLine(line); }} className="group">
-                  <div className="h-7 w-7 rounded-full flex items-center justify-center text-xs shadow-lg border-2 border-background group-hover:scale-125 transition-transform" style={{ backgroundColor: color }}>
-                    {ICONS[tt?.icon || 'bus']}
+                  <div className="flex items-center gap-1 pl-0.5 pr-2 py-0.5 rounded-full shadow-lg border-2 border-background group-hover:scale-110 transition-transform" style={{ backgroundColor: color }}>
+                    <div className="h-6 w-6 rounded-full flex items-center justify-center text-xs bg-background/20">{ICONS[tt?.icon || 'bus']}</div>
+                    <span className="text-[11px] font-bold text-white whitespace-nowrap">{line.line_number || tt?.name_en?.slice(0, 6)}</span>
                   </div>
                 </button>
               </Marker>
@@ -549,7 +566,17 @@ const AdminMap = () => {
                   <div className="flex justify-between"><span className="text-muted-foreground">Stops</span><span>{detailLine.has_fixed_stops ? 'Fixed stops' : 'Stop anywhere'}</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">Map</span><span>{getLineGeometry(detailLine) ? 'Visible route path' : 'Generating from stops'}</span></div>
                 </div>
-                <DialogFooter className="gap-2">
+                <DialogFooter className="gap-2 flex-wrap">
+                  <Button variant="outline" size="sm" className="gap-1" onClick={async () => {
+                    toast.info('Regenerating path along real streets...');
+                    const path = await buildPathFromLineText(detailLine);
+                    if (!path) { toast.error('Could not geocode the stops — add more via stops'); return; }
+                    const { error } = await supabase.from('transit_lines').update({ route_path: path }).eq('id', detailLine.id);
+                    if (error) { toast.error(error.message); return; }
+                    toast.success('Path regenerated and snapped to roads');
+                    setGeneratedPaths(prev => ({ ...prev, [detailLine.id]: path }));
+                    fetchData();
+                  }}><RouteIcon className="h-3 w-3" /> Regenerate path</Button>
                   <Button variant="outline" size="sm" className="gap-1" onClick={() => { setDetailLine(null); openEditForm(detailLine); }}><Pencil className="h-3 w-3" /> Edit</Button>
                   <Button variant="destructive" size="sm" className="gap-1" onClick={() => deleteLine(detailLine.id)}><Trash2 className="h-3 w-3" /> Delete</Button>
                 </DialogFooter>

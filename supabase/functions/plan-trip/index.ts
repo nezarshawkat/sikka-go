@@ -13,6 +13,16 @@ function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+// Distance from a point to a line's nearest coordinate (km)
+function nearestPointOnPath(lat: number, lng: number, coords: [number, number][]): { dist: number; point: [number, number] } {
+  let best = { dist: Infinity, point: coords[0] as [number, number] };
+  for (const c of coords) {
+    const d = haversineKm(lat, lng, c[1], c[0]);
+    if (d < best.dist) best = { dist: d, point: c };
+  }
+  return best;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -35,50 +45,77 @@ Deno.serve(async (req) => {
 
     const [ttRes, tlRes] = await Promise.all([
       supabase.from('transport_types').select('*').eq('is_active', true),
-      supabase.from('transit_lines').select('id, transport_type_id, line_number, from_area, to_area, via_stops, price_egp, has_fixed_stops').eq('is_active', true),
+      supabase.from('transit_lines').select('id, transport_type_id, line_number, name_en, from_area, to_area, via_stops, route_path, price_egp, has_fixed_stops').eq('is_active', true),
     ]);
 
     const transportTypes = ttRes.data || [];
     const transitLines = tlRes.data || [];
+
+    // Filter to ONLY lines whose path comes within ~3km of either start or end (i.e. actually relevant)
+    const RELEVANCE_KM = 3.5;
+    const relevantLines = transitLines
+      .map((l: any) => {
+        const coords: [number, number][] = l.route_path?.coordinates || [];
+        if (!coords.length) return null;
+        const fromStart = nearestPointOnPath(startLat, startLng, coords);
+        const fromEnd = nearestPointOnPath(endLat, endLng, coords);
+        const minRelevance = Math.min(fromStart.dist, fromEnd.dist);
+        if (minRelevance > RELEVANCE_KM) return null;
+        return {
+          ...l,
+          board_distance_km: fromStart.dist,
+          alight_distance_km: fromEnd.dist,
+          board_point: fromStart.point,
+          alight_point: fromEnd.point,
+        };
+      })
+      .filter(Boolean)
+      .sort((a: any, b: any) => (a.board_distance_km + a.alight_distance_km) - (b.board_distance_km + b.alight_distance_km))
+      .slice(0, 30);
 
     const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
     if (!LOVABLE_API_KEY) throw new Error('LOVABLE_API_KEY not configured');
 
     const systemPrompt = `You are an Egyptian transportation route planner AI.
 
-CRITICAL RULES:
-1. Route MUST be fully connected from start to destination. Each segment's end must connect to next segment's start.
-2. If walking is needed to reach nearest transport, add a walking segment (icon: "walk", cost: 0), but walking must NEVER exceed 15 minutes per segment.
-3. If a gap would require more than 15 minutes walking, replace that gap with the cheapest available vehicle that completes it (microbus/tuk-tuk inside neighborhoods, bus near lines, or taxi app when no economic option exists).
-4. For economic trips: prefer tuk-tuk, public buses (النقل الجماعي, هيئة النقل العام), microbus.
-5. For comfortable: prefer metro, monorail, CTA bus, white taxi.
-6. For premium: prefer Uber/Careem, train, aeroplane.
-6. Tuk-tuks ONLY operate in residential neighborhoods, NOT highways or between cities.
-7. Microbuses operate on semi-fixed routes, riders board from anywhere on the path.
-8. Metro only in Cairo (3 lines). Monorail connects 6th October and New Capital.
-9. Governmental transport (metro, train, monorail, aeroplane, cruise) has FIXED stops only.
-10. All other transport (bus, microbus, tuk-tuk) can be boarded from anywhere along the route.
+ABSOLUTE RULES (violating any of them = bad plan):
+1. The route MUST be FULLY CONNECTED from start point to destination — no gaps.
+2. You may ONLY pick a transit line from the "RELEVANT TRANSIT LINES" list below. NEVER invent a bus number, NEVER use a line that does not appear in that list.
+3. For each transit segment, set transport_name to "<TYPE> <LINE_NUMBER>" (e.g. "هيئة النقل العام 24" or "Metro M1") AND set line_number = the line_number from the list AND set line_id = the database id of the line.
+4. Walking segments MUST be ≤ 10 minutes (≈ 800 m). If a gap is bigger than that, you MUST insert another transit line from the list (or a tuk-tuk / taxi if no listed line covers it). Never produce a walking segment longer than 10 minutes.
+5. Force-complete the route to the destination EVEN IF the total cost exceeds the user's budget. Get as close to budget as possible but never leave the trip incomplete.
+6. The first segment must start at the user's start coordinates, the last segment must end at the destination coordinates. Each segment's end must equal the next segment's start (same name).
+7. Tuk-tuks ONLY operate inside residential neighborhoods. Microbuses use semi-fixed routes. Metro/monorail/train/plane use FIXED stops only.
+8. For "economic" prefer: tuk-tuk, public buses (النقل الجماعي / هيئة النقل العام), microbus.
+   For "comfortable" prefer: metro, monorail, CTA bus, white taxi.
+   For "premium" prefer: Uber/Careem, train, aeroplane.
 
-Taxi pricing:
-- White taxi: 10 EGP base + 3.5 EGP/km
-- Uber/Careem: 15 EGP base + 4.5 EGP/km × surge (1.0-2.5)
+Taxi pricing fallback: White taxi 10 + 3.5/km · Uber/Careem 15 + 4.5/km × surge (1.0–2.5).
 
-Available transit lines in database (use these when relevant):
-${JSON.stringify(transitLines.slice(0, 50).map(l => ({ id: l.id, type_id: l.transport_type_id, num: l.line_number, from: l.from_area, to: l.to_area, price: l.price_egp })), null, 1)}
+RELEVANT TRANSIT LINES (these are the ONLY transit lines you may name in this trip):
+${JSON.stringify(relevantLines.map((l: any) => ({
+  line_id: l.id,
+  type_id: l.transport_type_id,
+  line_number: l.line_number,
+  name: l.name_en,
+  from: l.from_area,
+  to: l.to_area,
+  price_egp: l.price_egp,
+  walk_to_board_km: +l.board_distance_km.toFixed(2),
+  walk_from_alight_km: +l.alight_distance_km.toFixed(2),
+})), null, 1)}
 
-Use the database line prices exactly when selecting a known line. Do not inflate suggested money above the selected segments' real total unless it is a small safety buffer.
-
-Return JSON via create_trip_plan. ENSURE route is COMPLETE and CONNECTED with walking segments where needed, and every walking segment is 15 minutes or less.`;
+Use the listed price exactly. If NO line is relevant, fall back to taxi/microbus and clearly say "no fixed line available".`;
 
     const userPrompt = `Plan a ${tripType} trip:
-- Start: ${startLat}, ${startLng}
-- End: ${endLat}, ${endLng}
-- Distance: ${distanceKm.toFixed(1)} km
-- Budget: ${budget ? budget + ' EGP' : 'not specified'}
+- Start coordinates: ${startLat}, ${startLng}
+- End coordinates: ${endLat}, ${endLng}
+- Straight-line distance: ${distanceKm.toFixed(1)} km
+- Budget: ${budget ? budget + ' EGP (target — exceed if needed to complete the trip)' : 'not specified'}
 - Language: ${language || 'en'}
 
 Transport types:
-${JSON.stringify(transportTypes.map(t => ({ id: t.id, name: t.name_en, speed: t.average_speed_kmh, base_price: t.base_price_egp, price_per_km: t.price_per_km_egp, service_level: t.service_level })), null, 1)}`;
+${JSON.stringify(transportTypes.map((t: any) => ({ id: t.id, name: t.name_en, speed: t.average_speed_kmh, base_price: t.base_price_egp, price_per_km: t.price_per_km_egp, service_level: t.service_level })), null, 1)}`;
 
     const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
@@ -93,7 +130,7 @@ ${JSON.stringify(transportTypes.map(t => ({ id: t.id, name: t.name_en, speed: t.
           type: 'function',
           function: {
             name: 'create_trip_plan',
-            description: 'Create a complete connected trip plan with walking segments where needed',
+            description: 'Create a complete connected trip plan with walking segments ≤ 10 min and named line numbers',
             parameters: {
               type: 'object',
               properties: {
@@ -103,7 +140,10 @@ ${JSON.stringify(transportTypes.map(t => ({ id: t.id, name: t.name_en, speed: t.
                     type: 'object',
                     properties: {
                       transport_type_id: { type: 'string' },
-                      transport_name: { type: 'string' },
+                      transport_name: { type: 'string', description: 'Display name including the route number, e.g. "هيئة النقل العام 24"' },
+                      line_id: { type: 'string', description: 'database id of the transit line, or empty for walking/taxi' },
+                      line_number: { type: 'string', description: 'Route/line number, or empty for walking/taxi' },
+                      info: { type: 'string', description: 'Short rider info: where to board, frequency, fare details' },
                       start_name: { type: 'string' },
                       end_name: { type: 'string' },
                       cost_egp: { type: 'number' },
@@ -115,6 +155,7 @@ ${JSON.stringify(transportTypes.map(t => ({ id: t.id, name: t.name_en, speed: t.
                           properties: {
                             transport_type_id: { type: 'string' },
                             transport_name: { type: 'string' },
+                            line_number: { type: 'string' },
                             cost_egp: { type: 'number' },
                             duration_minutes: { type: 'number' },
                           },
@@ -157,17 +198,26 @@ ${JSON.stringify(transportTypes.map(t => ({ id: t.id, name: t.name_en, speed: t.
     }
 
     const enrichedSegments = plan.segments.map((seg: any) => {
-      const tt = transportTypes.find(t => t.id === seg.transport_type_id);
-      // Walking segments
-      if (seg.transport_name?.toLowerCase().includes('walk') || seg.icon === 'walk') {
-        return { ...seg, color: '#9CA3AF', icon: 'walk', alternatives: seg.alternatives || [] };
+      const tt = transportTypes.find((t: any) => t.id === seg.transport_type_id);
+      const isWalk = seg.transport_name?.toLowerCase().includes('walk') || seg.icon === 'walk' || tt?.icon === 'walk';
+      // Look up the line geometry if line_id provided
+      const line = seg.line_id ? transitLines.find((l: any) => l.id === seg.line_id) : null;
+      const route_geometry = line?.route_path?.coordinates || null;
+      // Cap walking at 10 min in display (safety net — shouldn't trigger if AI obeyed)
+      const cappedDuration = isWalk ? Math.min(Number(seg.duration_minutes || 0), 10) : Number(seg.duration_minutes || 0);
+      if (isWalk) {
+        return { ...seg, color: '#9CA3AF', icon: 'walk', duration_minutes: cappedDuration, alternatives: seg.alternatives || [], line_number: '', info: seg.info || `Walk ${Math.round(cappedDuration)} min` };
       }
       return {
         ...seg,
         color: tt?.color || '#3B82F6',
         icon: tt?.icon || 'bus',
+        line_id: seg.line_id || null,
+        line_number: seg.line_number || line?.line_number || '',
+        info: seg.info || (line ? `${tt?.name_en} ${line.line_number}: ${line.from_area} → ${line.to_area}. ${line.price_egp} EGP.` : `${tt?.name_en || 'Transit'} segment`),
+        route_geometry,
         alternatives: (seg.alternatives || []).map((alt: any) => {
-          const altTt = transportTypes.find(t => t.id === alt.transport_type_id);
+          const altTt = transportTypes.find((t: any) => t.id === alt.transport_type_id);
           return { ...alt, color: altTt?.color || '#6366F1', icon: altTt?.icon || 'bus' };
         }),
       };
