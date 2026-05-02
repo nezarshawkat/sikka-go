@@ -374,7 +374,7 @@ router.post("/", requireAdmin, async (req, res) => {
         isActive: true,
         frequencyMinutes: line.freq,
         hasFixedStops: line.hasFixedStops,
-        routePath: routePath as unknown as null,
+        routePath: routePath,
       });
       results.push(`Seeded: ${line.lineNum}${generatePaths && routePath ? " ✓path" : ""}`);
     }

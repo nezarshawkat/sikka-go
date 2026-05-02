@@ -100,7 +100,7 @@ router.post("/", requireAdmin, async (req, res) => {
         fromArea, toArea, viaStops,
         priceEgp: 13, isActive: true,
         frequencyMinutes: 15, hasFixedStops: false,
-        routePath: routePath as unknown as null,
+        routePath: routePath,
       });
       results.push(`Seeded: Alex Line ${line.n}${generatePaths && routePath ? " (with path)" : ""}`);
     }

@@ -47,7 +47,7 @@ export const transitLinesTable = pgTable("transit_lines", {
   fromArea: text("from_area").notNull(),
   toArea: text("to_area").notNull(),
   viaStops: text("via_stops").array().notNull().default([]),
-  routePath: jsonb("route_path"),
+  routePath: jsonb("route_path").$type<{ type: string; coordinates: [number, number][] } | null>(),
   priceEgp: real("price_egp").notNull().default(5),
   frequencyMinutes: integer("frequency_minutes"),
   hasFixedStops: boolean("has_fixed_stops").notNull().default(false),
