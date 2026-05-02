@@ -9,7 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, Clock, Wallet, MapPin, RefreshCw, Check, Navigation, X, Info, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
-import Map, { Source, Layer, Marker, Popup } from 'react-map-gl';
+import Map, { Source, Layer, Marker } from 'react-map-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
