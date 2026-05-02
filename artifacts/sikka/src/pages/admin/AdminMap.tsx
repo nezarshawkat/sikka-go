@@ -119,6 +119,8 @@ const AdminMap = () => {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const tuktukType = transportTypes.find(t => t.nameEn.toLowerCase().includes('tuk'));
+  const whiteTaxiType = transportTypes.find(t => t.nameEn.toLowerCase().includes('white taxi'));
+  const heatmapOnlyTypes = [tuktukType, whiteTaxiType].filter(Boolean);
   const selectedStation = mawaqef.find(s => s.id === activeStationId);
 
   const geocodeStop = useCallback(async (stop: string): Promise<[number, number] | null> => {
@@ -224,10 +226,11 @@ const AdminMap = () => {
     })),
   };
 
+  const heatmapTypeIds = heatmapOnlyTypes.map(t => t!.id);
   const heatmapGeoJSON = {
     type: 'FeatureCollection' as const,
     features: heatmapData
-      .filter(h => tuktukType && h.transportTypeId === tuktukType.id)
+      .filter(h => heatmapTypeIds.includes(h.transportTypeId))
       .map(h => ({ type: 'Feature' as const, properties: { intensity: h.intensity }, geometry: { type: 'Point' as const, coordinates: [h.longitude, h.latitude] } })),
   };
 
@@ -243,10 +246,14 @@ const AdminMap = () => {
   };
 
   const addHeatPoint = async (lng: number, lat: number) => {
-    if (!tuktukType) return;
+    const heatTypeId = (whiteTaxiType && activeTypeId === whiteTaxiType.id)
+      ? whiteTaxiType.id
+      : tuktukType?.id;
+    if (!heatTypeId) return;
     try {
-      await api.post('/heatmaps', { transportTypeId: tuktukType.id, longitude: lng, latitude: lat, intensity: 0.75, radiusKm: 1.5 });
-      toast.success('Tuk-tuk heat point added');
+      const typeName = transportTypes.find(t => t.id === heatTypeId)?.nameEn || 'Heat point';
+      await api.post('/heatmaps', { transportTypeId: heatTypeId, longitude: lng, latitude: lat, intensity: 0.75, radiusKm: 1.5 });
+      toast.success(`${typeName} heat point added`);
       fetchData();
     } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Failed to add heat point'); }
   };
@@ -277,10 +284,11 @@ const AdminMap = () => {
   }, [isDrawing, isHeatmapEditing, transitLines]);
 
   const openNewForm = () => {
-    if (activeTypeId !== 'all' && activeTypeId === tuktukType?.id) {
+    if (activeTypeId !== 'all' && heatmapOnlyTypes.some(t => t?.id === activeTypeId)) {
       setShowHeatmap(true);
       setIsHeatmapEditing(true);
-      toast.info('Tuk-tuk is managed as editable heatmap zones, not fixed routes');
+      const typeName = transportTypes.find(t => t.id === activeTypeId)?.nameEn || 'This transport';
+      toast.info(`${typeName} is managed as editable heatmap zones, not fixed routes`);
       return;
     }
     setEditingLine(null);
@@ -318,8 +326,8 @@ const AdminMap = () => {
       toast.error('Fill required fields');
       return;
     }
-    if (formData.transportTypeId === tuktukType?.id) {
-      toast.error('Tuk-tuk uses the heatmap editor instead of route lines');
+    if (heatmapOnlyTypes.some(t => t?.id === formData.transportTypeId)) {
+      toast.error('This transport type uses the heatmap editor instead of fixed routes');
       return;
     }
 
@@ -469,10 +477,10 @@ const AdminMap = () => {
             </Select>
           </div>
 
-          {tuktukType && activeTypeId === tuktukType.id && (
+          {heatmapOnlyTypes.some(t => t?.id === activeTypeId) && (
             <div className="flex gap-2">
               <Button size="sm" variant={showHeatmap ? 'default' : 'outline'} className="h-9 gap-1 bg-card/95 backdrop-blur-sm" onClick={() => setShowHeatmap(!showHeatmap)}>
-                <Flame className="h-3.5 w-3.5" /> Tuk-tuk heatmap
+                <Flame className="h-3.5 w-3.5" /> {transportTypes.find(t => t.id === activeTypeId)?.nameEn || 'Heatmap'}
               </Button>
               <Button size="sm" variant={isHeatmapEditing ? 'destructive' : 'outline'} className="h-9 bg-card/95 backdrop-blur-sm" onClick={() => { setShowHeatmap(true); setIsHeatmapEditing(!isHeatmapEditing); }}>
                 {isHeatmapEditing ? 'Done editing' : 'Edit heatmap'}
@@ -534,7 +542,7 @@ const AdminMap = () => {
             </Source>
           )}
 
-          {showHeatmap && isHeatmapEditing && heatmapData.filter(h => tuktukType && h.transportTypeId === tuktukType.id).map(h => (
+          {showHeatmap && isHeatmapEditing && heatmapData.filter(h => heatmapTypeIds.includes(h.transportTypeId)).map(h => (
             <Marker key={h.id} latitude={h.latitude} longitude={h.longitude}>
               <button onClick={e => { e.stopPropagation(); deleteHeatPoint(h.id); }} className="h-7 w-7 rounded-full bg-destructive text-destructive-foreground text-xs shadow-lg border border-background">×</button>
             </Marker>
@@ -625,7 +633,7 @@ const AdminMap = () => {
           <div className="space-y-3">
             <Select value={formData.transportTypeId} onValueChange={value => setFormData(p => ({ ...p, transportTypeId: value }))}>
               <SelectTrigger className="h-9"><SelectValue placeholder="Select transport type..." /></SelectTrigger>
-              <SelectContent>{transportTypes.filter(tt => tt.id !== tuktukType?.id).map(tt => <SelectItem key={tt.id} value={tt.id}>{ICONS[tt.icon]} {tt.nameEn}</SelectItem>)}</SelectContent>
+              <SelectContent>{transportTypes.filter(tt => !heatmapOnlyTypes.some(h => h?.id === tt.id)).map(tt => <SelectItem key={tt.id} value={tt.id}>{ICONS[tt.icon]} {tt.nameEn}</SelectItem>)}</SelectContent>
             </Select>
             <Input placeholder="Line number (e.g. 356, M1)" value={formData.lineNumber} onChange={e => setFormData(p => ({ ...p, lineNumber: e.target.value }))} className="h-9 text-sm" />
             <Input placeholder="Name (EN)" value={formData.nameEn} onChange={e => setFormData(p => ({ ...p, nameEn: e.target.value }))} className="h-9 text-sm" />

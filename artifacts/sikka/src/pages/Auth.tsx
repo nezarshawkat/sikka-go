@@ -59,8 +59,10 @@ const Auth = () => {
     if (nextCountry) setSelectedCountry(nextCountry);
   };
 
-  const handleSelectLanguage = (lang: Language) => {
-    setLanguage(lang);
+  const [selectedLang, setSelectedLang] = useState<Language>('en');
+
+  const handleSelectLanguage = () => {
+    setLanguage(selectedLang);
     setStep('phone');
   };
 
@@ -146,20 +148,17 @@ const Auth = () => {
           <motion.div key="language" variants={slideVariants} initial="enter" animate="center" exit="exit" className="w-full max-w-sm">
             <Card>
               <CardHeader><CardTitle className="text-lg text-center">Select Language / اختر اللغة</CardTitle></CardHeader>
-              <CardContent className="space-y-3">
-                <Button
-                  className="w-full h-14 text-base font-semibold"
-                  onClick={() => handleSelectLanguage('en')}
+              <CardContent className="space-y-4">
+                <select
+                  value={selectedLang}
+                  onChange={(e) => setSelectedLang(e.target.value as Language)}
+                  className="flex h-14 w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
-                  🇬🇧 English
-                </Button>
-                <Button
-                  variant="outline"
-                  className="w-full h-14 text-base font-semibold"
-                  onClick={() => handleSelectLanguage('ar')}
-                  dir="rtl"
-                >
-                  🇪🇬 العربية
+                  <option value="en">🇬🇧 English</option>
+                  <option value="ar">🇪🇬 العربية</option>
+                </select>
+                <Button className="w-full h-12 text-base font-semibold" onClick={handleSelectLanguage}>
+                  {selectedLang === 'ar' ? 'التالي ←' : 'Next →'}
                 </Button>
               </CardContent>
             </Card>
