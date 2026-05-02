@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { t } from '@/lib/i18n';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
@@ -60,18 +60,15 @@ const TripPlan = () => {
   const handlePlanTrip = async () => {
     setIsPlanning(true);
     try {
-      const { data, error } = await supabase.functions.invoke('plan-trip', {
-        body: {
-          startLat, startLng,
-          endLat: destLat, endLng: destLng,
-          tripType,
-          budget: budget ? parseFloat(budget) : null,
-          language,
-        },
+      const data = await api.post('/trips/plan', {
+        startLat, startLng,
+        endLat: destLat, endLng: destLng,
+        tripType,
+        budget: budget ? parseFloat(budget) : null,
+        language,
       });
 
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
+      if (!data) throw new Error('No plan returned');
 
       sessionStorage.setItem('tripPlan', JSON.stringify({
         ...data,

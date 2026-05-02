@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/lib/api';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
@@ -10,22 +10,17 @@ const AdminReviews = () => {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const fetch = async () => {
-      const { data, error } = await supabase
-        .from('reviews')
-        .select('*')
-        .order('created_at', { ascending: false });
-      if (error) toast.error(error.message);
-      else setReviews(data || []);
-      setIsLoading(false);
-    };
-    fetch();
+    api.get('/reviews')
+      .then((data: any) => setReviews(data || []))
+      .catch((err: any) => toast.error(err.message))
+      .finally(() => setIsLoading(false));
   }, []);
 
   const deleteReview = async (id: string) => {
-    const { error } = await supabase.from('reviews').delete().eq('id', id);
-    if (error) toast.error(error.message);
-    else setReviews(prev => prev.filter(r => r.id !== id));
+    try {
+      await api.delete(`/reviews/${id}`);
+      setReviews(prev => prev.filter(r => r.id !== id));
+    } catch (err: any) { toast.error(err.message); }
   };
 
   if (isLoading) return <p className="text-muted-foreground text-sm">Loading...</p>;
@@ -44,7 +39,7 @@ const AdminReviews = () => {
               </div>
               {review.comment && <p className="text-sm text-foreground">{review.comment}</p>}
               <p className="text-xs text-muted-foreground mt-1">
-                {new Date(review.created_at).toLocaleDateString()}
+                {new Date(review.createdAt).toLocaleDateString()}
               </p>
             </div>
             <Button variant="ghost" size="icon" onClick={() => deleteReview(review.id)}>

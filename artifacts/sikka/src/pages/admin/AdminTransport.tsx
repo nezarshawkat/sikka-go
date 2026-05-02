@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { t } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
@@ -11,14 +11,14 @@ import { Plus } from 'lucide-react';
 
 interface TransportType {
   id: string;
-  name_en: string;
-  name_ar: string;
+  nameEn: string;
+  nameAr: string;
   icon: string;
-  average_speed_kmh: number;
-  base_price_egp: number;
-  price_per_km_egp: number;
-  is_active: boolean;
-  foreigner_allowed: boolean;
+  averageSpeedKmh: number;
+  basePriceEgp: number;
+  pricePerKmEgp: number;
+  isActive: boolean;
+  foreignerAllowed: boolean;
   color: string;
 }
 
@@ -28,35 +28,31 @@ const AdminTransport = () => {
   const [isLoading, setIsLoading] = useState(true);
 
   const fetchTypes = async () => {
-    const { data, error } = await supabase.from('transport_types').select('*').order('name_en');
-    if (error) toast.error(error.message);
-    else setTypes(data || []);
+    try {
+      const data = await api.get('/transport-types');
+      setTypes(data || []);
+    } catch (err: any) { toast.error(err.message); }
     setIsLoading(false);
   };
 
   useEffect(() => { fetchTypes(); }, []);
 
   const updateType = async (id: string, updates: Partial<TransportType>) => {
-    const { error } = await supabase.from('transport_types').update(updates).eq('id', id);
-    if (error) toast.error(error.message);
-    else {
+    try {
+      await api.put(`/transport-types/${id}`, updates);
       setTypes(prev => prev.map(tt => tt.id === id ? { ...tt, ...updates } : tt));
       toast.success('Updated');
-    }
+    } catch (err: any) { toast.error(err.message); }
   };
 
   const addType = async () => {
-    const { error } = await supabase.from('transport_types').insert({
-      name_en: 'New Transport',
-      name_ar: 'مواصلات جديدة',
-      icon: 'bus',
-      average_speed_kmh: 30,
-      base_price_egp: 5,
-      price_per_km_egp: 1,
-      color: '#3B82F6',
-    });
-    if (error) toast.error(error.message);
-    else fetchTypes();
+    try {
+      const row = await api.post('/transport-types', {
+        nameEn: 'New Transport', nameAr: 'مواصلات جديدة',
+        icon: 'bus', averageSpeedKmh: 30, basePriceEgp: 5, pricePerKmEgp: 1, color: '#3B82F6',
+      });
+      setTypes(prev => [...prev, row]);
+    } catch (err: any) { toast.error(err.message); }
   };
 
   if (isLoading) return <p className="text-muted-foreground text-sm">Loading...</p>;
@@ -75,18 +71,18 @@ const AdminTransport = () => {
               <div>
                 <label className="text-xs text-muted-foreground">Name (EN)</label>
                 <Input
-                  value={tt.name_en}
-                  onChange={(e) => setTypes(prev => prev.map(t => t.id === tt.id ? { ...t, name_en: e.target.value } : t))}
-                  onBlur={() => updateType(tt.id, { name_en: tt.name_en })}
+                  value={tt.nameEn}
+                  onChange={(e) => setTypes(prev => prev.map(t => t.id === tt.id ? { ...t, nameEn: e.target.value } : t))}
+                  onBlur={() => updateType(tt.id, { nameEn: tt.nameEn })}
                   className="text-sm"
                 />
               </div>
               <div>
                 <label className="text-xs text-muted-foreground">Name (AR)</label>
                 <Input
-                  value={tt.name_ar}
-                  onChange={(e) => setTypes(prev => prev.map(t => t.id === tt.id ? { ...t, name_ar: e.target.value } : t))}
-                  onBlur={() => updateType(tt.id, { name_ar: tt.name_ar })}
+                  value={tt.nameAr}
+                  onChange={(e) => setTypes(prev => prev.map(t => t.id === tt.id ? { ...t, nameAr: e.target.value } : t))}
+                  onBlur={() => updateType(tt.id, { nameAr: tt.nameAr })}
                   className="text-sm"
                   dir="rtl"
                 />
@@ -97,9 +93,9 @@ const AdminTransport = () => {
                 <label className="text-xs text-muted-foreground">{t('speed', language)}</label>
                 <Input
                   type="number"
-                  value={tt.average_speed_kmh}
-                  onChange={(e) => setTypes(prev => prev.map(t => t.id === tt.id ? { ...t, average_speed_kmh: +e.target.value } : t))}
-                  onBlur={() => updateType(tt.id, { average_speed_kmh: tt.average_speed_kmh })}
+                  value={tt.averageSpeedKmh}
+                  onChange={(e) => setTypes(prev => prev.map(t => t.id === tt.id ? { ...t, averageSpeedKmh: +e.target.value } : t))}
+                  onBlur={() => updateType(tt.id, { averageSpeedKmh: tt.averageSpeedKmh })}
                   className="text-sm"
                 />
               </div>
@@ -107,9 +103,9 @@ const AdminTransport = () => {
                 <label className="text-xs text-muted-foreground">Base Price</label>
                 <Input
                   type="number"
-                  value={tt.base_price_egp}
-                  onChange={(e) => setTypes(prev => prev.map(t => t.id === tt.id ? { ...t, base_price_egp: +e.target.value } : t))}
-                  onBlur={() => updateType(tt.id, { base_price_egp: tt.base_price_egp })}
+                  value={tt.basePriceEgp}
+                  onChange={(e) => setTypes(prev => prev.map(t => t.id === tt.id ? { ...t, basePriceEgp: +e.target.value } : t))}
+                  onBlur={() => updateType(tt.id, { basePriceEgp: tt.basePriceEgp })}
                   className="text-sm"
                 />
               </div>
@@ -117,9 +113,9 @@ const AdminTransport = () => {
                 <label className="text-xs text-muted-foreground">Per KM</label>
                 <Input
                   type="number"
-                  value={tt.price_per_km_egp}
-                  onChange={(e) => setTypes(prev => prev.map(t => t.id === tt.id ? { ...t, price_per_km_egp: +e.target.value } : t))}
-                  onBlur={() => updateType(tt.id, { price_per_km_egp: tt.price_per_km_egp })}
+                  value={tt.pricePerKmEgp}
+                  onChange={(e) => setTypes(prev => prev.map(t => t.id === tt.id ? { ...t, pricePerKmEgp: +e.target.value } : t))}
+                  onBlur={() => updateType(tt.id, { pricePerKmEgp: tt.pricePerKmEgp })}
                   className="text-sm"
                 />
               </div>
@@ -127,15 +123,15 @@ const AdminTransport = () => {
             <div className="flex items-center gap-6">
               <label className="flex items-center gap-2 text-sm">
                 <Switch
-                  checked={tt.is_active}
-                  onCheckedChange={(checked) => updateType(tt.id, { is_active: checked })}
+                  checked={tt.isActive}
+                  onCheckedChange={(checked) => updateType(tt.id, { isActive: checked })}
                 />
                 {t('active', language)}
               </label>
               <label className="flex items-center gap-2 text-sm">
                 <Switch
-                  checked={tt.foreigner_allowed}
-                  onCheckedChange={(checked) => updateType(tt.id, { foreigner_allowed: checked })}
+                  checked={tt.foreignerAllowed}
+                  onCheckedChange={(checked) => updateType(tt.id, { foreignerAllowed: checked })}
                 />
                 Foreigners
               </label>

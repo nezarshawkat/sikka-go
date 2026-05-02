@@ -1,0 +1,45 @@
+-The map making is giving an error because in a certain place it cant find a transportation method. Here's the fix:
+there's allways taxi apps if there is no certain trasportation he can find...
+
+ 
+-All the routes' drawing is just random paths... i need the ai to route correctly by marking the stops then drawing the path too them .. not random this is imortant !!! fix it always use the big streets or roads for {example: points: -السواح -روكسي -كلية البنات  -ميدان هشام بركات
+paths: (السواح ل روكسي) street X
+(روكسي ل كلية البنات ) street y
+(كلية البنات ل  ميدان هشام بركات) street z
+So the route is xyzyx and then get marked in the map}
+all the routes should not be hardcoded but an algorithm that does this logic every new import for a route.
+
+If the Ai has a problem tell me.
+If the map cant mark the route correctly tell me
++tell me the fix if yes
+
+-White taxi should not be a route it should be a heatmap like tuktuk  remove all routes
+-remove public transport authority bus section it is not needed
+
+-Add monorail routes (as seperate stops) from internet
+-Add train routes from the internet (as seperate stops)
+-Add metro routes from the internet (as seperate stops)
+as  seperate stops means every stop is asingle route (only the metro can be outside f a road because it is underground)
+
+
+- I want literally the home page to contain the trip itself when the user starts trip guide
+and the my location pop up in the bottom to give details about the current transporrtation
+Name  number from to 
+pickup place (the street he will reach that has the transportation route)
+avg price
+What to say to check if it is the right bus route
+MAKE SURE THAT THE AI DONT CONFUSE PLACES WITH ANOTHER BECAUSE THE NAMES ARE SIMILAR... YOU SHOULD FOCUS ON THE MEANT PLACES (SINCE THESE ROUTES ARE FOR CAIRO THEN YOU WILL FIND MOS PLACES IN CAIRO UNLESS SOMEHTHING ELSE IS MENTIONED.
+DO NOT RELY ONLY ON NAMES SEARCH ON THE IINTERNET THE LOGTUDE AND LATITUDE OF EVERY PLACE MENTIONED IN EVERY ROUTE AND USE THEM SO NAMES DON'T CONFUSE THE AI (FROM THE INTERNET)
+
+AND WHEN ANY PATH IS BEING ADDED FROM NOW ON THE ADMIN SHOULD MARK THE PLACE OF ITS STOPS
+
+-What the Ai of making the trip plan sould consider:
+1- the route the user needs to reach his destination
+2- the coincident routes to his route
+3- ai cuts routes and glues them together with the transportation info about every route path
+4- rest emptry spaces can be filled with walking or taxi or tuktuk
+this depends on the budget.
+5- the buses should have avg prices and every other transportaion to know the avg payment and on this basis make the trips recommedation prices. if the prices are lower you may give him the closest price.
+_______________________________________________________________
+
+AFTER FINISHING TELL ME WHAT HAS BEEN FINISHED AND IF SOMETHING ISN'T FINISHED TELL NOTE IT TO ME

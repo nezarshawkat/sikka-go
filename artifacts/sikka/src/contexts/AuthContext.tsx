@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { Session, User } from '@supabase/supabase-js';
-import { supabase } from '@/integrations/supabase/client';
+import { useUser, useClerk } from '@clerk/react';
+import { api } from '@/lib/api';
 import type { Language } from '@/lib/i18n';
 
 interface Profile {
@@ -10,108 +10,124 @@ interface Profile {
   phone: string | null;
 }
 
+interface PhoneUser {
+  userId: string;
+  profile: Profile | null;
+}
+
 interface AuthContextType {
-  session: Session | null;
-  user: User | null;
+  user: any | null;
+  phoneUser: PhoneUser | null;
   profile: Profile | null;
   isAdmin: boolean;
   isLoading: boolean;
   language: Language;
   setLanguage: (lang: Language) => void;
   signOut: () => Promise<void>;
+  setPhoneSession: (token: string, userId: string, profile: Profile | null) => void;
 }
 
 const AuthContext = createContext<AuthContextType>({
-  session: null,
   user: null,
+  phoneUser: null,
   profile: null,
   isAdmin: false,
   isLoading: true,
   language: 'en',
   setLanguage: () => {},
   signOut: async () => {},
+  setPhoneSession: () => {},
 });
 
 export const useAuth = () => useContext(AuthContext);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [session, setSession] = useState<Session | null>(null);
-  const [user, setUser] = useState<User | null>(null);
+  const { user, isLoaded: clerkLoaded } = useUser();
+  const { signOut: clerkSignOut } = useClerk();
+
+  const [phoneUser, setPhoneUser] = useState<PhoneUser | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-  const [language, setLanguage] = useState<Language>(() => {
+  const [isPhoneLoading, setIsPhoneLoading] = useState(
+    () => !!localStorage.getItem('sikka_phone_token')
+  );
+  const [language, setLanguageState] = useState<Language>(() => {
     return (localStorage.getItem('sikka-lang') as Language) || 'en';
   });
 
-  const fetchProfile = async (userId: string) => {
-    const { data } = await supabase
-      .from('profiles')
-      .select('language, nationality, display_name, phone')
-      .eq('user_id', userId)
-      .single();
-
-    if (data) {
-      setProfile(data as Profile);
-      setLanguage(data.language as Language);
-    }
-  };
-
-  const checkAdmin = async (userId: string) => {
-    const { data } = await supabase
-      .from('user_roles')
-      .select('role')
-      .eq('user_id', userId)
-      .eq('role', 'admin')
-      .maybeSingle();
-
-    setIsAdmin(!!data);
-  };
-
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-
-      if (session?.user) {
-        setTimeout(() => {
-          fetchProfile(session.user.id);
-          checkAdmin(session.user.id);
-        }, 0);
-      } else {
-        setProfile(null);
-        setIsAdmin(false);
-      }
-      setIsLoading(false);
-    });
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchProfile(session.user.id);
-        checkAdmin(session.user.id);
-      }
-      setIsLoading(false);
-    });
-
-    return () => subscription.unsubscribe();
+    const token = localStorage.getItem('sikka_phone_token');
+    if (!token) {
+      setIsPhoneLoading(false);
+      return;
+    }
+    api.get('/auth/session')
+      .then((data: any) => {
+        setPhoneUser({ userId: data.userId, profile: data.profile });
+        setProfile(data.profile);
+        setIsAdmin(data.isAdmin);
+        if (data.profile?.language) setLanguageState(data.profile.language as Language);
+      })
+      .catch(() => {
+        localStorage.removeItem('sikka_phone_token');
+      })
+      .finally(() => setIsPhoneLoading(false));
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('sikka-lang', language);
+    if (user && clerkLoaded) {
+      const role = (user.publicMetadata as any)?.role;
+      setIsAdmin(role === 'admin');
+    }
+  }, [user, clerkLoaded]);
+
+  const setLanguage = (lang: Language) => {
+    setLanguageState(lang);
+    localStorage.setItem('sikka-lang', lang);
+    document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
+    document.documentElement.lang = lang;
+  };
+
+  useEffect(() => {
     document.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr';
     document.documentElement.lang = language;
   }, [language]);
 
-  const signOut = async () => {
-    await supabase.auth.signOut();
-    setProfile(null);
-    setIsAdmin(false);
+  const setPhoneSession = (token: string, userId: string, prof: Profile | null) => {
+    localStorage.setItem('sikka_phone_token', token);
+    setPhoneUser({ userId, profile: prof });
+    setProfile(prof);
   };
 
+  const signOut = async () => {
+    const token = localStorage.getItem('sikka_phone_token');
+    if (token) {
+      await api.post('/auth/logout', {}).catch(() => {});
+      localStorage.removeItem('sikka_phone_token');
+      setPhoneUser(null);
+      setProfile(null);
+      setIsAdmin(false);
+    }
+    if (user) {
+      await clerkSignOut();
+    }
+  };
+
+  const isLoading = isPhoneLoading;
+  const effectiveUser = user || (phoneUser ? { id: phoneUser.userId } : null);
+
   return (
-    <AuthContext.Provider value={{ session, user, profile, isAdmin, isLoading, language, setLanguage, signOut }}>
+    <AuthContext.Provider value={{
+      user: effectiveUser,
+      phoneUser,
+      profile,
+      isAdmin,
+      isLoading,
+      language,
+      setLanguage,
+      signOut,
+      setPhoneSession,
+    }}>
       {children}
     </AuthContext.Provider>
   );

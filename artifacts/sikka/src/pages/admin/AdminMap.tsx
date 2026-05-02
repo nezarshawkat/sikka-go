@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,18 +17,18 @@ const ROUTE_COLORS = ['#EF4444', '#3B82F6', '#10B981', '#F59E0B', '#8B5CF6', '#E
 const GOVERNORATES = ['Cairo', 'Giza', 'Qalyubia', 'Alexandria', 'Dakahlia', 'Sharqia', 'Monufia', 'Beheira', 'Kafr El Sheikh', 'Gharbia', 'Damietta', 'Port Said', 'Suez', 'Ismailia', 'Fayoum', 'Beni Suef', 'Minya', 'Assiut', 'Sohag', 'Qena', 'Luxor', 'Aswan', 'Red Sea', 'South Sinai', 'North Sinai', 'Matrouh', 'New Valley'];
 
 interface TransportType {
-  id: string; name_en: string; name_ar: string; icon: string; color: string; service_level: string;
+  id: string; nameEn: string; nameAr: string; icon: string; color: string; serviceLevel: string;
 }
 interface TransitLine {
-  id: string; transport_type_id: string; line_number: string; name_en: string; name_ar: string;
-  from_area: string; to_area: string; via_stops: string[]; route_path: any;
-  price_egp: number; frequency_minutes: number | null; has_fixed_stops: boolean; is_active: boolean;
+  id: string; transportTypeId: string; lineNumber: string; nameEn: string; nameAr: string;
+  fromArea: string; toArea: string; viaStops: string[]; routePath: any;
+  priceEgp: number; frequencyMinutes: number | null; hasFixedStops: boolean; isActive: boolean;
 }
 interface HeatmapPoint {
-  id: string; transport_type_id: string; latitude: number; longitude: number; intensity: number; radius_km: number;
+  id: string; transportTypeId: string; latitude: number; longitude: number; intensity: number; radiusKm: number;
 }
 interface Mawaqef {
-  id: string; name_en: string; name_ar: string; city: string; latitude: number; longitude: number; transport_type_ids: string[];
+  id: string; nameEn: string; nameAr: string; city: string; latitude: number; longitude: number; transportTypeIds: string[];
 }
 
 const ICONS: Record<string, string> = {
@@ -89,29 +89,31 @@ const AdminMap = () => {
   const [showForm, setShowForm] = useState(false);
   const [editingLine, setEditingLine] = useState<TransitLine | null>(null);
   const [formData, setFormData] = useState({
-    transport_type_id: '', line_number: '', name_en: '', name_ar: '',
-    from_area: '', to_area: '', via_stops: '', price_egp: 5,
-    frequency_minutes: 10, has_fixed_stops: false,
+    transportTypeId: '', lineNumber: '', nameEn: '', nameAr: '',
+    fromArea: '', toArea: '', viaStops: '', priceEgp: 5,
+    frequencyMinutes: 10, hasFixedStops: false,
   });
   const [detailLine, setDetailLine] = useState<TransitLine | null>(null);
 
   const fetchData = useCallback(async () => {
-    const [tt, tl, hm, mw] = await Promise.all([
-      supabase.from('transport_types').select('*').eq('is_active', true).order('service_level'),
-      supabase.from('transit_lines').select('*').eq('is_active', true).order('line_number'),
-      supabase.from('transport_heatmaps').select('*'),
-      supabase.from('mawaqef').select('*').eq('is_active', true).order('name_ar'),
-    ]);
-    setTransportTypes((tt.data || []) as TransportType[]);
-    setTransitLines((tl.data || []) as TransitLine[]);
-    setHeatmapData((hm.data || []) as HeatmapPoint[]);
-    setMawaqef((mw.data || []) as Mawaqef[]);
+    try {
+      const [tt, tl, hm, mw] = await Promise.all([
+        api.get('/transport-types'),
+        api.get('/transit-lines'),
+        api.get('/heatmaps'),
+        api.get('/mawaqef'),
+      ]);
+      setTransportTypes((tt || []) as TransportType[]);
+      setTransitLines((tl || []) as TransitLine[]);
+      setHeatmapData((hm || []) as HeatmapPoint[]);
+      setMawaqef((mw || []) as Mawaqef[]);
+    } catch (err: any) { toast.error(err.message); }
     setIsLoading(false);
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const tuktukType = transportTypes.find(t => t.name_en.toLowerCase().includes('tuk'));
+  const tuktukType = transportTypes.find(t => t.nameEn.toLowerCase().includes('tuk'));
   const selectedStation = mawaqef.find(s => s.id === activeStationId);
 
   const geocodeStop = useCallback(async (stop: string): Promise<[number, number] | null> => {
@@ -130,8 +132,8 @@ const AdminMap = () => {
     }
   }, []);
 
-  const buildPathFromLineText = useCallback(async (line: Pick<TransitLine, 'from_area' | 'to_area' | 'via_stops'>) => {
-    const stopNames = [line.from_area, ...(line.via_stops || []), line.to_area]
+  const buildPathFromLineText = useCallback(async (line: Pick<TransitLine, 'fromArea' | 'toArea' | 'viaStops'>) => {
+    const stopNames = [line.fromArea, ...(line.viaStops || []), line.toArea]
       .map(s => s?.trim()).filter(Boolean)
       .filter((s, i, arr) => arr.findIndex(x => x.toLowerCase() === s.toLowerCase()) === i)
       .slice(0, 12);
@@ -147,17 +149,17 @@ const AdminMap = () => {
 
   const filteredLines = useMemo(() => {
     return transitLines.filter(line => {
-      const typeMatch = activeTypeId === 'all' || line.transport_type_id === activeTypeId;
-      const stationName = selectedStation ? (language === 'ar' ? selectedStation.name_ar : selectedStation.name_en) : '';
-      const stationMatch = !selectedStation || [line.from_area, line.to_area, ...(line.via_stops || [])].some(s => s.includes(selectedStation.name_ar) || s.includes(selectedStation.name_en) || s.includes(stationName));
+      const typeMatch = activeTypeId === 'all' || line.transportTypeId === activeTypeId;
+      const stationName = selectedStation ? (language === 'ar' ? selectedStation.nameAr : selectedStation.nameEn) : '';
+      const stationMatch = !selectedStation || [line.fromArea, line.toArea, ...(line.viaStops || [])].some(s => s.includes(selectedStation.nameAr) || s.includes(selectedStation.nameEn) || s.includes(stationName));
       const q = searchQuery.trim().toLowerCase();
       const searchMatch = !q ||
-        line.line_number.toLowerCase().includes(q) ||
-        line.name_en.toLowerCase().includes(q) ||
-        line.name_ar.includes(searchQuery) ||
-        line.from_area.toLowerCase().includes(q) ||
-        line.to_area.toLowerCase().includes(q) ||
-        line.via_stops.some(s => s.toLowerCase().includes(q));
+        line.lineNumber.toLowerCase().includes(q) ||
+        line.nameEn.toLowerCase().includes(q) ||
+        line.nameAr.includes(searchQuery) ||
+        line.fromArea.toLowerCase().includes(q) ||
+        line.toArea.toLowerCase().includes(q) ||
+        line.viaStops.some(s => s.toLowerCase().includes(q));
       return typeMatch && stationMatch && searchMatch;
     });
   }, [activeTypeId, language, searchQuery, selectedStation, transitLines]);
@@ -165,7 +167,7 @@ const AdminMap = () => {
   useEffect(() => {
     const limit = activeTypeId === 'all' && !searchQuery && !selectedStation ? 25 : 45;
     const missing = filteredLines
-      .filter(line => !line.route_path?.coordinates?.length && !generatedPaths[line.id] && !generatingRef.current.has(line.id))
+      .filter(line => !line.routePath?.coordinates?.length && !generatedPaths[line.id] && !generatingRef.current.has(line.id))
       .slice(0, limit);
     if (!missing.length) return;
 
@@ -178,26 +180,26 @@ const AdminMap = () => {
         generatingRef.current.delete(line.id);
         if (path?.coordinates?.length && !cancelled) {
           setGeneratedPaths(prev => ({ ...prev, [line.id]: path }));
-          supabase.from('transit_lines').update({ route_path: path }).eq('id', line.id).then(() => undefined);
+          api.put(`/transit-lines/${line.id}`, { routePath: path }).catch(() => undefined);
         }
       }
     })();
     return () => { cancelled = true; };
   }, [activeTypeId, buildPathFromLineText, filteredLines, generatedPaths, searchQuery, selectedStation]);
 
-  const getLineGeometry = (line: TransitLine) => line.route_path?.coordinates?.length ? line.route_path : generatedPaths[line.id];
+  const getLineGeometry = (line: TransitLine) => line.routePath?.coordinates?.length ? line.routePath : generatedPaths[line.id];
   const visibleLines = filteredLines.filter(line => getLineGeometry(line));
 
   const getRouteColor = (line: TransitLine, index: number) => {
     if (activeTypeId !== 'all') return ROUTE_COLORS[index % ROUTE_COLORS.length];
-    return transportTypes.find(t => t.id === line.transport_type_id)?.color || '#3B82F6';
+    return transportTypes.find(t => t.id === line.transportTypeId)?.color || '#3B82F6';
   };
 
   const routesGeoJSON = {
     type: 'FeatureCollection' as const,
     features: visibleLines.map((line, idx) => ({
       type: 'Feature' as const,
-      properties: { id: line.id, color: getRouteColor(line, idx), name: line.line_number || line.from_area, selected: selectedLine?.id === line.id ? 1 : 0 },
+      properties: { id: line.id, color: getRouteColor(line, idx), name: line.lineNumber || line.fromArea, selected: selectedLine?.id === line.id ? 1 : 0 },
       geometry: getLineGeometry(line),
     })),
   };
@@ -205,7 +207,7 @@ const AdminMap = () => {
   const heatmapGeoJSON = {
     type: 'FeatureCollection' as const,
     features: heatmapData
-      .filter(h => tuktukType && h.transport_type_id === tuktukType.id)
+      .filter(h => tuktukType && h.transportTypeId === tuktukType.id)
       .map(h => ({ type: 'Feature' as const, properties: { intensity: h.intensity }, geometry: { type: 'Point' as const, coordinates: [h.longitude, h.latitude] } })),
   };
 
@@ -217,20 +219,24 @@ const AdminMap = () => {
   const getTypeName = (id: string) => {
     if (id === 'all') return 'All';
     const tt = transportTypes.find(t => t.id === id);
-    return language === 'ar' ? tt?.name_ar : tt?.name_en;
+    return language === 'ar' ? tt?.nameAr : tt?.nameEn;
   };
 
   const addHeatPoint = async (lng: number, lat: number) => {
     if (!tuktukType) return;
-    const { error } = await supabase.from('transport_heatmaps').insert({ transport_type_id: tuktukType.id, longitude: lng, latitude: lat, intensity: 0.75, radius_km: 1.5 });
-    if (error) toast.error(error.message);
-    else { toast.success('Tuk-tuk heat point added'); fetchData(); }
+    try {
+      await api.post('/heatmaps', { transportTypeId: tuktukType.id, longitude: lng, latitude: lat, intensity: 0.75, radiusKm: 1.5 });
+      toast.success('Tuk-tuk heat point added');
+      fetchData();
+    } catch (err: any) { toast.error(err.message); }
   };
 
   const deleteHeatPoint = async (id: string) => {
-    const { error } = await supabase.from('transport_heatmaps').delete().eq('id', id);
-    if (error) toast.error(error.message);
-    else { toast.success('Heat point removed'); fetchData(); }
+    try {
+      await api.delete(`/heatmaps/${id}`);
+      toast.success('Heat point removed');
+      fetchData();
+    } catch (err: any) { toast.error(err.message); }
   };
 
   const handleMapClick = useCallback((e: any) => {
@@ -259,10 +265,10 @@ const AdminMap = () => {
     }
     setEditingLine(null);
     setFormData({
-      transport_type_id: activeTypeId !== 'all' ? activeTypeId : '',
-      line_number: '', name_en: '', name_ar: '',
-      from_area: '', to_area: '', via_stops: '', price_egp: 5,
-      frequency_minutes: 10, has_fixed_stops: false,
+      transportTypeId: activeTypeId !== 'all' ? activeTypeId : '',
+      lineNumber: '', nameEn: '', nameAr: '',
+      fromArea: '', toArea: '', viaStops: '', priceEgp: 5,
+      frequencyMinutes: 10, hasFixedStops: false,
     });
     setDrawPoints([]);
     setShowForm(true);
@@ -271,16 +277,16 @@ const AdminMap = () => {
   const openEditForm = (line: TransitLine) => {
     setEditingLine(line);
     setFormData({
-      transport_type_id: line.transport_type_id,
-      line_number: line.line_number,
-      name_en: line.name_en,
-      name_ar: line.name_ar,
-      from_area: line.from_area,
-      to_area: line.to_area,
-      via_stops: line.via_stops.join(', '),
-      price_egp: line.price_egp,
-      frequency_minutes: line.frequency_minutes || 10,
-      has_fixed_stops: line.has_fixed_stops,
+      transportTypeId: line.transportTypeId,
+      lineNumber: line.lineNumber,
+      nameEn: line.nameEn,
+      nameAr: line.nameAr,
+      fromArea: line.fromArea,
+      toArea: line.toArea,
+      viaStops: line.viaStops.join(', '),
+      priceEgp: line.priceEgp,
+      frequencyMinutes: line.frequencyMinutes || 10,
+      hasFixedStops: line.hasFixedStops,
     });
     const geom = getLineGeometry(line);
     setDrawPoints(geom?.coordinates || []);
@@ -288,11 +294,11 @@ const AdminMap = () => {
   };
 
   const saveRoute = async () => {
-    if (!formData.transport_type_id || !formData.line_number || !formData.from_area || !formData.to_area) {
+    if (!formData.transportTypeId || !formData.lineNumber || !formData.fromArea || !formData.toArea) {
       toast.error('Fill required fields');
       return;
     }
-    if (formData.transport_type_id === tuktukType?.id) {
+    if (formData.transportTypeId === tuktukType?.id) {
       toast.error('Tuk-tuk uses the heatmap editor instead of route lines');
       return;
     }
@@ -301,30 +307,32 @@ const AdminMap = () => {
     let routePath = null;
     try {
       if (drawPoints.length >= 2) routePath = { type: 'LineString', coordinates: await snapToRoads(drawPoints) };
-      else routePath = await buildPathFromLineText({ from_area: formData.from_area, to_area: formData.to_area, via_stops: formData.via_stops ? formData.via_stops.split(',').map(s => s.trim()).filter(Boolean) : [] });
+      else routePath = await buildPathFromLineText({ fromArea: formData.fromArea, toArea: formData.toArea, viaStops: formData.viaStops ? formData.viaStops.split(',').map(s => s.trim()).filter(Boolean) : [] });
     } finally {
       setIsSnapping(false);
     }
 
     const payload = {
-      transport_type_id: formData.transport_type_id,
-      line_number: formData.line_number,
-      name_en: formData.name_en || `${formData.line_number}: ${formData.from_area} to ${formData.to_area}`,
-      name_ar: formData.name_ar || `${formData.line_number}: ${formData.from_area} - ${formData.to_area}`,
-      from_area: formData.from_area,
-      to_area: formData.to_area,
-      via_stops: formData.via_stops ? formData.via_stops.split(',').map(s => s.trim()).filter(Boolean) : [],
-      price_egp: formData.price_egp,
-      frequency_minutes: formData.frequency_minutes,
-      has_fixed_stops: formData.has_fixed_stops,
-      route_path: routePath,
+      transportTypeId: formData.transportTypeId,
+      lineNumber: formData.lineNumber,
+      nameEn: formData.nameEn || `${formData.lineNumber}: ${formData.fromArea} to ${formData.toArea}`,
+      nameAr: formData.nameAr || `${formData.lineNumber}: ${formData.fromArea} - ${formData.toArea}`,
+      fromArea: formData.fromArea,
+      toArea: formData.toArea,
+      viaStops: formData.viaStops ? formData.viaStops.split(',').map(s => s.trim()).filter(Boolean) : [],
+      priceEgp: formData.priceEgp,
+      frequencyMinutes: formData.frequencyMinutes,
+      hasFixedStops: formData.hasFixedStops,
+      routePath,
     };
 
-    const { error } = editingLine
-      ? await supabase.from('transit_lines').update(payload).eq('id', editingLine.id)
-      : await supabase.from('transit_lines').insert(payload);
-
-    if (error) { toast.error(error.message); return; }
+    try {
+      if (editingLine) {
+        await api.put(`/transit-lines/${editingLine.id}`, payload);
+      } else {
+        await api.post('/transit-lines', payload);
+      }
+    } catch (err: any) { toast.error(err.message); return; }
     toast.success(editingLine ? 'Route updated and snapped to roads' : 'Route added and snapped to roads');
     setShowForm(false);
     setDrawPoints([]);
@@ -334,9 +342,13 @@ const AdminMap = () => {
   };
 
   const deleteLine = async (id: string) => {
-    const { error } = await supabase.from('transit_lines').delete().eq('id', id);
-    if (error) toast.error(error.message);
-    else { toast.success('Deleted'); setDetailLine(null); setSelectedLine(null); fetchData(); }
+    try {
+      await api.delete(`/transit-lines/${id}`);
+      toast.success('Deleted');
+      setDetailLine(null);
+      setSelectedLine(null);
+      fetchData();
+    } catch (err: any) { toast.error(err.message); }
   };
 
   if (isLoading) return <div className="flex items-center justify-center h-96"><div className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>;
@@ -351,14 +363,14 @@ const AdminMap = () => {
         {selectedStation && (
           <div className="p-3 border-b bg-muted/40">
             <p className="text-xs text-muted-foreground">Station</p>
-            <p className="text-sm font-medium">{language === 'ar' ? selectedStation.name_ar : selectedStation.name_en}</p>
+            <p className="text-sm font-medium">{language === 'ar' ? selectedStation.nameAr : selectedStation.nameEn}</p>
             <p className="text-xs text-muted-foreground">{filteredLines.length} connected routes</p>
           </div>
         )}
         <div className="flex-1 overflow-y-auto">
           {filteredLines.length === 0 && <p className="text-sm text-muted-foreground p-4 text-center">No routes</p>}
           {filteredLines.map((line, idx) => {
-            const tt = transportTypes.find(t => t.id === line.transport_type_id);
+            const tt = transportTypes.find(t => t.id === line.transportTypeId);
             const color = getRouteColor(line, idx);
             const hasPath = Boolean(getLineGeometry(line));
             return (
@@ -381,11 +393,11 @@ const AdminMap = () => {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
-                      <Badge variant="outline" className="text-[10px] px-1 py-0" style={{ borderColor: color, color }}>{line.line_number || 'Route'}</Badge>
-                      <span className="text-xs truncate">{line.from_area} → {line.to_area}</span>
+                      <Badge variant="outline" className="text-[10px] px-1 py-0" style={{ borderColor: color, color }}>{line.lineNumber || 'Route'}</Badge>
+                      <span className="text-xs truncate">{line.fromArea} → {line.toArea}</span>
                     </div>
-                    <p className="text-[10px] text-muted-foreground truncate">{line.via_stops.slice(0, 4).join(' · ')}</p>
-                    <p className="text-[10px] text-muted-foreground">{line.price_egp} EGP · {hasPath ? 'mapped' : 'drawing from stops...'}</p>
+                    <p className="text-[10px] text-muted-foreground truncate">{line.viaStops.slice(0, 4).join(' · ')}</p>
+                    <p className="text-[10px] text-muted-foreground">{line.priceEgp} EGP · {hasPath ? 'mapped' : 'drawing from stops...'}</p>
                   </div>
                 </div>
               </div>
@@ -414,7 +426,7 @@ const AdminMap = () => {
               <SelectTrigger className="h-10 bg-card/95 backdrop-blur-sm"><SelectValue placeholder="Transport type" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All transport types</SelectItem>
-                {transportTypes.map(tt => <SelectItem key={tt.id} value={tt.id}>{ICONS[tt.icon] || '🚌'} {tt.name_en}</SelectItem>)}
+                {transportTypes.map(tt => <SelectItem key={tt.id} value={tt.id}>{ICONS[tt.icon] || '🚌'} {tt.nameEn}</SelectItem>)}
               </SelectContent>
             </Select>
             <Select value={activeGovernorate} onValueChange={setActiveGovernorate}>
@@ -432,7 +444,7 @@ const AdminMap = () => {
               <SelectTrigger className="h-10 bg-card/95 backdrop-blur-sm"><SelectValue placeholder="Stations / المواقف" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All stations and terminals</SelectItem>
-                {mawaqef.map(s => <SelectItem key={s.id} value={s.id}>{language === 'ar' ? s.name_ar : s.name_en}</SelectItem>)}
+                {mawaqef.map(s => <SelectItem key={s.id} value={s.id}>{language === 'ar' ? s.nameAr : s.nameEn}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -502,7 +514,7 @@ const AdminMap = () => {
             </Source>
           )}
 
-          {showHeatmap && isHeatmapEditing && heatmapData.filter(h => tuktukType && h.transport_type_id === tuktukType.id).map(h => (
+          {showHeatmap && isHeatmapEditing && heatmapData.filter(h => tuktukType && h.transportTypeId === tuktukType.id).map(h => (
             <Marker key={h.id} latitude={h.latitude} longitude={h.longitude}>
               <button onClick={e => { e.stopPropagation(); deleteHeatPoint(h.id); }} className="h-7 w-7 rounded-full bg-destructive text-destructive-foreground text-xs shadow-lg border border-background">×</button>
             </Marker>
@@ -520,14 +532,14 @@ const AdminMap = () => {
             const coords = getLineGeometry(line)?.coordinates;
             if (!coords?.length) return null;
             const mid = coords[Math.floor(coords.length / 2)];
-            const tt = transportTypes.find(t => t.id === line.transport_type_id);
+            const tt = transportTypes.find(t => t.id === line.transportTypeId);
             const color = getRouteColor(line, idx);
             return (
               <Marker key={`icon-${line.id}`} latitude={mid[1]} longitude={mid[0]}>
                 <button onClick={e => { e.stopPropagation(); setDetailLine(line); setSelectedLine(line); }} className="group">
                   <div className="flex items-center gap-1 pl-0.5 pr-2 py-0.5 rounded-full shadow-lg border-2 border-background group-hover:scale-110 transition-transform" style={{ backgroundColor: color }}>
                     <div className="h-6 w-6 rounded-full flex items-center justify-center text-xs bg-background/20">{ICONS[tt?.icon || 'bus']}</div>
-                    <span className="text-[11px] font-bold text-white whitespace-nowrap">{line.line_number || tt?.name_en?.slice(0, 6)}</span>
+                    <span className="text-[11px] font-bold text-white whitespace-nowrap">{line.lineNumber || tt?.nameEn?.slice(0, 6)}</span>
                   </div>
                 </button>
               </Marker>
@@ -548,22 +560,22 @@ const AdminMap = () => {
       <Dialog open={!!detailLine} onOpenChange={open => !open && setDetailLine(null)}>
         <DialogContent className="max-w-md">
           {detailLine && (() => {
-            const tt = transportTypes.find(t => t.id === detailLine.transport_type_id);
+            const tt = transportTypes.find(t => t.id === detailLine.transportTypeId);
             return (
               <>
                 <DialogHeader>
                   <DialogTitle className="flex items-center gap-2">
                     <div className="h-8 w-8 rounded-full flex items-center justify-center text-sm" style={{ backgroundColor: `${tt?.color || '#3B82F6'}20`, border: `2px solid ${tt?.color || '#3B82F6'}` }}>{ICONS[tt?.icon || 'bus']}</div>
-                    <div><span className="text-base">{detailLine.line_number || detailLine.from_area}</span><span className="text-sm text-muted-foreground ml-2">{tt?.name_en}</span></div>
+                    <div><span className="text-base">{detailLine.lineNumber || detailLine.fromArea}</span><span className="text-sm text-muted-foreground ml-2">{tt?.nameEn}</span></div>
                   </DialogTitle>
                 </DialogHeader>
                 <div className="space-y-3 text-sm">
-                  <div className="flex justify-between gap-4"><span className="text-muted-foreground">From</span><span className="text-right">{detailLine.from_area}</span></div>
-                  <div className="flex justify-between gap-4"><span className="text-muted-foreground">To</span><span className="text-right">{detailLine.to_area}</span></div>
-                  {detailLine.via_stops.length > 0 && <div><span className="text-muted-foreground">Via: </span><span>{detailLine.via_stops.join(' → ')}</span></div>}
-                  <div className="flex justify-between"><span className="text-muted-foreground">Price</span><span>{detailLine.price_egp} EGP</span></div>
-                  {detailLine.frequency_minutes && <div className="flex justify-between"><span className="text-muted-foreground">Frequency</span><span>Every {detailLine.frequency_minutes} min</span></div>}
-                  <div className="flex justify-between"><span className="text-muted-foreground">Stops</span><span>{detailLine.has_fixed_stops ? 'Fixed stops' : 'Stop anywhere'}</span></div>
+                  <div className="flex justify-between gap-4"><span className="text-muted-foreground">From</span><span className="text-right">{detailLine.fromArea}</span></div>
+                  <div className="flex justify-between gap-4"><span className="text-muted-foreground">To</span><span className="text-right">{detailLine.toArea}</span></div>
+                  {detailLine.viaStops.length > 0 && <div><span className="text-muted-foreground">Via: </span><span>{detailLine.viaStops.join(' → ')}</span></div>}
+                  <div className="flex justify-between"><span className="text-muted-foreground">Price</span><span>{detailLine.priceEgp} EGP</span></div>
+                  {detailLine.frequencyMinutes && <div className="flex justify-between"><span className="text-muted-foreground">Frequency</span><span>Every {detailLine.frequencyMinutes} min</span></div>}
+                  <div className="flex justify-between"><span className="text-muted-foreground">Stops</span><span>{detailLine.hasFixedStops ? 'Fixed stops' : 'Stop anywhere'}</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">Map</span><span>{getLineGeometry(detailLine) ? 'Visible route path' : 'Generating from stops'}</span></div>
                 </div>
                 <DialogFooter className="gap-2 flex-wrap">
@@ -571,8 +583,9 @@ const AdminMap = () => {
                     toast.info('Regenerating path along real streets...');
                     const path = await buildPathFromLineText(detailLine);
                     if (!path) { toast.error('Could not geocode the stops — add more via stops'); return; }
-                    const { error } = await supabase.from('transit_lines').update({ route_path: path }).eq('id', detailLine.id);
-                    if (error) { toast.error(error.message); return; }
+                    try {
+                      await api.put(`/transit-lines/${detailLine.id}`, { routePath: path });
+                    } catch (err: any) { toast.error(err.message); return; }
                     toast.success('Path regenerated and snapped to roads');
                     setGeneratedPaths(prev => ({ ...prev, [detailLine.id]: path }));
                     fetchData();
@@ -590,23 +603,23 @@ const AdminMap = () => {
         <DialogContent className="fixed bottom-4 left-4 top-auto translate-x-0 translate-y-0 max-w-sm w-[360px] max-h-[70vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{editingLine ? 'Edit Route' : 'New Route'}</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <Select value={formData.transport_type_id} onValueChange={value => setFormData(p => ({ ...p, transport_type_id: value }))}>
+            <Select value={formData.transportTypeId} onValueChange={value => setFormData(p => ({ ...p, transportTypeId: value }))}>
               <SelectTrigger className="h-9"><SelectValue placeholder="Select transport type..." /></SelectTrigger>
-              <SelectContent>{transportTypes.filter(tt => tt.id !== tuktukType?.id).map(tt => <SelectItem key={tt.id} value={tt.id}>{ICONS[tt.icon]} {tt.name_en}</SelectItem>)}</SelectContent>
+              <SelectContent>{transportTypes.filter(tt => tt.id !== tuktukType?.id).map(tt => <SelectItem key={tt.id} value={tt.id}>{ICONS[tt.icon]} {tt.nameEn}</SelectItem>)}</SelectContent>
             </Select>
-            <Input placeholder="Line number (e.g. 356, M1)" value={formData.line_number} onChange={e => setFormData(p => ({ ...p, line_number: e.target.value }))} className="h-9 text-sm" />
-            <Input placeholder="Name (EN)" value={formData.name_en} onChange={e => setFormData(p => ({ ...p, name_en: e.target.value }))} className="h-9 text-sm" />
-            <Input placeholder="الاسم (AR)" value={formData.name_ar} onChange={e => setFormData(p => ({ ...p, name_ar: e.target.value }))} className="h-9 text-sm" />
+            <Input placeholder="Line number (e.g. 356, M1)" value={formData.lineNumber} onChange={e => setFormData(p => ({ ...p, lineNumber: e.target.value }))} className="h-9 text-sm" />
+            <Input placeholder="Name (EN)" value={formData.nameEn} onChange={e => setFormData(p => ({ ...p, nameEn: e.target.value }))} className="h-9 text-sm" />
+            <Input placeholder="الاسم (AR)" value={formData.nameAr} onChange={e => setFormData(p => ({ ...p, nameAr: e.target.value }))} className="h-9 text-sm" />
             <div className="grid grid-cols-2 gap-2">
-              <Input placeholder="From" value={formData.from_area} onChange={e => setFormData(p => ({ ...p, from_area: e.target.value }))} className="h-9 text-sm" />
-              <Input placeholder="To" value={formData.to_area} onChange={e => setFormData(p => ({ ...p, to_area: e.target.value }))} className="h-9 text-sm" />
+              <Input placeholder="From" value={formData.fromArea} onChange={e => setFormData(p => ({ ...p, fromArea: e.target.value }))} className="h-9 text-sm" />
+              <Input placeholder="To" value={formData.toArea} onChange={e => setFormData(p => ({ ...p, toArea: e.target.value }))} className="h-9 text-sm" />
             </div>
-            <Input placeholder="Via stops (comma separated)" value={formData.via_stops} onChange={e => setFormData(p => ({ ...p, via_stops: e.target.value }))} className="h-9 text-sm" />
+            <Input placeholder="Via stops (comma separated)" value={formData.viaStops} onChange={e => setFormData(p => ({ ...p, viaStops: e.target.value }))} className="h-9 text-sm" />
             <div className="grid grid-cols-2 gap-2">
-              <Input type="number" placeholder="Price EGP" value={formData.price_egp} onChange={e => setFormData(p => ({ ...p, price_egp: +e.target.value }))} className="h-9 text-sm" />
-              <Input type="number" placeholder="Freq (min)" value={formData.frequency_minutes} onChange={e => setFormData(p => ({ ...p, frequency_minutes: +e.target.value }))} className="h-9 text-sm" />
+              <Input type="number" placeholder="Price EGP" value={formData.priceEgp} onChange={e => setFormData(p => ({ ...p, priceEgp: +e.target.value }))} className="h-9 text-sm" />
+              <Input type="number" placeholder="Freq (min)" value={formData.frequencyMinutes} onChange={e => setFormData(p => ({ ...p, frequencyMinutes: +e.target.value }))} className="h-9 text-sm" />
             </div>
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={formData.has_fixed_stops} onChange={e => setFormData(p => ({ ...p, has_fixed_stops: e.target.checked }))} /> Fixed stops</label>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={formData.hasFixedStops} onChange={e => setFormData(p => ({ ...p, hasFixedStops: e.target.checked }))} /> Fixed stops</label>
             <Button size="sm" variant="outline" className="w-full h-9 text-xs gap-1" onClick={() => { setShowForm(false); setDrawPoints([]); setIsDrawing(true); }}>
               <Pencil className="h-3 w-3" /> Draw on Map
             </Button>

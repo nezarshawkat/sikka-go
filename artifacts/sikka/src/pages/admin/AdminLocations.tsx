@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { t } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
@@ -11,12 +11,12 @@ import { Plus, Trash2 } from 'lucide-react';
 
 interface Location {
   id: string;
-  name_en: string;
-  name_ar: string;
+  nameEn: string;
+  nameAr: string;
   latitude: number;
   longitude: number;
   city: string;
-  is_station: boolean;
+  isStation: boolean;
 }
 
 const AdminLocations = () => {
@@ -25,36 +25,37 @@ const AdminLocations = () => {
   const [isLoading, setIsLoading] = useState(true);
 
   const fetchLocations = async () => {
-    const { data, error } = await supabase.from('locations').select('*').order('name_en');
-    if (error) toast.error(error.message);
-    else setLocations(data || []);
+    try {
+      const data = await api.get('/locations');
+      setLocations(data || []);
+    } catch (err: any) { toast.error(err.message); }
     setIsLoading(false);
   };
 
   useEffect(() => { fetchLocations(); }, []);
 
   const addLocation = async () => {
-    const { error } = await supabase.from('locations').insert({
-      name_en: 'New Location',
-      name_ar: 'موقع جديد',
-      latitude: 30.0444,
-      longitude: 31.2357,
-      city: 'cairo',
-    });
-    if (error) toast.error(error.message);
-    else fetchLocations();
+    try {
+      const row = await api.post('/locations', {
+        nameEn: 'New Location', nameAr: 'موقع جديد',
+        latitude: 30.0444, longitude: 31.2357, city: 'cairo',
+      });
+      setLocations(prev => [...prev, row]);
+    } catch (err: any) { toast.error(err.message); }
   };
 
   const updateLocation = async (id: string, updates: Partial<Location>) => {
-    const { error } = await supabase.from('locations').update(updates).eq('id', id);
-    if (error) toast.error(error.message);
-    else toast.success('Updated');
+    try {
+      await api.put(`/locations/${id}`, updates);
+      toast.success('Updated');
+    } catch (err: any) { toast.error(err.message); }
   };
 
   const deleteLocation = async (id: string) => {
-    const { error } = await supabase.from('locations').delete().eq('id', id);
-    if (error) toast.error(error.message);
-    else setLocations(prev => prev.filter(l => l.id !== id));
+    try {
+      await api.delete(`/locations/${id}`);
+      setLocations(prev => prev.filter(l => l.id !== id));
+    } catch (err: any) { toast.error(err.message); }
   };
 
   if (isLoading) return <p className="text-muted-foreground text-sm">Loading...</p>;
@@ -71,16 +72,16 @@ const AdminLocations = () => {
           <CardContent className="p-4 space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <Input
-                value={loc.name_en}
-                onChange={(e) => setLocations(prev => prev.map(l => l.id === loc.id ? { ...l, name_en: e.target.value } : l))}
-                onBlur={() => updateLocation(loc.id, { name_en: loc.name_en })}
+                value={loc.nameEn}
+                onChange={(e) => setLocations(prev => prev.map(l => l.id === loc.id ? { ...l, nameEn: e.target.value } : l))}
+                onBlur={() => updateLocation(loc.id, { nameEn: loc.nameEn })}
                 placeholder="Name (EN)"
                 className="text-sm"
               />
               <Input
-                value={loc.name_ar}
-                onChange={(e) => setLocations(prev => prev.map(l => l.id === loc.id ? { ...l, name_ar: e.target.value } : l))}
-                onBlur={() => updateLocation(loc.id, { name_ar: loc.name_ar })}
+                value={loc.nameAr}
+                onChange={(e) => setLocations(prev => prev.map(l => l.id === loc.id ? { ...l, nameAr: e.target.value } : l))}
+                onBlur={() => updateLocation(loc.id, { nameAr: loc.nameAr })}
                 placeholder="Name (AR)"
                 dir="rtl"
                 className="text-sm"
@@ -114,10 +115,10 @@ const AdminLocations = () => {
             <div className="flex items-center justify-between">
               <label className="flex items-center gap-2 text-sm">
                 <Switch
-                  checked={loc.is_station}
+                  checked={loc.isStation}
                   onCheckedChange={(checked) => {
-                    setLocations(prev => prev.map(l => l.id === loc.id ? { ...l, is_station: checked } : l));
-                    updateLocation(loc.id, { is_station: checked });
+                    setLocations(prev => prev.map(l => l.id === loc.id ? { ...l, isStation: checked } : l));
+                    updateLocation(loc.id, { isStation: checked });
                   }}
                 />
                 Station

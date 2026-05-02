@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/contexts/AuthContext';
 import { t } from '@/lib/i18n';
@@ -10,21 +10,9 @@ const AdminAnalytics = () => {
   const [stats, setStats] = useState({ users: 0, trips: 0, reviews: 0, routes: 0 });
 
   useEffect(() => {
-    const fetch = async () => {
-      const [u, tr, rv, rt] = await Promise.all([
-        supabase.from('profiles').select('id', { count: 'exact', head: true }),
-        supabase.from('trips').select('id', { count: 'exact', head: true }),
-        supabase.from('reviews').select('id', { count: 'exact', head: true }),
-        supabase.from('transport_routes').select('id', { count: 'exact', head: true }),
-      ]);
-      setStats({
-        users: u.count || 0,
-        trips: tr.count || 0,
-        reviews: rv.count || 0,
-        routes: rt.count || 0,
-      });
-    };
-    fetch();
+    api.get('/analytics')
+      .then((data: any) => setStats(data || { users: 0, trips: 0, reviews: 0, routes: 0 }))
+      .catch(() => {});
   }, []);
 
   const cards = [

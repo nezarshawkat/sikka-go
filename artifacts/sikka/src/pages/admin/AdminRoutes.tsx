@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
@@ -7,38 +7,55 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Route, Search } from 'lucide-react';
 
+interface TransitLine {
+  id: string;
+  transportTypeId: string;
+  lineNumber: string;
+  nameEn: string;
+  nameAr: string;
+  fromArea: string;
+  toArea: string;
+  viaStops: string[];
+  priceEgp: number;
+  routePath: any;
+}
+
+interface TransportType {
+  id: string;
+  nameEn: string;
+  nameAr: string;
+  color: string;
+}
+
 const AdminRoutes = () => {
   const { language } = useAuth();
-  const [routes, setRoutes] = useState<any[]>([]);
-  const [transportTypes, setTransportTypes] = useState<any[]>([]);
+  const [routes, setRoutes] = useState<TransitLine[]>([]);
+  const [transportTypes, setTransportTypes] = useState<TransportType[]>([]);
   const [typeId, setTypeId] = useState('all');
   const [query, setQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const fetch = async () => {
-      const [r, tt] = await Promise.all([
-        supabase.from('transit_lines').select('*').eq('is_active', true).order('line_number'),
-        supabase.from('transport_types').select('id, name_en, name_ar, color, icon').eq('is_active', true),
-      ]);
-      setRoutes(r.data || []);
-      setTransportTypes(tt.data || []);
-      setIsLoading(false);
-    };
-    fetch();
+    Promise.all([api.get('/transit-lines'), api.get('/transport-types')])
+      .then(([lines, types]) => {
+        setRoutes(lines || []);
+        setTransportTypes(types || []);
+      })
+      .catch(() => {})
+      .finally(() => setIsLoading(false));
   }, []);
 
   const filteredRoutes = useMemo(() => {
     const q = query.trim().toLowerCase();
     return routes.filter(route => {
-      const typeMatch = typeId === 'all' || route.transport_type_id === typeId;
+      const typeMatch = typeId === 'all' || route.transportTypeId === typeId;
       const searchMatch = !q ||
-        route.line_number?.toLowerCase().includes(q) ||
-        route.name_en?.toLowerCase().includes(q) ||
-        route.name_ar?.includes(query) ||
-        route.from_area?.toLowerCase().includes(q) ||
-        route.to_area?.toLowerCase().includes(q) ||
-        route.via_stops?.some((stop: string) => stop.toLowerCase().includes(q));
+        route.lineNumber?.toLowerCase().includes(q) ||
+        route.nameEn?.toLowerCase().includes(q) ||
+        route.nameAr?.includes(query) ||
+        route.fromArea?.toLowerCase().includes(q) ||
+        route.toArea?.toLowerCase().includes(q) ||
+        route.viaStops?.some((stop: string) => stop.toLowerCase().includes(q));
       return typeMatch && searchMatch;
     });
   }, [query, routes, typeId]);
@@ -57,7 +74,7 @@ const AdminRoutes = () => {
           <SelectContent>
             <SelectItem value="all">All transport types</SelectItem>
             {transportTypes.map(type => (
-              <SelectItem key={type.id} value={type.id}>{language === 'ar' ? type.name_ar : type.name_en}</SelectItem>
+              <SelectItem key={type.id} value={type.id}>{language === 'ar' ? type.nameAr : type.nameEn}</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -71,24 +88,24 @@ const AdminRoutes = () => {
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {filteredRoutes.map(route => {
-          const type = typeById.get(route.transport_type_id);
+          const type = typeById.get(route.transportTypeId);
           return (
             <Card key={route.id}>
               <CardContent className="p-4 space-y-3">
                 <div className="flex items-center justify-between gap-2">
-                  <Badge variant="outline" style={{ borderColor: type?.color, color: type?.color }}>{route.line_number || 'Route'}</Badge>
-                  <span className="text-xs text-muted-foreground">{type ? (language === 'ar' ? type.name_ar : type.name_en) : 'Transport'}</span>
+                  <Badge variant="outline" style={{ borderColor: type?.color, color: type?.color }}>{route.lineNumber || 'Route'}</Badge>
+                  <span className="text-xs text-muted-foreground">{type ? (language === 'ar' ? type.nameAr : type.nameEn) : 'Transport'}</span>
                 </div>
                 <div className="flex gap-2">
                   <Route className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-foreground">{route.from_area} → {route.to_area}</p>
-                    {route.via_stops?.length > 0 && <p className="text-xs text-muted-foreground line-clamp-2">{route.via_stops.join(' · ')}</p>}
+                    <p className="text-sm font-medium text-foreground">{route.fromArea} → {route.toArea}</p>
+                    {route.viaStops?.length > 0 && <p className="text-xs text-muted-foreground line-clamp-2">{route.viaStops.join(' · ')}</p>}
                   </div>
                 </div>
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span>{route.price_egp} EGP</span>
-                  <span>{route.route_path ? 'Visible on map' : 'Auto-drawn on Admin Map'}</span>
+                  <span>{route.priceEgp} EGP</span>
+                  <span>{route.routePath ? 'Visible on map' : 'Auto-drawn on Admin Map'}</span>
                 </div>
               </CardContent>
             </Card>
