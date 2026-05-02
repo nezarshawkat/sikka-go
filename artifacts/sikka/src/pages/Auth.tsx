@@ -78,26 +78,27 @@ const Auth = () => {
       }
       setPendingPhone(fullPhone);
       setStep('otp');
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to send OTP');
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Failed to send OTP');
     } finally {
       setIsLoading(false);
     }
   };
 
+  interface OtpResponse { token: string; userId: string; profile: Parameters<typeof setPhoneSession>[2]; isNew: boolean }
   const handleVerifyOtp = async () => {
     if (otp.length !== 6) return;
     setIsLoading(true);
     try {
-      const res = await api.post('/auth/verify-otp', { phone: pendingPhone, code: otp });
+      const res = await api.post<OtpResponse>('/auth/verify-otp', { phone: pendingPhone, code: otp });
       setPhoneSession(res.token, res.userId, res.profile);
       if (res.isNew) {
         setStep('nationality');
       } else {
         navigate('/');
       }
-    } catch (err: any) {
-      toast.error(err.message || 'Invalid code');
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Invalid code');
     } finally { setIsLoading(false); }
   };
 
@@ -121,8 +122,8 @@ const Auth = () => {
       setPhoneSession(res.token, res.userId, res.profile, !!res.isAdmin);
       toast.success('Welcome, Admin!');
       navigate('/admin');
-    } catch (err: any) {
-      toast.error(err.message || 'Login failed. Check username and password.');
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Login failed. Check username and password.');
     } finally { setIsLoading(false); }
   };
 

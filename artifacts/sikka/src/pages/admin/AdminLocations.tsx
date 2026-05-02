@@ -26,9 +26,9 @@ const AdminLocations = () => {
 
   const fetchLocations = async () => {
     try {
-      const data = await api.get('/locations');
-      setLocations(data || []);
-    } catch (err: any) { toast.error(err.message); }
+      const data = await api.get<Location[]>('/locations');
+      setLocations(data ?? []);
+    } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Failed to load'); }
     setIsLoading(false);
   };
 
@@ -36,26 +36,26 @@ const AdminLocations = () => {
 
   const addLocation = async () => {
     try {
-      const row = await api.post('/locations', {
+      const row = await api.post<Location>('/locations', {
         nameEn: 'New Location', nameAr: 'موقع جديد',
         latitude: 30.0444, longitude: 31.2357, city: 'cairo',
       });
       setLocations(prev => [...prev, row]);
-    } catch (err: any) { toast.error(err.message); }
+    } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Failed to add'); }
   };
 
   const updateLocation = async (id: string, updates: Partial<Location>) => {
     try {
       await api.put(`/locations/${id}`, updates);
       toast.success('Updated');
-    } catch (err: any) { toast.error(err.message); }
+    } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Failed to update'); }
   };
 
   const deleteLocation = async (id: string) => {
     try {
       await api.delete(`/locations/${id}`);
       setLocations(prev => prev.filter(l => l.id !== id));
-    } catch (err: any) { toast.error(err.message); }
+    } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Failed to delete'); }
   };
 
   if (isLoading) return <p className="text-muted-foreground text-sm">Loading...</p>;

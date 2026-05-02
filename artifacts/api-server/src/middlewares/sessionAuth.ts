@@ -2,9 +2,8 @@ import { Request, Response, NextFunction } from "express";
 import { db } from "@workspace/db";
 import { phoneSessionsTable } from "@workspace/db";
 import { and, eq, gt } from "drizzle-orm";
-import { getAuth } from "@clerk/express";
 
-export async function sessionAuth(req: Request, _res: Response, next: NextFunction) {
+export async function sessionAuth(req: Request, _res: Response, next: NextFunction): Promise<void> {
   const authHeader = req.headers.authorization;
 
   if (authHeader?.startsWith("Bearer ")) {
@@ -16,14 +15,8 @@ export async function sessionAuth(req: Request, _res: Response, next: NextFuncti
       .limit(1);
 
     if (session) {
-      (req as any).userId = session.userId;
-      return next();
+      req.userId = session.userId;
     }
-  }
-
-  const clerkAuth = getAuth(req);
-  if (clerkAuth?.userId) {
-    (req as any).userId = `clerk:${clerkAuth.userId}`;
   }
 
   next();

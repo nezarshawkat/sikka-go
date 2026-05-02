@@ -126,10 +126,13 @@ Plan 1-4 segments covering the full trip. Icon values: bus, metro, train, car, b
     });
 
     if (!response.ok) throw new Error(`AI API error: ${response.status}`);
-    const data = await response.json() as any;
+    interface OpenAIResponse {
+      choices: Array<{ message: { content: string } }>;
+    }
+    const data = await response.json() as OpenAIResponse;
     const plan = JSON.parse(data.choices[0].message.content);
     return res.json(plan);
-  } catch (err) {
+  } catch (err: unknown) {
     console.error("AI trip plan error:", err);
     return res.json(generateFallbackPlan(distanceKm, tripType, startLat, startLng, endLat, endLng));
   }

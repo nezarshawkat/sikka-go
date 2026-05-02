@@ -29,9 +29,9 @@ const AdminTransport = () => {
 
   const fetchTypes = async () => {
     try {
-      const data = await api.get('/transport-types');
-      setTypes(data || []);
-    } catch (err: any) { toast.error(err.message); }
+      const data = await api.get<TransportType[]>('/transport-types');
+      setTypes(data ?? []);
+    } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Failed to load'); }
     setIsLoading(false);
   };
 
@@ -42,17 +42,17 @@ const AdminTransport = () => {
       await api.put(`/transport-types/${id}`, updates);
       setTypes(prev => prev.map(tt => tt.id === id ? { ...tt, ...updates } : tt));
       toast.success('Updated');
-    } catch (err: any) { toast.error(err.message); }
+    } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Failed to update'); }
   };
 
   const addType = async () => {
     try {
-      const row = await api.post('/transport-types', {
+      const row = await api.post<TransportType>('/transport-types', {
         nameEn: 'New Transport', nameAr: 'مواصلات جديدة',
         icon: 'bus', averageSpeedKmh: 30, basePriceEgp: 5, pricePerKmEgp: 1, color: '#3B82F6',
       });
       setTypes(prev => [...prev, row]);
-    } catch (err: any) { toast.error(err.message); }
+    } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Failed to add'); }
   };
 
   if (isLoading) return <p className="text-muted-foreground text-sm">Loading...</p>;

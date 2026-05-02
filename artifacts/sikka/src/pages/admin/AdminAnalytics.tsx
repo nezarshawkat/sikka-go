@@ -7,11 +7,12 @@ import { Users, Route, Star, Train } from 'lucide-react';
 
 const AdminAnalytics = () => {
   const { language } = useAuth();
-  const [stats, setStats] = useState({ users: 0, trips: 0, reviews: 0, routes: 0 });
+  interface AnalyticsStats { users: number; trips: number; reviews: number; routes: number }
+  const [stats, setStats] = useState<AnalyticsStats>({ users: 0, trips: 0, reviews: 0, routes: 0 });
 
   useEffect(() => {
-    api.get('/analytics')
-      .then((data: any) => setStats(data || { users: 0, trips: 0, reviews: 0, routes: 0 }))
+    api.get<AnalyticsStats>('/analytics')
+      .then((data) => setStats(data ?? { users: 0, trips: 0, reviews: 0, routes: 0 }))
       .catch(() => {});
   }, []);
 

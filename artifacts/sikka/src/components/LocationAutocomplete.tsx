@@ -52,9 +52,16 @@ const LocationAutocomplete = ({ value, onChange, onSelect, placeholder, classNam
         const res = await fetch(
           `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(value)}.json?access_token=${MAPBOX_TOKEN}&country=eg&language=en,ar&limit=7&types=country,region,place,district,locality,neighborhood,address,poi`
         );
-        const data = await res.json();
+        interface MapboxFeature {
+          id: string;
+          place_name: string;
+          center: [number, number];
+          text: string;
+        }
+        interface MapboxResponse { features?: MapboxFeature[] }
+        const data = await res.json() as MapboxResponse;
         if (data.features) {
-          setSuggestions(data.features.map((f: any) => ({
+          setSuggestions(data.features.map((f) => ({
             id: f.id,
             place_name: f.place_name,
             center: f.center,

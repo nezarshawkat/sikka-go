@@ -6,10 +6,15 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { Search, Plus, Eye, EyeOff, Pencil, Trash2, Save, Flame, MapPin, Route as RouteIcon } from 'lucide-react';
-import Map, { Source, Layer, Marker, NavigationControl } from 'react-map-gl/mapbox';
+import Map, { Source, Layer, Marker, NavigationControl, type MapLayerMouseEvent } from 'react-map-gl/mapbox';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+
+interface GeoJSONLineString {
+  type: 'LineString';
+  coordinates: [number, number][];
+}
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
 const CAIRO = { latitude: 30.0444, longitude: 31.2357, zoom: 11 };
@@ -21,7 +26,7 @@ interface TransportType {
 }
 interface TransitLine {
   id: string; transportTypeId: string; lineNumber: string; nameEn: string; nameAr: string;
-  fromArea: string; toArea: string; viaStops: string[]; routePath: any;
+  fromArea: string; toArea: string; viaStops: string[]; routePath: GeoJSONLineString | null;
   priceEgp: number; frequencyMinutes: number | null; hasFixedStops: boolean; isActive: boolean;
 }
 interface HeatmapPoint {
@@ -82,7 +87,7 @@ const AdminMap = () => {
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawPoints, setDrawPoints] = useState<[number, number][]>([]);
   const [isSnapping, setIsSnapping] = useState(false);
-  const [generatedPaths, setGeneratedPaths] = useState<Record<string, any>>({});
+  const [generatedPaths, setGeneratedPaths] = useState<Record<string, GeoJSONLineString>>({});
   const generatingRef = useRef(new Set<string>());
   const geocodeCacheRef = useRef<Record<string, [number, number] | null>>({});
 
@@ -107,7 +112,7 @@ const AdminMap = () => {
       setTransitLines((tl || []) as TransitLine[]);
       setHeatmapData((hm || []) as HeatmapPoint[]);
       setMawaqef((mw || []) as Mawaqef[]);
-    } catch (err: any) { toast.error(err.message); }
+    } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Failed to load data'); }
     setIsLoading(false);
   }, []);
 
@@ -243,7 +248,7 @@ const AdminMap = () => {
       await api.post('/heatmaps', { transportTypeId: tuktukType.id, longitude: lng, latitude: lat, intensity: 0.75, radiusKm: 1.5 });
       toast.success('Tuk-tuk heat point added');
       fetchData();
-    } catch (err: any) { toast.error(err.message); }
+    } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Failed to add heat point'); }
   };
 
   const deleteHeatPoint = async (id: string) => {
@@ -251,10 +256,10 @@ const AdminMap = () => {
       await api.delete(`/heatmaps/${id}`);
       toast.success('Heat point removed');
       fetchData();
-    } catch (err: any) { toast.error(err.message); }
+    } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Failed to delete heat point'); }
   };
 
-  const handleMapClick = useCallback((e: any) => {
+  const handleMapClick = useCallback((e: MapLayerMouseEvent) => {
     if (isDrawing) {
       setDrawPoints(prev => [...prev, [e.lngLat.lng, e.lngLat.lat]]);
       return;
@@ -347,7 +352,7 @@ const AdminMap = () => {
       } else {
         await api.post('/transit-lines', payload);
       }
-    } catch (err: any) { toast.error(err.message); return; }
+    } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Failed to save route'); return; }
     toast.success(editingLine ? 'Route updated and snapped to roads' : 'Route added and snapped to roads');
     setShowForm(false);
     setDrawPoints([]);
@@ -363,7 +368,7 @@ const AdminMap = () => {
       setDetailLine(null);
       setSelectedLine(null);
       fetchData();
-    } catch (err: any) { toast.error(err.message); }
+    } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Failed to delete route'); }
   };
 
   if (isLoading) return <div className="flex items-center justify-center h-96"><div className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>;
@@ -600,7 +605,7 @@ const AdminMap = () => {
                     if (!path) { toast.error('Could not geocode the stops — add more via stops'); return; }
                     try {
                       await api.put(`/transit-lines/${detailLine.id}`, { routePath: path });
-                    } catch (err: any) { toast.error(err.message); return; }
+                    } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Failed to regenerate path'); return; }
                     toast.success('Path regenerated and snapped to roads');
                     setGeneratedPaths(prev => ({ ...prev, [detailLine.id]: path }));
                     fetchData();

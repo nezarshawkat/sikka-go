@@ -34,7 +34,3 @@ externalPort = 80
 [userenv]
 
 [userenv.shared]
-VITE_SUPABASE_URL = "https://avwaockrlxmsfnhytemv.supabase.co"
-VITE_SUPABASE_PUBLISHABLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF2d2FvY2tybHhtc2ZuaHl0ZW12Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3NDkyOTAsImV4cCI6MjA5MTMyNTI5MH0.AmWRFwQavhTJUuvAVrPVRMY6zuWTnSHLIpAk2OW5SmY"
-VITE_SUPABASE_PROJECT_ID = "avwaockrlxmsfnhytemv"
-VITE_CLERK_PUBLISHABLE_KEY = "pk_test_Y2hhcm1lZC1nYXItMjMuY2xlcmsuYWNjb3VudHMuZGV2JA"

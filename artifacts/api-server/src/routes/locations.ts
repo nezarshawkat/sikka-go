@@ -6,31 +6,40 @@ import { requireAdmin } from "../middlewares/requireAdmin";
 
 const router = Router();
 
-// Public read
+interface LocationUpdate {
+  nameEn?: string;
+  nameAr?: string;
+  latitude?: number;
+  longitude?: number;
+  city?: string;
+  isStation?: boolean;
+}
+
 router.get("/", async (_req, res) => {
   const rows = await db.select().from(locationsTable).orderBy(asc(locationsTable.nameEn));
   res.json(rows);
 });
 
-// Admin-only writes
 router.post("/", requireAdmin, async (req, res) => {
   const { nameEn, nameAr, latitude, longitude, city, isStation } = req.body;
   const [row] = await db.insert(locationsTable).values({
-    nameEn: nameEn || "New Location",
-    nameAr: nameAr || "موقع جديد",
-    latitude: latitude || 30.0444,
-    longitude: longitude || 31.2357,
-    city: city || "cairo",
-    isStation: isStation || false,
+    nameEn: nameEn ?? "New Location",
+    nameAr: nameAr ?? "موقع جديد",
+    latitude: latitude ?? 30.0444,
+    longitude: longitude ?? 31.2357,
+    city: city ?? "cairo",
+    isStation: isStation ?? false,
   }).returning();
   res.json(row);
 });
 
 router.put("/:id", requireAdmin, async (req, res) => {
-  const updates: Record<string, any> = {};
-  const allowed = ["nameEn", "nameAr", "latitude", "longitude", "city", "isStation"];
+  const allowed: (keyof LocationUpdate)[] = ["nameEn", "nameAr", "latitude", "longitude", "city", "isStation"];
+  const updates: LocationUpdate = {};
   for (const key of allowed) {
-    if (req.body[key] !== undefined) updates[key] = req.body[key];
+    if (req.body[key] !== undefined) {
+      (updates as Record<keyof LocationUpdate, unknown>)[key] = req.body[key];
+    }
   }
   const [row] = await db.update(locationsTable).set(updates).where(eq(locationsTable.id, req.params.id)).returning();
   res.json(row);

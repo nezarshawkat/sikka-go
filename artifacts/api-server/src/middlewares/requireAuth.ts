@@ -1,8 +1,9 @@
 import { Request, Response, NextFunction } from "express";
 
-export function requireAuth(req: Request, res: Response, next: NextFunction) {
-  if (!(req as any).userId) {
-    return res.status(401).json({ error: "Authentication required" });
+export function requireAuth(req: Request, res: Response, next: NextFunction): void {
+  if (!req.userId) {
+    res.status(401).json({ error: "Authentication required" });
+    return;
   }
   next();
 }

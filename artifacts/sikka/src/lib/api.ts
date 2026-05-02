@@ -1,6 +1,6 @@
 const API_BASE = "/api";
 
-export async function apiFetch<T = any>(
+export async function apiFetch<T = unknown>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
@@ -13,18 +13,18 @@ export async function apiFetch<T = any>(
 
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
+    const err = await res.json().catch(() => ({ error: res.statusText })) as { error?: string };
     throw new Error(err.error || res.statusText);
   }
-  return res.json();
+  return res.json() as Promise<T>;
 }
 
 export const api = {
-  get: <T = any>(path: string) => apiFetch<T>(path),
-  post: <T = any>(path: string, body: any) =>
+  get: <T = unknown>(path: string) => apiFetch<T>(path),
+  post: <T = unknown>(path: string, body: unknown) =>
     apiFetch<T>(path, { method: "POST", body: JSON.stringify(body) }),
-  put: <T = any>(path: string, body: any) =>
+  put: <T = unknown>(path: string, body: unknown) =>
     apiFetch<T>(path, { method: "PUT", body: JSON.stringify(body) }),
-  delete: <T = any>(path: string) =>
+  delete: <T = unknown>(path: string) =>
     apiFetch<T>(path, { method: "DELETE" }),
 };

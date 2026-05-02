@@ -6,7 +6,6 @@ import { requireAdmin } from "../middlewares/requireAdmin";
 
 const router = Router();
 
-// Admin-only — analytics exposes aggregate user/trip data
 router.get("/", requireAdmin, async (_req, res) => {
   const [users, trips, reviews, routes] = await Promise.all([
     db.select({ count: count() }).from(profilesTable),

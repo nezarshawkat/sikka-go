@@ -16,17 +16,17 @@ function generateToken(): string {
 
 router.post("/send-otp", async (req, res) => {
   const { phone } = req.body;
-  if (!phone || phone.length < 8) {
-    return res.status(400).json({ error: "Valid phone number required" });
+  if (!phone || String(phone).length < 8) {
+    res.status(400).json({ error: "Valid phone number required" });
+    return;
   }
 
   const code = generateOtp();
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+  await db.insert(otpCodesTable).values({ phone: String(phone), code, expiresAt });
 
-  await db.insert(otpCodesTable).values({ phone, code, expiresAt });
-
-  // In development only: return the code in the response so the UI can show it as a toast.
-  // Never log OTP codes — they are sensitive authentication data.
+  // In development only: include the OTP in the response so the UI can display it as a toast.
+  // In production this field is omitted and the code must be delivered via SMS.
   const devCode = process.env.NODE_ENV !== "production" ? code : undefined;
   res.json({ success: true, dev_code: devCode });
 });
@@ -34,7 +34,8 @@ router.post("/send-otp", async (req, res) => {
 router.post("/verify-otp", async (req, res) => {
   const { phone, code } = req.body;
   if (!phone || !code) {
-    return res.status(400).json({ error: "Phone and code required" });
+    res.status(400).json({ error: "Phone and code required" });
+    return;
   }
 
   const [otp] = await db
@@ -42,8 +43,8 @@ router.post("/verify-otp", async (req, res) => {
     .from(otpCodesTable)
     .where(
       and(
-        eq(otpCodesTable.phone, phone),
-        eq(otpCodesTable.code, code),
+        eq(otpCodesTable.phone, String(phone)),
+        eq(otpCodesTable.code, String(code)),
         eq(otpCodesTable.verified, false),
         gt(otpCodesTable.expiresAt, new Date()),
       ),
@@ -51,7 +52,8 @@ router.post("/verify-otp", async (req, res) => {
     .limit(1);
 
   if (!otp) {
-    return res.status(400).json({ error: "Invalid or expired code" });
+    res.status(400).json({ error: "Invalid or expired code" });
+    return;
   }
 
   await db.update(otpCodesTable).set({ verified: true }).where(eq(otpCodesTable.id, otp.id));
@@ -62,12 +64,13 @@ router.post("/verify-otp", async (req, res) => {
   const isNew = !profile;
 
   if (!profile) {
-    [profile] = await db.insert(profilesTable).values({ userId, phone, language: "en", nationality: "egyptian" }).returning();
+    [profile] = await db.insert(profilesTable).values({
+      userId, phone: String(phone), language: "en", nationality: "egyptian",
+    }).returning();
   }
 
   const token = generateToken();
   const sessionExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-
   await db.insert(phoneSessionsTable).values({ userId, token, expiresAt: sessionExpiry });
 
   res.json({ success: true, token, userId, isNew, profile });
@@ -76,33 +79,30 @@ router.post("/verify-otp", async (req, res) => {
 router.post("/admin-login", async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) {
-    return res.status(400).json({ error: "Username and password required" });
+    res.status(400).json({ error: "Username and password required" });
+    return;
   }
 
-  // Fail closed in production if env vars are not configured.
-  // In development, fall back to defaults so the app works out of the box.
-  const isDev = process.env.NODE_ENV !== "production";
-  const ADMIN_USERNAME = process.env.ADMIN_USERNAME ?? (isDev ? "admin" : null);
-  const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? (isDev ? "Sikka@Admin@2024!" : null);
+  const isProd = process.env.NODE_ENV === "production";
+  const ADMIN_USERNAME = process.env.ADMIN_USERNAME ?? (isProd ? null : "admin");
+  const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? (isProd ? null : "Sikka@Admin@2024!");
 
   if (!ADMIN_USERNAME || !ADMIN_PASSWORD) {
-    return res.status(503).json({ error: "Admin authentication is not configured on this server" });
+    res.status(503).json({ error: "Admin authentication is not configured on this server" });
+    return;
   }
 
-  if (username.trim() !== ADMIN_USERNAME || password !== ADMIN_PASSWORD) {
-    return res.status(401).json({ error: "Invalid credentials" });
+  if (String(username).trim() !== ADMIN_USERNAME || String(password) !== ADMIN_PASSWORD) {
+    res.status(401).json({ error: "Invalid credentials" });
+    return;
   }
 
-  const userId = `admin:${username.trim()}`;
+  const userId = `admin:${String(username).trim()}`;
 
   let [profile] = await db.select().from(profilesTable).where(eq(profilesTable.userId, userId)).limit(1);
   if (!profile) {
     [profile] = await db.insert(profilesTable).values({
-      userId,
-      phone: null,
-      language: "en",
-      nationality: "egyptian",
-      displayName: "Admin",
+      userId, phone: null, language: "en", nationality: "egyptian", displayName: "Admin",
     }).returning();
   }
 
@@ -126,7 +126,8 @@ router.post("/admin-login", async (req, res) => {
 router.get("/session", async (req, res) => {
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith("Bearer ")) {
-    return res.status(401).json({ error: "No session" });
+    res.status(401).json({ error: "No session" });
+    return;
   }
   const token = authHeader.slice(7);
 
@@ -137,11 +138,16 @@ router.get("/session", async (req, res) => {
     .limit(1);
 
   if (!session) {
-    return res.status(401).json({ error: "Invalid or expired session" });
+    res.status(401).json({ error: "Invalid or expired session" });
+    return;
   }
 
   const [profile] = await db.select().from(profilesTable).where(eq(profilesTable.userId, session.userId)).limit(1);
-  const [roleRow] = await db.select().from(userRolesTable).where(and(eq(userRolesTable.userId, session.userId), eq(userRolesTable.role, "admin"))).limit(1);
+  const [roleRow] = await db
+    .select()
+    .from(userRolesTable)
+    .where(and(eq(userRolesTable.userId, session.userId), eq(userRolesTable.role, "admin")))
+    .limit(1);
 
   res.json({ userId: session.userId, profile, isAdmin: !!roleRow });
 });

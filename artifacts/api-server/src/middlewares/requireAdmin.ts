@@ -3,20 +3,21 @@ import { db } from "@workspace/db";
 import { userRolesTable } from "@workspace/db";
 import { and, eq } from "drizzle-orm";
 
-export async function requireAdmin(req: Request, res: Response, next: NextFunction) {
-  const userId = (req as any).userId;
-  if (!userId) {
-    return res.status(401).json({ error: "Authentication required" });
+export async function requireAdmin(req: Request, res: Response, next: NextFunction): Promise<void> {
+  if (!req.userId) {
+    res.status(401).json({ error: "Authentication required" });
+    return;
   }
 
   const [role] = await db
     .select()
     .from(userRolesTable)
-    .where(and(eq(userRolesTable.userId, userId), eq(userRolesTable.role, "admin")))
+    .where(and(eq(userRolesTable.userId, req.userId), eq(userRolesTable.role, "admin")))
     .limit(1);
 
   if (!role) {
-    return res.status(403).json({ error: "Admin access required" });
+    res.status(403).json({ error: "Admin access required" });
+    return;
   }
 
   next();

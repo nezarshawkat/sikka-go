@@ -17,7 +17,7 @@ interface TransitLine {
   toArea: string;
   viaStops: string[];
   priceEgp: number;
-  routePath: any;
+  routePath: { type: 'LineString'; coordinates: [number, number][] } | null;
 }
 
 interface TransportType {

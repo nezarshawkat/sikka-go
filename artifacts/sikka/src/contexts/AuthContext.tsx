@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { useUser, useClerk } from '@clerk/react';
 import { api } from '@/lib/api';
 import type { Language } from '@/lib/i18n';
 
@@ -16,7 +15,7 @@ interface PhoneUser {
 }
 
 interface AuthContextType {
-  user: any | null;
+  user: { id: string } | null;
   phoneUser: PhoneUser | null;
   profile: Profile | null;
   isAdmin: boolean;
@@ -41,14 +40,17 @@ const AuthContext = createContext<AuthContextType>({
 
 export const useAuth = () => useContext(AuthContext);
 
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user, isLoaded: clerkLoaded } = useUser();
-  const { signOut: clerkSignOut } = useClerk();
+interface SessionResponse {
+  userId: string;
+  profile: Profile;
+  isAdmin: boolean;
+}
 
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [phoneUser, setPhoneUser] = useState<PhoneUser | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [isPhoneLoading, setIsPhoneLoading] = useState(
+  const [isLoading, setIsLoading] = useState(
     () => !!localStorage.getItem('sikka_phone_token')
   );
   const [language, setLanguageState] = useState<Language>(() => {
@@ -58,11 +60,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     const token = localStorage.getItem('sikka_phone_token');
     if (!token) {
-      setIsPhoneLoading(false);
+      setIsLoading(false);
       return;
     }
-    api.get('/auth/session')
-      .then((data: any) => {
+    api.get<SessionResponse>('/auth/session')
+      .then((data) => {
         setPhoneUser({ userId: data.userId, profile: data.profile });
         setProfile(data.profile);
         setIsAdmin(data.isAdmin);
@@ -71,15 +73,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       .catch(() => {
         localStorage.removeItem('sikka_phone_token');
       })
-      .finally(() => setIsPhoneLoading(false));
+      .finally(() => setIsLoading(false));
   }, []);
-
-  useEffect(() => {
-    if (user && clerkLoaded) {
-      const role = (user.publicMetadata as any)?.role;
-      setIsAdmin(role === 'admin');
-    }
-  }, [user, clerkLoaded]);
 
   const setLanguage = (lang: Language) => {
     setLanguageState(lang);
@@ -109,13 +104,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setProfile(null);
       setIsAdmin(false);
     }
-    if (user) {
-      await clerkSignOut();
-    }
   };
 
-  const isLoading = isPhoneLoading;
-  const effectiveUser = user || (phoneUser ? { id: phoneUser.userId } : null);
+  const effectiveUser = phoneUser ? { id: phoneUser.userId } : null;
 
   return (
     <AuthContext.Provider value={{

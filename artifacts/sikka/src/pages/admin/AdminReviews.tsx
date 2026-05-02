@@ -5,14 +5,21 @@ import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { Star, Trash2 } from 'lucide-react';
 
+interface Review {
+  id: string;
+  rating: number;
+  comment: string | null;
+  createdAt: string;
+}
+
 const AdminReviews = () => {
-  const [reviews, setReviews] = useState<any[]>([]);
+  const [reviews, setReviews] = useState<Review[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    api.get('/reviews')
-      .then((data: any) => setReviews(data || []))
-      .catch((err: any) => toast.error(err.message))
+    api.get<Review[]>('/reviews')
+      .then((data) => setReviews(data ?? []))
+      .catch((err: unknown) => toast.error(err instanceof Error ? err.message : 'Failed to load reviews'))
       .finally(() => setIsLoading(false));
   }, []);
 
@@ -20,7 +27,7 @@ const AdminReviews = () => {
     try {
       await api.delete(`/reviews/${id}`);
       setReviews(prev => prev.filter(r => r.id !== id));
-    } catch (err: any) { toast.error(err.message); }
+    } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Failed to delete review'); }
   };
 
   if (isLoading) return <p className="text-muted-foreground text-sm">Loading...</p>;
