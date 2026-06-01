@@ -14,6 +14,7 @@ import tripPlanRouter from "./tripPlan";
 import seedCairoRouter from "./seedCairo";
 import seedAlexandriaRouter from "./seedAlexandria";
 import seedFromCSVRouter from "./seedFromCSV";
+import seedHeatmapsRouter from "./seedHeatmaps";
 import intercityRouter from "./intercity";
 import reportsRouter from "./reports";
 import transportReportsRouter from "./transportReports";
@@ -49,6 +50,8 @@ router.use("/analytics", analyticsRouter);
 router.use("/admin/seed-cairo", seedCairoRouter);
 router.use("/admin/seed-alexandria", seedAlexandriaRouter);
 router.use("/admin/seed-from-csv", seedFromCSVRouter);
+// POST /api/admin/seed-heatmaps — Tuktuk + White Taxi density hotspots
+router.use("/admin/seed-heatmaps", seedHeatmapsRouter);
 
 // User-scoped routes
 router.use("/profile", profileRouter);

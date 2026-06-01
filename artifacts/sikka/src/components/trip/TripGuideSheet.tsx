@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { t } from '@/lib/i18n';
 import type { Language } from '@/lib/i18n';
 import {
-  ChevronUp, ChevronDown, X, Clock, Wallet, Check, RefreshCw, MapPin, ArrowLeft, ArrowRight, Flag,
+  ChevronUp, ChevronDown, X, Clock, Wallet, Check, MapPin, ArrowLeft, ArrowRight, Flag,
 } from 'lucide-react';
 
 const ICONS: Record<string, string> = {
@@ -77,12 +77,12 @@ export default function TripGuideSheet({
           if (info.offset.y < -60 && !expanded) onToggleExpand();
           if (info.offset.y > 60 && expanded) onToggleExpand();
         }}
-        className="bg-card/98 backdrop-blur-md rounded-2xl shadow-2xl border overflow-hidden"
+        className="bg-card/98 backdrop-blur-md rounded-2xl shadow-2xl border overflow-hidden flex flex-col max-h-[calc(100vh-7rem)]"
       >
         {/* drag handle / expand toggle */}
         <button
           onClick={onToggleExpand}
-          className="w-full flex flex-col items-center pt-2 pb-1"
+          className="w-full flex flex-col items-center pt-2 pb-1 shrink-0"
           aria-label="toggle"
         >
           <div className="h-1.5 w-10 rounded-full bg-muted-foreground/30" />
@@ -128,10 +128,10 @@ export default function TripGuideSheet({
           {expanded && (
             <motion.div
               key="expanded"
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 'auto', opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              className="overflow-hidden"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
             >
               <div className="px-4 pb-4 space-y-4">
                 {/* overall ETA + cost */}
@@ -177,31 +177,6 @@ export default function TripGuideSheet({
 
                   {seg.info && !seg.instructions?.length && (
                     <p className="text-xs text-muted-foreground leading-snug">{seg.info}</p>
-                  )}
-
-                  {/* alternatives / swap */}
-                  {seg.alternatives && seg.alternatives.length > 0 && (
-                    <div className="mt-2 pt-2 border-t space-y-1">
-                      <p className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
-                        <RefreshCw className="h-3 w-3" /> {t('alternativeOptions', language)}
-                      </p>
-                      {seg.alternatives.map((alt, j) => (
-                        <button
-                          key={j}
-                          onClick={() => onSwap(currentSegIdx, alt)}
-                          className="w-full flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-accent/50 transition-colors"
-                        >
-                          <span className="flex items-center gap-1.5 text-xs">
-                            <span className="text-base">{getIcon(alt.icon)}</span>
-                            {alt.line_number && <Badge variant="outline" className="text-[9px] h-3.5 px-1">{alt.line_number}</Badge>}
-                            {alt.transport_name}
-                          </span>
-                          <span className="text-[11px] text-muted-foreground">
-                            {Math.round(alt.duration_minutes)} {t('minutes', language)} · {Math.round(alt.cost_egp)} {t('egp', language)}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
                   )}
                 </div>
 

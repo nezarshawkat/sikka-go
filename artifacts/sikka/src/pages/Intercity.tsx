@@ -77,14 +77,31 @@ const Intercity = () => {
   const [showFromPicker, setShowFromPicker] = useState(false);
   const [showToPicker, setShowToPicker] = useState(false);
   const [cityFilter, setCityFilter] = useState('');
+  // When arriving from the home map's intercity flow (?from=&to=), preselect
+  // both cities and auto-run the search once.
+  const [autoSearch, setAutoSearch] = useState(false);
 
   useEffect(() => {
     fetch('/api/intercity/cities')
       .then((r) => r.json())
       .then((data: City[]) => {
         setCities(data);
-        const cairo = data.find((c) => c.id === 'cairo');
-        if (cairo) setFromCity(cairo);
+        const params = new URLSearchParams(window.location.search);
+        const fromParam = params.get('from');
+        const toParam = params.get('to');
+        const byName = (name: string | null) =>
+          name
+            ? data.find(
+                (c) =>
+                  c.nameEn.toLowerCase() === name.toLowerCase() ||
+                  c.id.toLowerCase() === name.toLowerCase(),
+              )
+            : undefined;
+        const fromMatch = byName(fromParam);
+        const toMatch = byName(toParam);
+        setFromCity(fromMatch ?? data.find((c) => c.id === 'cairo') ?? null);
+        if (toMatch) setToCity(toMatch);
+        if (fromMatch && toMatch && fromMatch.id !== toMatch.id) setAutoSearch(true);
       })
       .catch(() => toast.error('Could not load cities'));
   }, []);
@@ -116,6 +133,14 @@ const Intercity = () => {
       setLoading(false);
     }
   }, [fromCity, toCity, date, isAr]);
+
+  // Fire the auto-search once both cities are set from URL params.
+  useEffect(() => {
+    if (autoSearch && fromCity && toCity && fromCity.id !== toCity.id) {
+      setAutoSearch(false);
+      void handleSearch();
+    }
+  }, [autoSearch, fromCity, toCity, handleSearch]);
 
   const routeGeoJSON = fromCity?.lat && fromCity?.lng && toCity?.lat && toCity?.lng
     ? {

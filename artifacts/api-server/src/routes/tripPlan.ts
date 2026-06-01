@@ -34,16 +34,70 @@ function zoneOf(governorate: string) {
   return GREATER_CAIRO.has(governorate) ? "greater_cairo" : governorate;
 }
 
+// Decide whether a trip crosses governorate zones (intercity).
+function detectIntercity(startLat: number, startLng: number, endLat: number, endLng: number) {
+  const distanceKm = haversineKm(startLat, startLng, endLat, endLng);
+  const startNear = nearestCity(startLat, startLng);
+  const endNear = nearestCity(endLat, endLng);
+  const isIntercity =
+    !!startNear && !!endNear &&
+    distanceKm > 50 &&
+    zoneOf(startNear.city.governorate) !== zoneOf(endNear.city.governorate);
+  return { distanceKm, startNear, endNear, isIntercity };
+}
+
+// Does any serfis route plausibly reach the destination city? (matches city name in stops)
+async function findSerfisToCity(toCity: IntercityCity) {
+  const types = await db.select().from(transportTypesTable).where(eq(transportTypesTable.isActive, true));
+  const serfisType = types.find((t) => t.nameEn.toLowerCase().includes("serfis"));
+  if (!serfisType) return false;
+  const lines = await db.select().from(transitLinesTable).where(eq(transitLinesTable.transportTypeId, serfisType.id));
+  const targets = [toCity.nameAr, toCity.nameEn].map((s) => s.toLowerCase()).filter(Boolean);
+  return lines.some((l) => {
+    const hay = [l.fromArea, l.toArea, ...(l.viaStops ?? [])].filter(Boolean).map((s) => s.toLowerCase());
+    return targets.some((tgt) => hay.some((h) => h.includes(tgt) || tgt.includes(h)));
+  });
+}
+
+// GET /api/trips/plan/intercity-check?startLat&startLng&endLat&endLng
+router.get("/intercity-check", async (req, res) => {
+  const startLat = parseFloat(String(req.query.startLat));
+  const startLng = parseFloat(String(req.query.startLng));
+  const endLat = parseFloat(String(req.query.endLat));
+  const endLng = parseFloat(String(req.query.endLng));
+  if ([startLat, startLng, endLat, endLng].some((n) => Number.isNaN(n))) {
+    return res.status(400).json({ error: "startLat, startLng, endLat, endLng are required" });
+  }
+  const { isIntercity, startNear, endNear } = detectIntercity(startLat, startLng, endLat, endLng);
+  if (!isIntercity || !startNear || !endNear) {
+    return res.json({ isIntercity: false, hasSerfis: false, fromCity: null, toCity: null });
+  }
+  let hasSerfis = false;
+  try {
+    hasSerfis = await findSerfisToCity(endNear.city);
+  } catch (err) {
+    console.error("Serfis check error:", err);
+  }
+  return res.json({
+    isIntercity: true,
+    hasSerfis,
+    fromCity: { id: startNear.city.id, nameEn: startNear.city.nameEn, nameAr: startNear.city.nameAr },
+    toCity: { id: endNear.city.id, nameEn: endNear.city.nameEn, nameAr: endNear.city.nameAr },
+  });
+});
+
 router.post("/", requireAuth, async (req, res) => {
-  const { startLat, startLng, endLat, endLng, tripType, budget, language } = req.body;
+  const { startLat, startLng, endLat, endLng, tripType, budget, language, mode } = req.body;
 
   const distanceKm = haversineKm(startLat, startLng, endLat, endLng);
   const isArabicLang = language === "ar";
 
   // ── Intercity auto-mode: destination in a different governorate / far away ──
+  // Skipped when the client explicitly forces city mode (e.g. user chose Serfis).
   const startNear = nearestCity(startLat, startLng);
   const endNear = nearestCity(endLat, endLng);
   if (
+    mode !== "city" &&
     startNear && endNear &&
     distanceKm > 50 &&
     zoneOf(startNear.city.governorate) !== zoneOf(endNear.city.governorate)

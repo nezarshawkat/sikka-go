@@ -13,7 +13,10 @@ import { getDirections } from '@/lib/routePaths';
 import { useTripTracking } from '@/hooks/useTripTracking';
 import TripGuideSheet, { type GuidePlan, type GuideSegment, type GuideAlternative } from '@/components/trip/TripGuideSheet';
 import SegmentReviewDialog, { type ReviewSegment } from '@/components/trip/SegmentReviewDialog';
+import BusUsedDialog from '@/components/trip/BusUsedDialog';
+import IntercityChoiceDialog from '@/components/trip/IntercityChoiceDialog';
 import ReportDialog from '@/components/ReportDialog';
+import { api } from '@/lib/api';
 import { toast } from 'sonner';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
@@ -56,6 +59,19 @@ const Index = () => {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [tripReviewOpen, setTripReviewOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
+
+  // #6 — ask which bus the user took after finishing a bus segment
+  const [busUsedOpen, setBusUsedOpen] = useState(false);
+  const [busUsedName, setBusUsedName] = useState<string | undefined>(undefined);
+
+  // #7 — intercity vs serfis choice when crossing governorates
+  const [choiceOpen, setChoiceOpen] = useState(false);
+  const [pendingTrip, setPendingTrip] = useState<{
+    planUrl: string;
+    intercityUrl: string;
+    fromName: string;
+    toName: string;
+  } | null>(null);
 
   useEffect(() => {
     if (!isLoading && !user) {
@@ -172,11 +188,64 @@ const Index = () => {
   };
   const handleBack = () => setCurrentSegIdx((i) => Math.max(i - 1, 0));
 
-  const handleDone = () => {
+  const openSegmentReview = () => {
     if (!activeTrip) return;
     const seg = activeTrip.segments[currentSegIdx];
     setReviewSeg({ transport_type_id: seg.transport_type_id, transport_name: seg.transport_name });
     setReviewOpen(true);
+  };
+
+  const handleDone = () => {
+    if (!activeTrip) return;
+    const seg = activeTrip.segments[currentSegIdx];
+    // #6 — after finishing a bus leg, ask which bus number + operator was used.
+    if (seg.icon === 'bus') {
+      setBusUsedName(seg.transport_name);
+      setBusUsedOpen(true);
+      return;
+    }
+    openSegmentReview();
+  };
+
+  // #7 — when a destination is chosen, detect intercity travel and offer the
+  // Serfis-vs-Intercity choice (or route straight to the intercity page).
+  const handleDestinationSelect = async (suggestion: { place_name: string; center: [number, number] }) => {
+    const destName = suggestion.place_name;
+    const destLat = suggestion.center[1];
+    const destLng = suggestion.center[0];
+    const sLat = userLocation?.lat || CAIRO_CENTER.latitude;
+    const sLng = userLocation?.lng || CAIRO_CENTER.longitude;
+
+    const planUrl = (forceCity = false) =>
+      `/plan?destination=${encodeURIComponent(destName)}&destLat=${destLat}&destLng=${destLng}&lat=${sLat}&lng=${sLng}${forceCity ? '&mode=city' : ''}`;
+
+    try {
+      const check = await api.get<{
+        isIntercity: boolean;
+        hasSerfis: boolean;
+        fromCity: { id: string; nameEn: string; nameAr: string } | null;
+        toCity: { id: string; nameEn: string; nameAr: string } | null;
+      }>(
+        `/trips/plan/intercity-check?startLat=${sLat}&startLng=${sLng}&endLat=${destLat}&endLng=${destLng}`,
+      );
+      if (check?.isIntercity && check.fromCity && check.toCity) {
+        const fromCity = check.fromCity;
+        const toCity = check.toCity;
+        const fromName = language === 'ar' ? fromCity.nameAr : fromCity.nameEn;
+        const toName = language === 'ar' ? toCity.nameAr : toCity.nameEn;
+        const intercityUrl = `/intercity?from=${encodeURIComponent(fromCity.nameEn)}&to=${encodeURIComponent(toCity.nameEn)}`;
+        if (check.hasSerfis) {
+          setPendingTrip({ planUrl: planUrl(true), intercityUrl, fromName, toName });
+          setChoiceOpen(true);
+          return;
+        }
+        navigate(intercityUrl);
+        return;
+      }
+    } catch (err) {
+      console.error('intercity-check failed, falling back to city planning', err);
+    }
+    navigate(planUrl());
   };
 
   const handleSegmentReviewDone = () => {
@@ -283,7 +352,7 @@ const Index = () => {
             value={searchQuery}
             onChange={setSearchQuery}
             onSelect={(suggestion) => {
-              navigate(`/plan?destination=${encodeURIComponent(suggestion.place_name)}&destLat=${suggestion.center[1]}&destLng=${suggestion.center[0]}&lat=${userLocation?.lat || CAIRO_CENTER.latitude}&lng=${userLocation?.lng || CAIRO_CENTER.longitude}`);
+              void handleDestinationSelect(suggestion);
             }}
             placeholder={t('searchDestination', language)}
             className="flex-1"
@@ -367,6 +436,29 @@ const Index = () => {
         open={reportOpen}
         onClose={() => setReportOpen(false)}
         transportTypeId={activeTrip?.segments[currentSegIdx]?.transport_type_id}
+        language={language}
+      />
+
+      {/* #6 — which bus did you take? */}
+      <BusUsedDialog
+        open={busUsedOpen}
+        onClose={() => setBusUsedOpen(false)}
+        onDone={openSegmentReview}
+        transportName={busUsedName}
+        language={language}
+      />
+
+      {/* #7 — Serfis vs Intercity choice */}
+      <IntercityChoiceDialog
+        open={choiceOpen}
+        onClose={() => setChoiceOpen(false)}
+        onChoose={(choice) => {
+          setChoiceOpen(false);
+          if (!pendingTrip) return;
+          navigate(choice === 'serfis' ? pendingTrip.planUrl : pendingTrip.intercityUrl);
+        }}
+        fromName={pendingTrip?.fromName}
+        toName={pendingTrip?.toName}
         language={language}
       />
 

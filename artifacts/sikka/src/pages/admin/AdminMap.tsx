@@ -123,7 +123,9 @@ const AdminMap = () => {
   const heatmapOnlyTypes = [tuktukType, whiteTaxiType].filter(Boolean);
 
   const governorateOptions = useMemo(() => {
-    const set = new Set<string>();
+    // Always offer Cairo so the selector is usable even before any line carries
+    // an explicit governorate value.
+    const set = new Set<string>(['Cairo']);
     transitLines.forEach(line => { if (line.governorate) set.add(line.governorate); });
     return Array.from(set).sort();
   }, [transitLines]);

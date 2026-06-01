@@ -12,6 +12,20 @@ import { toast } from 'sonner';
 
 type TripType = 'economic' | 'comfortable' | 'premium';
 
+const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
+
+async function reverseGeocode(lat: number, lng: number): Promise<string> {
+  try {
+    const res = await fetch(
+      `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${MAPBOX_TOKEN}&language=en,ar&limit=1&types=address,neighborhood,locality,place`
+    );
+    const data = await res.json();
+    return data.features?.[0]?.place_name || '';
+  } catch {
+    return '';
+  }
+}
+
 const TripPlan = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -22,6 +36,7 @@ const TripPlan = () => {
   const destLng = parseFloat(searchParams.get('destLng') || '0');
   const startLat = parseFloat(searchParams.get('lat') || '30.0444');
   const startLng = parseFloat(searchParams.get('lng') || '31.2357');
+  const mode = searchParams.get('mode') || undefined;
 
   const [tripType, setTripType] = useState<TripType>('economic');
   const [budget, setBudget] = useState('');
@@ -60,15 +75,29 @@ const TripPlan = () => {
   const handlePlanTrip = async () => {
     setIsPlanning(true);
     try {
-      const data = await api.post('/trips/plan', {
+      const data = await api.post<{ segments?: Array<Record<string, unknown>>; [k: string]: unknown }>('/trips/plan', {
         startLat, startLng,
         endLat: destLat, endLng: destLng,
         tripType,
         budget: budget ? parseFloat(budget) : null,
         language,
+        mode,
       });
 
       if (!data) throw new Error('No plan returned');
+
+      // Replace generic boundary labels ("Your Location" / "Near Destination")
+      // with real place names: actual origin (reverse-geocoded) and destination.
+      if (Array.isArray(data.segments) && data.segments.length > 0) {
+        const originName = await reverseGeocode(startLat, startLng);
+        const segs = [...data.segments];
+        if (originName) segs[0] = { ...segs[0], start_name: originName };
+        if (destination) {
+          const last = segs.length - 1;
+          segs[last] = { ...segs[last], end_name: destination };
+        }
+        data.segments = segs;
+      }
 
       sessionStorage.setItem('tripPlan', JSON.stringify({
         ...data,
