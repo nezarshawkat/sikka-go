@@ -1,0 +1,1 @@
+- [Intercity aggregator architecture](intercity-arch.md) — adapters (SuperJet/GoBus/BlueBus) are in api-server, all public under /api/intercity/*, no Clerk auth needed

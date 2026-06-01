@@ -1,0 +1,719 @@
+🚀 FULL BUILD PROMPT — EGYPT INTERCITY TRANSPORT AGGREGATOR
+
+You are a senior full-stack engineer and transport systems architect building a nationwide Egyptian intercity travel aggregation platform.
+
+The system is a multi-operator transport engine for Egypt, similar to:
+
+Rome2Rio
+Omio
+Busbud
+Traveloka
+
+Focused exclusively on:
+
+> 🚌 Intercity bus & coach transportation in Egypt
+
+
+
+
+---
+
+🌍 CORE GOAL
+
+Build a scalable system that aggregates intercity transport data across Egypt:
+
+Cairo ↔ all governorates
+
+Alexandria ↔ all governorates
+
+Delta, Upper Egypt, Red Sea, Sinai
+
+Tourist routes (Luxor, Aswan, Hurghada, Sharm El-Sheikh)
+
+
+The system must unify:
+
+routes
+
+schedules
+
+stations
+
+prices
+
+availability
+
+booking methods
+
+operators
+
+
+AND MUST SUPPORT:
+
+> 📍 “Nearest station to user” intelligent routing across ALL operators
+
+
+
+
+---
+
+📍 LOCATION INTELLIGENCE (CRITICAL NEW FEATURE)
+
+The system must:
+
+1. Detect user location (lat/lng)
+
+
+2. Find nearest departure stations per operator
+
+
+3. Find nearest arrival stations in destination city
+
+
+4. Rank trips by:
+
+distance to station
+
+price
+
+duration
+
+availability
+
+
+
+
+IMPLEMENT:
+
+Nearest Station Algorithm:
+
+Haversine distance
+
+station.lat / station.lng required
+
+fallback: city-level station grouping
+
+
+API behavior:
+
+GET /api/search?from=auto&to=auto&userLat=...&userLng=...&date=...
+
+If "auto":
+
+resolve nearest station per operator
+
+generate multi-operator comparison results
+
+
+
+---
+
+🏗️ OPERATORS (PHASED)
+
+Phase 1 (MUST IMPLEMENT FIRST)
+
+SuperJet
+
+Go Bus
+
+Blue Bus
+
+
+Phase 2
+
+East Delta
+
+West Delta
+
+Upper Egypt Transport
+
+Bus Misr
+
+White Bus
+
+
+Phase 3
+
+regional + office-only operators
+
+
+
+---
+
+⚠️ CRITICAL DESIGN RULE
+
+This is NOT public transport.
+
+This is:
+
+> Long-distance intercity coach aggregation
+
+
+
+
+---
+
+🧠 ARCHITECTURE STRATEGY
+
+Use Hybrid Data Model:
+
+STATIC DATA
+
+operators
+
+cities
+
+stations
+
+route topology
+
+
+SEMI-DYNAMIC DATA
+
+schedules
+
+routes
+
+trips
+
+
+DYNAMIC DATA
+
+prices
+
+availability
+
+seat data
+
+
+❌ DO NOT hardcode schedules
+✔ MUST sync dynamically
+
+
+---
+
+🧱 TECH STACK
+
+Backend:
+
+Node.js
+
+TypeScript
+
+Express
+
+Prisma ORM
+
+PostgreSQL
+
+Redis
+
+Axios
+
+Cheerio
+
+Playwright (fallback)
+
+
+Frontend:
+
+React
+
+TailwindCSS
+
+shadcn/ui
+
+
+
+---
+
+🗄️ DATABASE DESIGN (PRISMA)
+
+operators:
+
+id
+
+name
+
+slug
+
+logo_url
+
+website
+
+booking_type (online | office | hotline | onboard)
+
+active
+
+
+cities:
+
+id
+
+operator_city_id
+
+name
+
+normalized_name
+
+governorate
+
+lat
+
+lng
+
+
+stations:
+
+id
+
+operator_station_id
+
+operator_id
+
+city_id
+
+name
+
+normalized_name
+
+address
+
+lat
+
+lng
+
+
+routes:
+
+id
+
+operator_id
+
+origin_station_id
+
+destination_station_id
+
+
+route_stops:
+
+id
+
+route_id
+
+station_id
+
+stop_order
+
+
+scheduled_trips:
+
+id
+
+operator_trip_id
+
+operator_id
+
+route_id
+
+departure_time
+
+arrival_time
+
+duration_minutes
+
+recurrence_type
+
+active
+
+
+trip_prices:
+
+id
+
+trip_id
+
+price
+
+currency
+
+updated_at
+
+
+booking_links:
+
+id
+
+trip_id
+
+booking_url
+
+booking_method
+
+
+
+---
+
+🔌 CORE API INTERFACE
+
+interface TransportAdapter { getCities(): Promise<City[]> getStations(cityId: string): Promise<Station[]> searchTrips(params): Promise<Trip[]> }
+
+
+---
+
+🧩 ADAPTER ARCHITECTURE
+
+adapters/ superjet/ gobus/ bluebus/
+
+Each implements TransportAdapter.
+
+
+---
+
+🚌 SUPERJET INTEGRATION
+
+GET https://www.superjet.com.eg/en/get-cities
+
+GET https://www.superjet.com.eg/en/get-stations/{city_id}
+
+HTML trips page: https://www.superjet.com.eg/en/one-way/trips
+
+
+Flow:
+
+1. fetch cities
+
+
+2. fetch stations
+
+
+3. build URL dynamically
+
+
+4. fetch HTML
+
+
+5. parse with Cheerio
+
+
+6. extract trips
+
+
+
+
+---
+
+🚌 GOBUS INTEGRATION
+
+GET https://go-bus.com/api/getTrips?From={id}&To={id}&tripDate={date}&lang=true
+
+
+Features:
+
+full JSON API
+
+direct integration
+
+caching required
+
+
+
+---
+
+🚌 BLUEBUS INTEGRATION (CRITICAL ADDITION)
+
+BlueBus uses GraphQL backend:
+
+Endpoint: POST https://api.bluebus.com.eg/graphql
+
+Characteristics:
+
+GraphQL queries from frontend
+
+Cloudflare-protected
+
+dynamic schema
+
+session-based requests
+
+
+Implementation:
+
+1. Capture real GraphQL query from browser DevTools
+
+
+2. Extract:
+
+query
+
+variables (from, to, date, passengers)
+
+
+
+3. Rebuild request in backend
+
+
+4. Normalize response into Trip format
+
+
+
+Example behavior:
+
+search trips via GraphQL POST
+
+parse:
+
+departure time
+
+arrival time
+
+price
+
+station IDs
+
+availability
+
+booking flags
+
+
+
+IMPORTANT:
+
+implement retry logic
+
+handle missing authorization gracefully
+
+cache responses aggressively
+
+fallback to UI scraping only if GraphQL fails
+
+
+
+---
+
+🔄 NORMALIZATION SYSTEM
+
+All operators map into global model:
+
+Cairo (SuperJet id=19)
+Cairo (GoBus id=8)
+Cairo (BlueBus id=43)
+
+→ unified: global_city_id = 1
+
+
+---
+
+🔎 SEARCH ENGINE
+
+GET /api/search
+
+Supports:
+
+from city name OR "auto"
+
+to city name OR "auto"
+
+userLat + userLng
+
+date
+
+
+If "auto":
+
+compute nearest station per operator
+
+generate best routes dynamically
+
+
+Response:
+
+{ "trips": [ { "operator": "BlueBus", "departure": "08:30", "arrival": "12:00", "price": 250, "duration": 210, "from_station": "nearest Cairo station", "to_station": "Luxor terminal", "booking_method": "online", "distance_score": 0.8 } ] }
+
+
+---
+
+🧠 SCRAPING STRATEGY
+
+Layer 1:
+
+GoBus API
+
+BlueBus GraphQL
+
+
+Layer 2:
+
+SuperJet HTML parsing
+
+
+Layer 3:
+
+Playwright fallback
+
+
+
+---
+
+⚙️ SYSTEM MODULES
+
+/api/cities
+
+/api/stations
+
+/api/search
+
+
+Sync jobs:
+
+cities weekly
+
+stations daily
+
+trips hourly
+
+prices real-time
+
+
+
+---
+
+📍 NEAREST STATION ENGINE
+
+Must implement:
+
+function getNearestStations(userLocation, stations[]) { return stations.sort(by Haversine distance) }
+
+Used across:
+
+SuperJet stations
+
+GoBus stations
+
+BlueBus stations
+
+
+
+---
+
+⚡ PERFORMANCE
+
+Redis caching
+
+request deduplication
+
+retry logic
+
+rate limiting protection
+
+timeout handling
+
+
+
+---
+
+🧾 RESULT UI CARD
+
+Each trip shows:
+
+operator logo
+
+departure time
+
+arrival time
+
+duration
+
+price
+
+nearest station distance
+
+booking method
+
+booking button
+
+
+
+---
+
+🚀 FUTURE EXPANSION
+
+trains integration
+
+ferries
+
+flights
+
+ride sharing
+
+AI route optimization
+
+multi-leg trips
+
+live tracking
+
+seat maps
+
+
+
+---
+
+📁 FINAL STRUCTURE
+
+src/ adapters/ superjet/ gobus/ bluebus/
+
+services/ search/ normalization/ location/
+
+parsers/ superjetParser.ts bluebusParser.ts
+
+routes/ cities.ts stations.ts search.ts
+
+db/ prisma/
+
+jobs/ syncCities.ts syncTrips.ts
+
+utils/ logger.ts http.ts geo.ts
+
+
+---
+
+🎯 PRIORITY ORDER
+
+1. SuperJet full integration
+
+
+2. GoBus API integration
+
+
+3. BlueBus GraphQL integration
+
+
+4. Nearest station engine (ALL operators)
+
+
+5. Unified search system
+
+
+6. UI results system
+
+
+7. Expand operators
+
+
+
+
+---
+
+END RESULT
+
+A nationwide Egyptian transport intelligence system that:
+
+aggregates all bus companies
+
+normalizes all routes
+
+dynamically finds nearest stations
+
+unifies booking systems
+
+scales to full regional transport intelligence platform

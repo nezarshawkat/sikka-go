@@ -5,10 +5,9 @@ import { t } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
 import { User, MapPin, Navigation, Bus, Clock, Wallet, ChevronRight, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import Map, { Marker, GeolocateControl, NavigationControl } from 'react-map-gl/mapbox';
+import Map, { Marker } from 'react-map-gl/mapbox';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import LocationAutocomplete from '@/components/LocationAutocomplete';
-import ThemeToggle from '@/components/ThemeToggle';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
 const CAIRO_CENTER = { latitude: 30.0444, longitude: 31.2357 };
@@ -49,11 +48,16 @@ const Index = () => {
   const [showTripPanel, setShowTripPanel] = useState(false);
 
   useEffect(() => {
-    if (!isLoading && !user) navigate('/auth');
+    if (!isLoading && !user) {
+      if (!sessionStorage.getItem('splashShown')) {
+        navigate('/splash');
+      } else {
+        navigate('/auth');
+      }
+    }
   }, [user, isLoading, navigate]);
 
   useEffect(() => {
-    // Load active trip from sessionStorage
     const stored = sessionStorage.getItem('tripPlan');
     if (stored) {
       try {
@@ -110,9 +114,8 @@ const Index = () => {
           mapboxAccessToken={MAPBOX_TOKEN}
           mapStyle="mapbox://styles/mapbox/streets-v12"
           style={{ width: '100%', height: '100%' }}
+          attributionControl={false}
         >
-          <GeolocateControl position="bottom-right" trackUserLocation />
-          <NavigationControl position="bottom-right" showCompass={false} />
           {userLocation && (
             <Marker latitude={userLocation.lat} longitude={userLocation.lng}>
               <div className="relative">
@@ -143,7 +146,6 @@ const Index = () => {
             placeholder={t('searchDestination', language)}
             className="flex-1"
           />
-          <ThemeToggle className="h-12 w-12 rounded-xl bg-card/95 backdrop-blur-sm shadow-lg border-0 shrink-0" />
           <Button
             variant="outline"
             size="icon"
@@ -166,7 +168,6 @@ const Index = () => {
               exit={{ y: 60, opacity: 0 }}
               className="bg-card/98 backdrop-blur-sm rounded-2xl shadow-xl border overflow-hidden"
             >
-              {/* Header */}
               <div className="flex items-center justify-between px-4 pt-3 pb-2 border-b">
                 <div className="flex items-center gap-2">
                   <span className="text-xl">{ICONS[currentSeg.icon] || '🚌'}</span>
@@ -189,7 +190,6 @@ const Index = () => {
                 </div>
               </div>
 
-              {/* Route info */}
               <div className="px-4 py-3 space-y-2">
                 <div className="flex items-center gap-2 text-sm">
                   <div className="flex flex-col items-center gap-0.5">
@@ -213,7 +213,6 @@ const Index = () => {
                   </div>
                 </div>
 
-                {/* Pickup tip */}
                 {currentSeg.info && (
                   <div className="flex items-start gap-2 bg-primary/5 rounded-lg px-3 py-2">
                     <Bus className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
@@ -221,7 +220,6 @@ const Index = () => {
                   </div>
                 )}
 
-                {/* Trip totals + next segment */}
                 <div className="flex items-center gap-2 pt-1">
                   <div className="flex-1 flex items-center gap-3 text-xs text-muted-foreground">
                     <span>Total: <strong className="text-foreground">{activeTrip.total_cost_egp} EGP</strong></span>

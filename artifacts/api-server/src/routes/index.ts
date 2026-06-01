@@ -13,6 +13,8 @@ import analyticsRouter from "./analytics";
 import tripPlanRouter from "./tripPlan";
 import seedCairoRouter from "./seedCairo";
 import seedAlexandriaRouter from "./seedAlexandria";
+import seedFromCSVRouter from "./seedFromCSV";
+import intercityRouter from "./intercity";
 import { clerkAuth } from "../middlewares/clerkAuth";
 
 const router: IRouter = Router();
@@ -20,6 +22,7 @@ const router: IRouter = Router();
 // Public — no auth needed
 router.use(healthRouter);
 router.use("/auth", authRouter);
+router.use("/intercity", intercityRouter);
 
 // Populate req.userId from Clerk session on all remaining routes
 router.use(clerkAuth);
@@ -41,6 +44,7 @@ router.use("/analytics", analyticsRouter);
 // POST /api/admin/seed-alexandria?generatePaths=true
 router.use("/admin/seed-cairo", seedCairoRouter);
 router.use("/admin/seed-alexandria", seedAlexandriaRouter);
+router.use("/admin/seed-from-csv", seedFromCSVRouter);
 
 // User-scoped routes
 router.use("/profile", profileRouter);

@@ -116,3 +116,13 @@
 .mapboxgl-ctrl-logo {
   display: none !important;
 }
+
+.mapboxgl-ctrl-attrib,
+.mapboxgl-ctrl-attrib-button {
+  display: none !important;
+}
+
+.mapboxgl-ctrl-bottom-left,
+.mapboxgl-ctrl-bottom-right {
+  display: none !important;
+}

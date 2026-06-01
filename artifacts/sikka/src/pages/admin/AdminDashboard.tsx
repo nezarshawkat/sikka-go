@@ -13,14 +13,16 @@ const AdminDashboard = () => {
   const location = useLocation();
   const [isSeeding, setIsSeeding] = useState(false);
 
-  interface SeedResult { success: boolean; seeded: number; skipped: number; results: string[] }
-  const handleSeedCairo = async () => {
+  interface SeedCSVResult { success: boolean; seeded: number; skipped: number; breakdown: Record<string, number>; errors: string[] }
+  const handleSeedCSV = async () => {
     setIsSeeding(true);
     try {
-      const res = await api.post<SeedResult>('/admin/seed-cairo', {});
-      const seeded = res.seeded ?? res.results?.filter((r) => r.startsWith('Seeded')).length ?? 0;
-      const skipped = res.skipped ?? res.results?.filter((r) => r.startsWith('Skip')).length ?? 0;
-      toast.success(`Seeded ${seeded} routes${skipped ? `, ${skipped} already existed` : ''}`);
+      const res = await api.post<SeedCSVResult>('/admin/seed-from-csv', {});
+      const { seeded, skipped, breakdown } = res;
+      toast.success(
+        `Seeded ${seeded} routes${skipped ? `, ${skipped} skipped` : ''}` +
+        (breakdown ? ` (NTA: ${breakdown.ntaBus}, CTA: ${breakdown.ctaBus}, Microbus: ${breakdown.microbus}, Serfis: ${breakdown.serfis})` : '')
+      );
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Seed failed');
     } finally {
@@ -58,15 +60,14 @@ const AdminDashboard = () => {
           variant="outline"
           size="sm"
           className="gap-1.5 text-xs"
-          onClick={handleSeedCairo}
+          onClick={handleSeedCSV}
           disabled={isSeeding}
         >
           <Database className="h-3.5 w-3.5" />
-          {isSeeding ? 'Seeding…' : 'Seed Cairo Data'}
+          {isSeeding ? 'Seeding…' : 'Seed CSV Data'}
         </Button>
       </div>
 
-      {/* Tab nav */}
       <div className="border-b overflow-x-auto sticky top-[65px] bg-card/95 backdrop-blur-sm z-10">
         <div className="flex p-2 gap-1 min-w-max">
           {tabs.map(({ path, label, icon: Icon }) => (
