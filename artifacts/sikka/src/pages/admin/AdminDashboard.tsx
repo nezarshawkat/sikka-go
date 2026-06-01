@@ -1,34 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useNavigate, Outlet, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { t } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Train, MapPin, Route, Star, BarChart3, Map, Database } from 'lucide-react';
-import { toast } from 'sonner';
-import { api } from '@/lib/api';
+import { ArrowLeft, Train, MapPin, Route, Star, BarChart3, Map } from 'lucide-react';
 
 const AdminDashboard = () => {
   const { isAdmin, isLoading, language } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [isSeeding, setIsSeeding] = useState(false);
-
-  interface SeedCSVResult { success: boolean; seeded: number; skipped: number; breakdown: Record<string, number>; errors: string[] }
-  const handleSeedCSV = async () => {
-    setIsSeeding(true);
-    try {
-      const res = await api.post<SeedCSVResult>('/admin/seed-from-csv', {});
-      const { seeded, skipped, breakdown } = res;
-      toast.success(
-        `Seeded ${seeded} routes${skipped ? `, ${skipped} skipped` : ''}` +
-        (breakdown ? ` (NTA: ${breakdown.ntaBus}, CTA: ${breakdown.ctaBus}, Microbus: ${breakdown.microbus}, Serfis: ${breakdown.serfis})` : '')
-      );
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Seed failed');
-    } finally {
-      setIsSeeding(false);
-    }
-  };
 
   useEffect(() => {
     if (!isLoading && !isAdmin) {
@@ -56,16 +36,6 @@ const AdminDashboard = () => {
           <ArrowLeft className="h-5 w-5" />
         </Button>
         <h1 className="font-semibold text-lg flex-1">{t('dashboard', language)}</h1>
-        <Button
-          variant="outline"
-          size="sm"
-          className="gap-1.5 text-xs"
-          onClick={handleSeedCSV}
-          disabled={isSeeding}
-        >
-          <Database className="h-3.5 w-3.5" />
-          {isSeeding ? 'Seeding…' : 'Seed CSV Data'}
-        </Button>
       </div>
 
       <div className="border-b overflow-x-auto sticky top-[65px] bg-card/95 backdrop-blur-sm z-10">

@@ -11,6 +11,7 @@ import {
 import { toast } from 'sonner';
 import Map, { Marker, Source, Layer } from 'react-map-gl/mapbox';
 import 'mapbox-gl/dist/mapbox-gl.css';
+import { useIsDark, MAP_STYLE_LIGHT, MAP_STYLE_DARK } from '@/hooks/useIsDark';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
 
@@ -63,6 +64,7 @@ function formatDuration(mins: number) {
 const Intercity = () => {
   const navigate = useNavigate();
   const { language } = useAuth();
+  const isDark = useIsDark();
   const isAr = language === 'ar';
 
   const [cities, setCities] = useState<City[]>([]);
@@ -242,7 +244,7 @@ const Intercity = () => {
               zoom: 5,
             }}
             mapboxAccessToken={MAPBOX_TOKEN}
-            mapStyle="mapbox://styles/mapbox/streets-v12"
+            mapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
             style={{ width: '100%', height: '100%' }}
             attributionControl={false}
             interactive={false}

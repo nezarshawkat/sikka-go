@@ -2,11 +2,19 @@ import { Router } from "express";
 import { requireAdmin } from "../middlewares/requireAdmin";
 import { db } from "@workspace/db";
 import { transitLinesTable, transportTypesTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import fs from "fs";
 import path from "path";
 
 const router = Router();
+
+// Latest uploaded CSV filenames (attached_assets)
+const CSV_FILES = {
+  nta: "NTA_Busses_data_Cairo_1780318927061.csv",
+  cta: "Cairo_Bus_Lines_All_1780318927059.csv",
+  microbus: "Cairo_Microbus_Full_Data_1780318927060.csv",
+  serfis: "serfis_with_stations_1780318927062.csv",
+};
 
 function parsePriceEGP(str: string): number {
   if (!str || str.trim() === "-") return 0;
@@ -84,9 +92,19 @@ async function insertLine(opts: {
   }
 }
 
-router.post("/", requireAdmin, async (_req, res) => {
+export type SeedResult = {
+  success: boolean;
+  seeded: number;
+  skipped: number;
+  cleared: number;
+  breakdown: { ntaBus: number; ctaBus: number; microbus: number; serfis: number; skipped: number };
+  errors: string[];
+};
+
+export async function runCSVSeed(opts: { clearFirst?: boolean } = {}): Promise<SeedResult> {
   const counts = { ntaBus: 0, ctaBus: 0, microbus: 0, serfis: 0, skipped: 0 };
   const errors: string[] = [];
+  let cleared = 0;
 
   const [ntaId, ctaId, microbusId, serfisId] = await Promise.all([
     getTypeId("NTA Bus"),
@@ -96,17 +114,24 @@ router.post("/", requireAdmin, async (_req, res) => {
   ]);
 
   if (!ntaId || !ctaId || !microbusId || !serfisId) {
-    res.status(400).json({
-      error: "One or more transport types missing. Run POST /api/admin/seed-cairo first.",
-      found: { ntaId, ctaId, microbusId, serfisId },
-    });
-    return;
+    throw new Error(
+      `One or more transport types missing. Run POST /api/admin/seed-cairo first. found=${JSON.stringify({ ntaId, ctaId, microbusId, serfisId })}`,
+    );
+  }
+
+  // ── Clear existing bus + serfis + microbus lines (Metro/Monorail/Train kept) ──
+  if (opts.clearFirst) {
+    const deleted = await db
+      .delete(transitLinesTable)
+      .where(inArray(transitLinesTable.transportTypeId, [ntaId, ctaId, microbusId, serfisId]))
+      .returning({ id: transitLinesTable.id });
+    cleared = deleted.length;
   }
 
   // ── NTA Buses ────────────────────────────────────────────────────────────────
   // Columns: رقم الخط, المسار, المواقف, التعريفة
   try {
-    const raw = readAttached("NTA_Busses_data_Cairo_1780314663184.csv");
+    const raw = readAttached(CSV_FILES.nta);
     const lines = raw.replace(/^\uFEFF/, "").split("\n").filter(Boolean);
     for (let i = 1; i < lines.length; i++) {
       const cols = parseCSVLine(lines[i]);
@@ -144,7 +169,7 @@ router.post("/", requireAdmin, async (_req, res) => {
   // ── CTA Buses (Cairo Bus Lines) ───────────────────────────────────────────
   // Columns: رقم الخط, المواقف, السعر
   try {
-    const raw = readAttached("Cairo_Bus_Lines_All_1780314663177.csv");
+    const raw = readAttached(CSV_FILES.cta);
     const lines = raw.replace(/^\uFEFF/, "").split("\n").filter(Boolean);
     for (let i = 1; i < lines.length; i++) {
       const cols = parseCSVLine(lines[i]);
@@ -181,7 +206,7 @@ router.post("/", requireAdmin, async (_req, res) => {
   // ── Microbus ──────────────────────────────────────────────────────────────
   // Columns: رقم الخط, خط السير, المواقف, السعر
   try {
-    const raw = readAttached("Cairo_Microbus_Full_Data_1780314663179.csv");
+    const raw = readAttached(CSV_FILES.microbus);
     const lines = raw.replace(/^\uFEFF/, "").split("\n").filter(Boolean);
     for (let i = 1; i < lines.length; i++) {
       const cols = parseCSVLine(lines[i]);
@@ -219,7 +244,7 @@ router.post("/", requireAdmin, async (_req, res) => {
   // ── Serfis ────────────────────────────────────────────────────────────────
   // Columns: م, خطوط السير, المواقف, التعريفة الحالية (جنية), (قرش), بعد الزيادة (جنية), (قرش)
   try {
-    const raw = readAttached("serfis_with_stations_1780314663186.csv");
+    const raw = readAttached(CSV_FILES.serfis);
     const lines = raw.replace(/^\uFEFF/, "").split("\n").filter(Boolean);
     for (let i = 1; i < lines.length; i++) {
       const cols = parseCSVLine(lines[i]);
@@ -258,13 +283,24 @@ router.post("/", requireAdmin, async (_req, res) => {
   }
 
   const total = counts.ntaBus + counts.ctaBus + counts.microbus + counts.serfis;
-  res.json({
+  return {
     success: errors.length === 0,
     seeded: total,
     skipped: counts.skipped,
+    cleared,
     breakdown: counts,
     errors,
-  });
+  };
+}
+
+router.post("/", requireAdmin, async (req, res) => {
+  try {
+    const clearFirst = req.query.clear === "true" || req.body?.clear === true;
+    const result = await runCSVSeed({ clearFirst });
+    res.json(result);
+  } catch (e) {
+    res.status(400).json({ error: (e as Error).message });
+  }
 });
 
 export default router;

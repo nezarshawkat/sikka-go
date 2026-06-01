@@ -10,7 +10,7 @@ import { Route, Search } from 'lucide-react';
 interface TransitLine {
   id: string;
   transportTypeId: string;
-  lineNumber: string;
+  lineNumber: string | null;
   nameEn: string;
   nameAr: string;
   fromArea: string;

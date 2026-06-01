@@ -9,6 +9,7 @@ import Map, { Marker } from 'react-map-gl/mapbox';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import LocationAutocomplete from '@/components/LocationAutocomplete';
 import { Milestone } from 'lucide-react';
+import { useIsDark, MAP_STYLE_LIGHT, MAP_STYLE_DARK } from '@/hooks/useIsDark';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
 const CAIRO_CENTER = { latitude: 30.0444, longitude: 31.2357 };
@@ -40,6 +41,7 @@ interface ActiveTrip {
 const Index = () => {
   const { user, isLoading, language } = useAuth();
   const navigate = useNavigate();
+  const isDark = useIsDark();
   const [viewState, setViewState] = useState({ ...CAIRO_CENTER, zoom: 14 });
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [locationName, setLocationName] = useState('');
@@ -113,7 +115,7 @@ const Index = () => {
           {...viewState}
           onMove={(evt) => setViewState(evt.viewState)}
           mapboxAccessToken={MAPBOX_TOKEN}
-          mapStyle="mapbox://styles/mapbox/streets-v12"
+          mapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
           style={{ width: '100%', height: '100%' }}
           attributionControl={false}
         >

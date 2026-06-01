@@ -215,6 +215,7 @@ const TripResult = () => {
               mapboxAccessToken={MAPBOX_TOKEN}
               mapStyle="mapbox://styles/mapbox/streets-v12"
               style={{ width: '100%', height: isTracking ? 420 : 320 }}
+              attributionControl={false}
             >
               {isLoadingRoutes && (
                 <div className="absolute inset-0 flex items-center justify-center bg-background/50 z-10">

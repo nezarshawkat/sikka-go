@@ -41,7 +41,7 @@ export const transportTypesTable = pgTable("transport_types", {
 export const transitLinesTable = pgTable("transit_lines", {
   id: uuid("id").primaryKey().defaultRandom(),
   transportTypeId: uuid("transport_type_id").notNull(),
-  lineNumber: text("line_number").notNull(),
+  lineNumber: text("line_number"),
   nameEn: text("name_en").notNull().default(""),
   nameAr: text("name_ar").notNull().default(""),
   fromArea: text("from_area").notNull(),

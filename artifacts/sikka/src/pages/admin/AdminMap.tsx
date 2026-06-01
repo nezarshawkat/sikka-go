@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { Search, Plus, Eye, EyeOff, Pencil, Trash2, Save, Flame, MapPin, Route as RouteIcon } from 'lucide-react';
-import Map, { Source, Layer, Marker, NavigationControl, type MapLayerMouseEvent } from 'react-map-gl/mapbox';
+import Map, { Source, Layer, Marker, type MapLayerMouseEvent } from 'react-map-gl/mapbox';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -25,7 +25,7 @@ interface TransportType {
   id: string; nameEn: string; nameAr: string; icon: string; color: string; serviceLevel: string;
 }
 interface TransitLine {
-  id: string; transportTypeId: string; lineNumber: string; nameEn: string; nameAr: string;
+  id: string; transportTypeId: string; lineNumber: string | null; nameEn: string; nameAr: string;
   fromArea: string; toArea: string; viaStops: string[]; routePath: GeoJSONLineString | null;
   priceEgp: number; frequencyMinutes: number | null; hasFixedStops: boolean; isActive: boolean;
 }
@@ -176,7 +176,7 @@ const AdminMap = () => {
       const stationMatch = !selectedStation || [line.fromArea, line.toArea, ...(line.viaStops || [])].some(s => s.includes(selectedStation.nameAr) || s.includes(selectedStation.nameEn) || s.includes(stationName));
       const q = searchQuery.trim().toLowerCase();
       const searchMatch = !q ||
-        line.lineNumber.toLowerCase().includes(q) ||
+        (line.lineNumber ?? '').toLowerCase().includes(q) ||
         line.nameEn.toLowerCase().includes(q) ||
         line.nameAr.includes(searchQuery) ||
         line.fromArea.toLowerCase().includes(q) ||
@@ -306,7 +306,7 @@ const AdminMap = () => {
     setEditingLine(line);
     setFormData({
       transportTypeId: line.transportTypeId,
-      lineNumber: line.lineNumber,
+      lineNumber: line.lineNumber ?? '',
       nameEn: line.nameEn,
       nameAr: line.nameAr,
       fromArea: line.fromArea,
@@ -498,8 +498,8 @@ const AdminMap = () => {
           style={{ width: '100%', height: '100%' }}
           cursor={isDrawing || isHeatmapEditing ? 'crosshair' : 'grab'}
           interactiveLayerIds={routesGeoJSON.features.length ? ['route-lines'] : []}
+          attributionControl={false}
         >
-          <NavigationControl position="bottom-right" />
 
           {routesGeoJSON.features.length > 0 && (
             <Source id="routes" type="geojson" data={routesGeoJSON}>
