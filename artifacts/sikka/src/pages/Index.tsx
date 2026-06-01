@@ -1,15 +1,22 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { t } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
-import { User, MapPin, Navigation, Bus, Clock, Wallet, ChevronRight, X } from 'lucide-react';
+import { User, MapPin, Navigation, ChevronRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import Map, { Marker } from 'react-map-gl/mapbox';
+import Map, { Marker, Source, Layer, type MapRef } from 'react-map-gl/mapbox';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import LocationAutocomplete from '@/components/LocationAutocomplete';
 import { Milestone } from 'lucide-react';
 import { useIsDark, MAP_STYLE_LIGHT, MAP_STYLE_DARK } from '@/hooks/useIsDark';
+import { getDirections } from '@/lib/routePaths';
+import { useTripTracking } from '@/hooks/useTripTracking';
+import TripGuideSheet, { type GuidePlan, type GuideSegment, type GuideAlternative } from '@/components/trip/TripGuideSheet';
+import SegmentReviewDialog, { type ReviewSegment } from '@/components/trip/SegmentReviewDialog';
+import ReportDialog from '@/components/ReportDialog';
+import ContributeTransportDialog from '@/components/ContributeTransportDialog';
+import { toast } from 'sonner';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
 const CAIRO_CENTER = { latitude: 30.0444, longitude: 31.2357 };
@@ -26,29 +33,32 @@ const reverseGeocode = async (lat: number, lng: number): Promise<string> => {
   }
 };
 
-const ICONS: Record<string, string> = {
-  bus: '🚌', train: '🚆', car: '🚕', bike: '🛺', ship: '🚢', plane: '✈️', metro: '🚇', monorail: '🚝', walk: '🚶',
-};
-
-interface TripSegment {
-  transport_name: string; line_number?: string; start_name: string; end_name: string;
-  cost_egp: number; duration_minutes: number; icon: string; color: string; info?: string;
-}
-interface ActiveTrip {
-  segments: TripSegment[]; total_cost_egp: number; total_duration_minutes: number; destination: string;
+interface ActiveTripPlan extends GuidePlan {
+  segments: (GuideSegment & { route_geometry?: [number, number][] | null })[];
+  startLat: number; startLng: number; destLat: number; destLng: number;
+  destination: string;
 }
 
 const Index = () => {
   const { user, isLoading, language } = useAuth();
   const navigate = useNavigate();
   const isDark = useIsDark();
+  const mapRef = useRef<MapRef | null>(null);
   const [viewState, setViewState] = useState({ ...CAIRO_CENTER, zoom: 14 });
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [locationName, setLocationName] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTrip, setActiveTrip] = useState<ActiveTrip | null>(null);
+
+  const [activeTrip, setActiveTrip] = useState<ActiveTripPlan | null>(null);
   const [currentSegIdx, setCurrentSegIdx] = useState(0);
-  const [showTripPanel, setShowTripPanel] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [routeCoords, setRouteCoords] = useState<{ segIndex: number; coords: [number, number][] }[]>([]);
+
+  const [reviewSeg, setReviewSeg] = useState<ReviewSegment | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [tripReviewOpen, setTripReviewOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [contributeOpen, setContributeOpen] = useState(false);
 
   useEffect(() => {
     if (!isLoading && !user) {
@@ -67,7 +77,7 @@ const Index = () => {
         const plan = JSON.parse(stored);
         if (plan?.segments?.length) {
           setActiveTrip(plan);
-          setShowTripPanel(true);
+          setCurrentSegIdx(0);
         }
       } catch {}
     }
@@ -91,14 +101,124 @@ const Index = () => {
     }
   }, []);
 
+  // Load road geometry for each segment of the active trip
+  const loadRoutes = useCallback(async (plan: ActiveTripPlan) => {
+    const results: { segIndex: number; coords: [number, number][] }[] = [];
+    const segCount = plan.segments.length;
+    for (let i = 0; i < segCount; i++) {
+      const seg = plan.segments[i];
+      if (seg.route_geometry && seg.route_geometry.length >= 2) {
+        results.push({ segIndex: i, coords: seg.route_geometry });
+        continue;
+      }
+      const startLng = plan.startLng + (plan.destLng - plan.startLng) * (i / segCount);
+      const startLat = plan.startLat + (plan.destLat - plan.startLat) * (i / segCount);
+      const endLng = plan.startLng + (plan.destLng - plan.startLng) * ((i + 1) / segCount);
+      const endLat = plan.startLat + (plan.destLat - plan.startLat) * ((i + 1) / segCount);
+      const profile = seg.icon === 'walk' ? 'walking' : 'driving';
+      const coords = await getDirections([startLng, startLat], [endLng, endLat], profile);
+      results.push({ segIndex: i, coords });
+    }
+    setRouteCoords(results);
+  }, []);
+
+  useEffect(() => {
+    if (activeTrip) {
+      setRouteCoords([]);
+      loadRoutes(activeTrip);
+    }
+  }, [activeTrip, loadRoutes]);
+
+  // Fit map to the route once loaded
+  useEffect(() => {
+    if (!activeTrip || !routeCoords.length || !mapRef.current) return;
+    let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
+    routeCoords.forEach(({ coords }) =>
+      coords.forEach(([lng, lat]) => {
+        minLng = Math.min(minLng, lng); maxLng = Math.max(maxLng, lng);
+        minLat = Math.min(minLat, lat); maxLat = Math.max(maxLat, lat);
+      })
+    );
+    if (Number.isFinite(minLng)) {
+      try {
+        mapRef.current.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 80, duration: 800 });
+      } catch {}
+    }
+  }, [routeCoords, activeTrip]);
+
+  const onApproachSegmentEnd = useCallback((segIdx: number) => {
+    if (!activeTrip) return;
+    if (segIdx < activeTrip.segments.length - 1) {
+      toast(t('approachingNext', language));
+    }
+  }, [activeTrip, language]);
+
+  const { userPos, progress, remainingMinutes } = useTripTracking({
+    enabled: !!activeTrip,
+    segments: activeTrip?.segments ?? [],
+    currentSegIdx,
+    routeCoords,
+    onApproachSegmentEnd,
+  });
+
   const clearTrip = () => {
     sessionStorage.removeItem('tripPlan');
     setActiveTrip(null);
-    setShowTripPanel(false);
     setCurrentSegIdx(0);
+    setExpanded(false);
+    setRouteCoords([]);
   };
 
-  const currentSeg = activeTrip?.segments?.[currentSegIdx] ?? null;
+  const handleNext = () => {
+    if (!activeTrip) return;
+    setCurrentSegIdx((i) => Math.min(i + 1, activeTrip.segments.length - 1));
+  };
+  const handleBack = () => setCurrentSegIdx((i) => Math.max(i - 1, 0));
+
+  const handleDone = () => {
+    if (!activeTrip) return;
+    const seg = activeTrip.segments[currentSegIdx];
+    setReviewSeg({ transport_type_id: seg.transport_type_id, transport_name: seg.transport_name });
+    setReviewOpen(true);
+  };
+
+  const handleSegmentReviewDone = () => {
+    if (!activeTrip) return;
+    if (currentSegIdx >= activeTrip.segments.length - 1) {
+      setTripReviewOpen(true);
+    } else {
+      setCurrentSegIdx((i) => i + 1);
+    }
+  };
+
+  const handleSwap = (segIdx: number, alt: GuideAlternative) => {
+    if (!activeTrip) return;
+    const newSegments = [...activeTrip.segments];
+    const old = newSegments[segIdx];
+    newSegments[segIdx] = {
+      ...old, transport_type_id: alt.transport_type_id, transport_name: alt.transport_name,
+      cost_egp: alt.cost_egp, duration_minutes: alt.duration_minutes, color: alt.color,
+      icon: alt.icon, line_number: alt.line_number || '',
+    };
+    const newTotal = newSegments.reduce((s, sg) => s + sg.cost_egp, 0);
+    const newTime = newSegments.reduce((s, sg) => s + sg.duration_minutes, 0);
+    const updated = { ...activeTrip, segments: newSegments, total_cost_egp: newTotal, total_duration_minutes: newTime };
+    setActiveTrip(updated);
+    sessionStorage.setItem('tripPlan', JSON.stringify(updated));
+    toast.success(t('planUpdated', language));
+  };
+
+  const routeGeoJSON = {
+    type: 'FeatureCollection' as const,
+    features: routeCoords.map(({ segIndex, coords }) => ({
+      type: 'Feature' as const,
+      properties: {
+        color: activeTrip?.segments[segIndex]?.color || '#3B82F6',
+        name: activeTrip?.segments[segIndex]?.line_number || activeTrip?.segments[segIndex]?.transport_name || '',
+      },
+      geometry: { type: 'LineString' as const, coordinates: coords },
+    })),
+  };
 
   if (isLoading) {
     return (
@@ -112,6 +232,7 @@ const Index = () => {
     <div className="h-screen w-screen relative overflow-hidden">
       {MAPBOX_TOKEN ? (
         <Map
+          ref={mapRef}
           {...viewState}
           onMove={(evt) => setViewState(evt.viewState)}
           mapboxAccessToken={MAPBOX_TOKEN}
@@ -119,11 +240,32 @@ const Index = () => {
           style={{ width: '100%', height: '100%' }}
           attributionControl={false}
         >
-          {userLocation && (
-            <Marker latitude={userLocation.lat} longitude={userLocation.lng}>
+          {activeTrip && routeCoords.length > 0 && (
+            <Source id="home-route" type="geojson" data={routeGeoJSON}>
+              <Layer id="home-route-line" type="line"
+                paint={{ 'line-color': ['get', 'color'], 'line-width': 5, 'line-opacity': 0.85 }} />
+              <Layer id="home-route-labels" type="symbol"
+                layout={{ 'symbol-placement': 'line', 'symbol-spacing': 200, 'text-field': ['get', 'name'], 'text-size': 13, 'text-font': ['DIN Pro Bold', 'Arial Unicode MS Bold'] }}
+                paint={{ 'text-color': '#fff', 'text-halo-color': ['get', 'color'], 'text-halo-width': 3 }} />
+            </Source>
+          )}
+
+          {activeTrip && (
+            <>
+              <Marker latitude={activeTrip.startLat} longitude={activeTrip.startLng}>
+                <div className="h-4 w-4 rounded-full bg-primary border-2 border-white shadow" />
+              </Marker>
+              <Marker latitude={activeTrip.destLat} longitude={activeTrip.destLng}>
+                <div className="h-4 w-4 rounded-full bg-destructive border-2 border-white shadow" />
+              </Marker>
+            </>
+          )}
+
+          {(userPos || userLocation) && (
+            <Marker latitude={(userPos ?? userLocation)!.lat} longitude={(userPos ?? userLocation)!.lng}>
               <div className="relative">
-                <div className="h-4 w-4 rounded-full bg-primary border-2 border-primary-foreground shadow-lg" />
-                <div className="absolute inset-0 h-4 w-4 rounded-full bg-primary animate-ping opacity-30" />
+                <div className="h-4 w-4 rounded-full bg-blue-500 border-2 border-white shadow-lg" />
+                <div className="absolute inset-0 h-4 w-4 rounded-full bg-blue-500 animate-ping opacity-30" />
               </div>
             </Marker>
           )}
@@ -138,7 +280,7 @@ const Index = () => {
       )}
 
       {/* Search bar overlay */}
-      <div className="absolute top-0 left-0 right-0 p-4 safe-area-top">
+      <div className="absolute top-0 left-0 right-0 p-4 safe-area-top z-20">
         <motion.div initial={{ y: -20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="flex items-center gap-2">
           <LocationAutocomplete
             value={searchQuery}
@@ -160,94 +302,26 @@ const Index = () => {
         </motion.div>
       </div>
 
-      {/* Bottom panel — active trip guide OR location info */}
-      <div className="absolute bottom-6 left-4 right-4">
-        <AnimatePresence mode="wait">
-          {showTripPanel && activeTrip && currentSeg ? (
-            <motion.div
-              key="trip-guide"
-              initial={{ y: 60, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: 60, opacity: 0 }}
-              className="bg-card/98 backdrop-blur-sm rounded-2xl shadow-xl border overflow-hidden"
-            >
-              <div className="flex items-center justify-between px-4 pt-3 pb-2 border-b">
-                <div className="flex items-center gap-2">
-                  <span className="text-xl">{ICONS[currentSeg.icon] || '🚌'}</span>
-                  <div>
-                    <p className="text-sm font-semibold text-foreground leading-tight">{currentSeg.transport_name}</p>
-                    {currentSeg.line_number && (
-                      <span className="text-xs font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: currentSeg.color + '20', color: currentSeg.color }}>
-                        #{currentSeg.line_number}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-center gap-1">
-                  <span className="text-xs text-muted-foreground">
-                    {currentSegIdx + 1}/{activeTrip.segments.length}
-                  </span>
-                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={clearTrip}>
-                    <X className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              </div>
-
-              <div className="px-4 py-3 space-y-2">
-                <div className="flex items-center gap-2 text-sm">
-                  <div className="flex flex-col items-center gap-0.5">
-                    <div className="h-2 w-2 rounded-full bg-primary" />
-                    <div className="h-6 w-px bg-border" />
-                    <div className="h-2 w-2 rounded-full border-2 border-primary" />
-                  </div>
-                  <div className="flex-1 flex flex-col gap-2">
-                    <span className="text-foreground font-medium leading-none">{currentSeg.start_name}</span>
-                    <span className="text-muted-foreground leading-none">{currentSeg.end_name}</span>
-                  </div>
-                  <div className="text-right">
-                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <Clock className="h-3 w-3" />
-                      {currentSeg.duration_minutes} min
-                    </div>
-                    <div className="flex items-center gap-1 text-xs font-semibold text-primary">
-                      <Wallet className="h-3 w-3" />
-                      {currentSeg.cost_egp} EGP
-                    </div>
-                  </div>
-                </div>
-
-                {currentSeg.info && (
-                  <div className="flex items-start gap-2 bg-primary/5 rounded-lg px-3 py-2">
-                    <Bus className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
-                    <p className="text-xs text-foreground/80 leading-snug">{currentSeg.info}</p>
-                  </div>
-                )}
-
-                <div className="flex items-center gap-2 pt-1">
-                  <div className="flex-1 flex items-center gap-3 text-xs text-muted-foreground">
-                    <span>Total: <strong className="text-foreground">{activeTrip.total_cost_egp} EGP</strong></span>
-                    <span>{activeTrip.total_duration_minutes} min</span>
-                  </div>
-                  <div className="flex gap-1">
-                    {currentSegIdx > 0 && (
-                      <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setCurrentSegIdx(i => i - 1)}>
-                        ←
-                      </Button>
-                    )}
-                    {currentSegIdx < activeTrip.segments.length - 1 ? (
-                      <Button size="sm" className="h-7 px-3 text-xs gap-1" onClick={() => setCurrentSegIdx(i => i + 1)}>
-                        Next <ChevronRight className="h-3 w-3" />
-                      </Button>
-                    ) : (
-                      <Button size="sm" variant="outline" className="h-7 px-3 text-xs" onClick={clearTrip}>
-                        Done ✓
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          ) : (
+      {/* Active trip guide sheet OR location info */}
+      {activeTrip ? (
+        <TripGuideSheet
+          plan={activeTrip}
+          currentSegIdx={currentSegIdx}
+          progress={progress}
+          remainingMinutes={remainingMinutes || activeTrip.total_duration_minutes}
+          expanded={expanded}
+          onToggleExpand={() => setExpanded((e) => !e)}
+          onNext={handleNext}
+          onBack={handleBack}
+          onDone={handleDone}
+          onClose={clearTrip}
+          onSwap={handleSwap}
+          onReport={() => setReportOpen(true)}
+          language={language}
+        />
+      ) : (
+        <div className="absolute bottom-6 left-4 right-4">
+          <AnimatePresence mode="wait">
             <motion.div
               key="location"
               initial={{ y: 20, opacity: 0 }}
@@ -284,10 +358,57 @@ const Index = () => {
                 </div>
                 <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
               </button>
+              <button
+                onClick={() => setContributeOpen(true)}
+                className="w-full bg-card/95 backdrop-blur-sm rounded-xl shadow-lg px-4 py-3 flex items-center gap-3 hover:bg-card active:scale-[0.98] transition-all border border-border/50"
+              >
+                <div className="h-10 w-10 rounded-full bg-green-500/10 flex items-center justify-center shrink-0">
+                  <Milestone className="h-5 w-5 text-green-500" />
+                </div>
+                <div className="flex-1 text-start">
+                  <p className="text-sm font-medium text-foreground">{t('contributeRoute', language)}</p>
+                  <p className="text-xs text-muted-foreground">{t('contributeTitle', language)}</p>
+                </div>
+                <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+              </button>
             </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
+          </AnimatePresence>
+        </div>
+      )}
+
+      {/* Per-segment review */}
+      <SegmentReviewDialog
+        open={reviewOpen}
+        onClose={() => setReviewOpen(false)}
+        onSubmitted={handleSegmentReviewDone}
+        segment={reviewSeg}
+        language={language}
+      />
+
+      {/* End-of-trip review */}
+      <SegmentReviewDialog
+        open={tripReviewOpen}
+        onClose={() => setTripReviewOpen(false)}
+        onSubmitted={() => { setTripReviewOpen(false); clearTrip(); toast.success(t('tripComplete', language)); }}
+        segment={null}
+        tripLevel
+        language={language}
+      />
+
+      {/* Report a problem */}
+      <ReportDialog
+        open={reportOpen}
+        onClose={() => setReportOpen(false)}
+        transportTypeId={activeTrip?.segments[currentSegIdx]?.transport_type_id}
+        language={language}
+      />
+
+      {/* Contribute a route */}
+      <ContributeTransportDialog
+        open={contributeOpen}
+        onClose={() => setContributeOpen(false)}
+        language={language}
+      />
     </div>
   );
 };

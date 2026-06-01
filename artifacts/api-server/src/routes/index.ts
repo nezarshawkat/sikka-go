@@ -15,6 +15,8 @@ import seedCairoRouter from "./seedCairo";
 import seedAlexandriaRouter from "./seedAlexandria";
 import seedFromCSVRouter from "./seedFromCSV";
 import intercityRouter from "./intercity";
+import reportsRouter from "./reports";
+import transportReportsRouter from "./transportReports";
 import { clerkAuth } from "../middlewares/clerkAuth";
 
 const router: IRouter = Router();
@@ -34,6 +36,8 @@ router.use("/locations", locationsRouter);
 router.use("/mawaqef", mawaqefRouter);
 router.use("/heatmaps", heatmapsRouter);
 router.use("/reviews", reviewsRouter);
+router.use("/reports", reportsRouter);
+router.use("/transport-reports", transportReportsRouter);
 router.use("/analytics", analyticsRouter);
 
 // Seed endpoints — admin-only, governorate-specific

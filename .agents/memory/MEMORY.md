@@ -1,2 +1,3 @@
 - [Intercity aggregator architecture](intercity-arch.md) — adapters (SuperJet/GoBus/BlueBus) are in api-server, all public under /api/intercity/*, no Clerk auth needed
 - [Sikka transit_lines seeding](sikka-seeding.md) — via_stops is text[] (pass raw array not JSON.stringify); line_number nullable for microbuses; seed needs admin auth
+- [Sikka trip experience & auth](sikka-trip-experience.md) — trips render on home map (no separate page); AI segment ids are slugs not UUIDs; request auth is cookie-based Clerk (no Bearer token)

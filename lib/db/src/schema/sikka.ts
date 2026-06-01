@@ -28,6 +28,8 @@ export const transportTypesTable = pgTable("transport_types", {
   icon: text("icon").notNull().default("bus"),
   color: text("color").notNull().default("#3B82F6"),
   serviceLevel: text("service_level").notNull().default("standard"),
+  governmentType: text("government_type").notNull().default("government"),
+  category: text("category").notNull().default("economic"),
   averageSpeedKmh: real("average_speed_kmh").notNull().default(30),
   basePriceEgp: real("base_price_egp").notNull().default(5),
   pricePerKmEgp: real("price_per_km_egp").notNull().default(1),
@@ -118,8 +120,45 @@ export const reviewsTable = pgTable("reviews", {
   userId: text("user_id").notNull(),
   rating: integer("rating").notNull(),
   comment: text("comment"),
-  transportTypeId: uuid("transport_type_id").notNull(),
-  tripSegmentId: uuid("trip_segment_id").notNull(),
+  transportTypeId: uuid("transport_type_id"),
+  tripSegmentId: uuid("trip_segment_id"),
+  tripId: uuid("trip_id"),
+  reviewType: text("review_type").notNull().default("segment"),
+  faceReaction: integer("face_reaction"),
+  routeAccurate: boolean("route_accurate"),
+  timingAccurate: boolean("timing_accurate"),
+  qualityGood: boolean("quality_good"),
+  stationInfoCorrect: boolean("station_info_correct"),
+  meta: jsonb("meta").$type<Record<string, unknown>>(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const reportsTable = pgTable("reports", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: text("user_id").notNull(),
+  reportType: text("report_type").notNull(),
+  transitLineId: uuid("transit_line_id"),
+  transportTypeId: uuid("transport_type_id"),
+  description: text("description"),
+  latitude: real("latitude"),
+  longitude: real("longitude"),
+  status: text("status").notNull().default("open"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  resolvedAt: timestamp("resolved_at"),
+});
+
+export const transportReportsTable = pgTable("transport_reports", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: text("user_id").notNull(),
+  transportName: text("transport_name").notNull(),
+  transportNumber: text("transport_number"),
+  transportTypeId: uuid("transport_type_id"),
+  fromArea: text("from_area"),
+  toArea: text("to_area"),
+  gpsTrace: jsonb("gps_trace").$type<[number, number][]>(),
+  stopsVisited: jsonb("stops_visited").$type<string[]>(),
+  priceEgp: real("price_egp"),
+  status: text("status").notNull().default("pending"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -157,6 +196,8 @@ export const insertLocationSchema = createInsertSchema(locationsTable).omit({ id
 export const insertMawaqefSchema = createInsertSchema(mawaqefTable).omit({ id: true, createdAt: true });
 export const insertTripSchema = createInsertSchema(tripsTable).omit({ id: true, createdAt: true });
 export const insertReviewSchema = createInsertSchema(reviewsTable).omit({ id: true, createdAt: true });
+export const insertReportSchema = createInsertSchema(reportsTable).omit({ id: true, createdAt: true, resolvedAt: true });
+export const insertTransportReportSchema = createInsertSchema(transportReportsTable).omit({ id: true, createdAt: true });
 export const insertHeatmapSchema = createInsertSchema(transportHeatmapsTable).omit({ id: true, createdAt: true });
 
 export type Profile = typeof profilesTable.$inferSelect;
@@ -167,4 +208,6 @@ export type Mawaqef = typeof mawaqefTable.$inferSelect;
 export type Trip = typeof tripsTable.$inferSelect;
 export type TripSegment = typeof tripSegmentsTable.$inferSelect;
 export type Review = typeof reviewsTable.$inferSelect;
+export type Report = typeof reportsTable.$inferSelect;
+export type TransportReport = typeof transportReportsTable.$inferSelect;
 export type TransportHeatmap = typeof transportHeatmapsTable.$inferSelect;

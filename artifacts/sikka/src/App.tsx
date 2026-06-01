@@ -20,6 +20,8 @@ import AdminTransport from "./pages/admin/AdminTransport";
 import AdminLocations from "./pages/admin/AdminLocations";
 import AdminRoutes from "./pages/admin/AdminRoutes";
 import AdminReviews from "./pages/admin/AdminReviews";
+import AdminReports from "./pages/admin/AdminReports";
+import AdminDiscovery from "./pages/admin/AdminDiscovery";
 import AdminAnalytics from "./pages/admin/AdminAnalytics";
 import AdminMap from "./pages/admin/AdminMap";
 import NotFound from "./pages/NotFound";
@@ -97,6 +99,8 @@ function AppRoutes() {
             <Route path="locations" element={<AdminLocations />} />
             <Route path="routes" element={<AdminRoutes />} />
             <Route path="reviews" element={<AdminReviews />} />
+            <Route path="reports" element={<AdminReports />} />
+            <Route path="discovery" element={<AdminDiscovery />} />
             <Route path="analytics" element={<AdminAnalytics />} />
           </Route>
           <Route path="*" element={<NotFound />} />

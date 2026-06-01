@@ -11,6 +11,7 @@ import { ArrowLeft, Clock, Wallet, MapPin, RefreshCw, Check, Navigation, X, Info
 import { toast } from 'sonner';
 import Map, { Source, Layer, Marker } from 'react-map-gl/mapbox';
 import 'mapbox-gl/dist/mapbox-gl.css';
+import { getDirections } from '@/lib/routePaths';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
 
@@ -33,16 +34,6 @@ interface TripPlanData {
 const ICONS: Record<string, string> = {
   bus: '🚌', train: '🚆', car: '🚕', bike: '🛺', ship: '🚢', plane: '✈️', metro: '🚇', monorail: '🚝', walk: '🚶',
 };
-
-async function getDirections(start: [number, number], end: [number, number], profile = 'driving'): Promise<[number, number][]> {
-  try {
-    const res = await fetch(
-      `https://api.mapbox.com/directions/v5/mapbox/${profile}/${start[0]},${start[1]};${end[0]},${end[1]}?geometries=geojson&overview=full&access_token=${MAPBOX_TOKEN}`
-    );
-    const data = await res.json();
-    return data.routes?.[0]?.geometry?.coordinates || [start, end];
-  } catch { return [start, end]; }
-}
 
 const TripResult = () => {
   const navigate = useNavigate();
