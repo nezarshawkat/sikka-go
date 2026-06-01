@@ -3,19 +3,17 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { t } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
-import { User, MapPin, Navigation, ChevronRight } from 'lucide-react';
+import { User, MapPin, Navigation } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Map, { Marker, Source, Layer, type MapRef } from 'react-map-gl/mapbox';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import LocationAutocomplete from '@/components/LocationAutocomplete';
-import { Milestone } from 'lucide-react';
 import { useIsDark, MAP_STYLE_LIGHT, MAP_STYLE_DARK } from '@/hooks/useIsDark';
 import { getDirections } from '@/lib/routePaths';
 import { useTripTracking } from '@/hooks/useTripTracking';
 import TripGuideSheet, { type GuidePlan, type GuideSegment, type GuideAlternative } from '@/components/trip/TripGuideSheet';
 import SegmentReviewDialog, { type ReviewSegment } from '@/components/trip/SegmentReviewDialog';
 import ReportDialog from '@/components/ReportDialog';
-import ContributeTransportDialog from '@/components/ContributeTransportDialog';
 import { toast } from 'sonner';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
@@ -51,14 +49,13 @@ const Index = () => {
 
   const [activeTrip, setActiveTrip] = useState<ActiveTripPlan | null>(null);
   const [currentSegIdx, setCurrentSegIdx] = useState(0);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
   const [routeCoords, setRouteCoords] = useState<{ segIndex: number; coords: [number, number][] }[]>([]);
 
   const [reviewSeg, setReviewSeg] = useState<ReviewSegment | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [tripReviewOpen, setTripReviewOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
-  const [contributeOpen, setContributeOpen] = useState(false);
 
   useEffect(() => {
     if (!isLoading && !user) {
@@ -341,36 +338,6 @@ const Index = () => {
                   </div>
                 </div>
               )}
-              <button
-                onClick={() => navigate('/intercity')}
-                className="w-full bg-card/95 backdrop-blur-sm rounded-xl shadow-lg px-4 py-3 flex items-center gap-3 hover:bg-card active:scale-[0.98] transition-all border border-border/50"
-              >
-                <div className="h-10 w-10 rounded-full bg-blue-500/10 flex items-center justify-center shrink-0">
-                  <Milestone className="h-5 w-5 text-blue-500" />
-                </div>
-                <div className="flex-1 text-start">
-                  <p className="text-sm font-medium text-foreground">
-                    {language === 'ar' ? 'السفر بين المحافظات' : 'Intercity Travel'}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {language === 'ar' ? 'سوبر جت · جو باص · بلو باص' : 'SuperJet · GoBus · BlueBus'}
-                  </p>
-                </div>
-                <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
-              </button>
-              <button
-                onClick={() => setContributeOpen(true)}
-                className="w-full bg-card/95 backdrop-blur-sm rounded-xl shadow-lg px-4 py-3 flex items-center gap-3 hover:bg-card active:scale-[0.98] transition-all border border-border/50"
-              >
-                <div className="h-10 w-10 rounded-full bg-green-500/10 flex items-center justify-center shrink-0">
-                  <Milestone className="h-5 w-5 text-green-500" />
-                </div>
-                <div className="flex-1 text-start">
-                  <p className="text-sm font-medium text-foreground">{t('contributeRoute', language)}</p>
-                  <p className="text-xs text-muted-foreground">{t('contributeTitle', language)}</p>
-                </div>
-                <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
-              </button>
             </motion.div>
           </AnimatePresence>
         </div>
@@ -403,12 +370,6 @@ const Index = () => {
         language={language}
       />
 
-      {/* Contribute a route */}
-      <ContributeTransportDialog
-        open={contributeOpen}
-        onClose={() => setContributeOpen(false)}
-        language={language}
-      />
     </div>
   );
 };

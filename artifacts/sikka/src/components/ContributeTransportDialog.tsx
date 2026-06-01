@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,6 +14,17 @@ interface ContributeTransportDialogProps {
   language: Language;
 }
 
+type Operator = 'nta' | 'cta';
+interface TransportType {
+  id: string;
+  nameEn: string;
+}
+
+const OPERATOR_TYPE_NAME: Record<Operator, string> = {
+  nta: 'NTA Bus',
+  cta: 'CTA Bus',
+};
+
 export default function ContributeTransportDialog({
   open,
   onClose,
@@ -21,17 +32,34 @@ export default function ContributeTransportDialog({
 }: ContributeTransportDialogProps) {
   const [transportName, setTransportName] = useState('');
   const [transportNumber, setTransportNumber] = useState('');
+  const [operator, setOperator] = useState<Operator>('nta');
   const [fromArea, setFromArea] = useState('');
   const [toArea, setToArea] = useState('');
   const [price, setPrice] = useState('');
   const [trace, setTrace] = useState<[number, number][]>([]);
   const [recording, setRecording] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [transportTypes, setTransportTypes] = useState<TransportType[]>([]);
   const watchRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    api
+      .get('/transport-types')
+      .then((data) => {
+        if (!cancelled && Array.isArray(data)) setTransportTypes(data as TransportType[]);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   const reset = () => {
     setTransportName('');
     setTransportNumber('');
+    setOperator('nta');
     setFromArea('');
     setToArea('');
     setPrice('');
@@ -76,9 +104,12 @@ export default function ContributeTransportDialog({
     setSubmitting(true);
     try {
       const priceNum = Number(price);
+      const transportTypeId =
+        transportTypes.find((tt) => tt.nameEn === OPERATOR_TYPE_NAME[operator])?.id ?? null;
       await api.post('/transport-reports', {
         transportName: transportName.trim(),
         transportNumber: transportNumber || null,
+        transportTypeId,
         fromArea: fromArea || null,
         toArea: toArea || null,
         priceEgp: Number.isFinite(priceNum) && price !== '' ? priceNum : null,
@@ -107,7 +138,23 @@ export default function ContributeTransportDialog({
             <Input value={transportName} onChange={(e) => setTransportName(e.target.value)} className="text-sm" />
           </div>
           <div>
-            <label className="text-xs text-muted-foreground">{t('transportNumber', language)}</label>
+            <label className="text-xs text-muted-foreground">{t('operatorLabel', language)}</label>
+            <div className="grid grid-cols-2 gap-2 mt-1">
+              {(['nta', 'cta'] as Operator[]).map((op) => (
+                <Button
+                  key={op}
+                  type="button"
+                  variant={operator === op ? 'default' : 'outline'}
+                  className="w-full text-xs"
+                  onClick={() => setOperator(op)}
+                >
+                  {t(op === 'nta' ? 'operatorNta' : 'operatorCta', language)}
+                </Button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground">{t('busNumber', language)}</label>
             <Input value={transportNumber} onChange={(e) => setTransportNumber(e.target.value)} className="text-sm" />
           </div>
           <div className="grid grid-cols-2 gap-3">

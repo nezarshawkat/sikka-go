@@ -65,6 +65,8 @@ All Drizzle columns use camelCase in JS/TS. API responses are camelCase.
 
 **Unique constraint**: `transit_lines(transport_type_id, line_number)` — added to prevent duplicate route entries.
 
+**`transit_lines.governorate`** (text, default 'Cairo') — drives the admin map's governorate filter; the "All stations" selector derives unique stop strings from `via_stops`/`from_area`/`to_area` of lines in the active governorate.
+
 ### Transport Types (seeded in DB)
 
 | Name | Arabic | Price | Routes |

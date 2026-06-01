@@ -19,7 +19,6 @@ interface GeoJSONLineString {
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
 const CAIRO = { latitude: 30.0444, longitude: 31.2357, zoom: 11 };
 const ROUTE_COLORS = ['#EF4444', '#3B82F6', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899', '#06B6D4', '#F97316', '#14B8A6', '#6366F1'];
-const GOVERNORATES = ['Cairo', 'Giza', 'Qalyubia', 'Alexandria', 'Dakahlia', 'Sharqia', 'Monufia', 'Beheira', 'Kafr El Sheikh', 'Gharbia', 'Damietta', 'Port Said', 'Suez', 'Ismailia', 'Fayoum', 'Beni Suef', 'Minya', 'Assiut', 'Sohag', 'Qena', 'Luxor', 'Aswan', 'Red Sea', 'South Sinai', 'North Sinai', 'Matrouh', 'New Valley'];
 
 interface TransportType {
   id: string; nameEn: string; nameAr: string; icon: string; color: string; serviceLevel: string;
@@ -28,6 +27,7 @@ interface TransitLine {
   id: string; transportTypeId: string; lineNumber: string | null; nameEn: string; nameAr: string;
   fromArea: string; toArea: string; viaStops: string[]; routePath: GeoJSONLineString | null;
   priceEgp: number; frequencyMinutes: number | null; hasFixedStops: boolean; isActive: boolean;
+  governorate: string;
 }
 interface HeatmapPoint {
   id: string; transportTypeId: string; latitude: number; longitude: number; intensity: number; radiusKm: number;
@@ -121,7 +121,21 @@ const AdminMap = () => {
   const tuktukType = transportTypes.find(t => t.nameEn.toLowerCase().includes('tuk'));
   const whiteTaxiType = transportTypes.find(t => t.nameEn.toLowerCase().includes('white taxi'));
   const heatmapOnlyTypes = [tuktukType, whiteTaxiType].filter(Boolean);
-  const selectedStation = mawaqef.find(s => s.id === activeStationId);
+
+  const governorateOptions = useMemo(() => {
+    const set = new Set<string>();
+    transitLines.forEach(line => { if (line.governorate) set.add(line.governorate); });
+    return Array.from(set).sort();
+  }, [transitLines]);
+
+  const stationOptions = useMemo(() => {
+    const set = new Set<string>();
+    transitLines.forEach(line => {
+      if (activeGovernorate !== 'all' && (line.governorate || '').toLowerCase() !== activeGovernorate) return;
+      [line.fromArea, line.toArea, ...(line.viaStops || [])].forEach(s => { if (s && s.trim()) set.add(s.trim()); });
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, language === 'ar' ? 'ar' : 'en'));
+  }, [transitLines, activeGovernorate, language]);
 
   const geocodeStop = useCallback(async (stop: string): Promise<[number, number] | null> => {
     const key = stop.trim().toLowerCase();
@@ -172,8 +186,8 @@ const AdminMap = () => {
   const filteredLines = useMemo(() => {
     return transitLines.filter(line => {
       const typeMatch = activeTypeId === 'all' || line.transportTypeId === activeTypeId;
-      const stationName = selectedStation ? (language === 'ar' ? selectedStation.nameAr : selectedStation.nameEn) : '';
-      const stationMatch = !selectedStation || [line.fromArea, line.toArea, ...(line.viaStops || [])].some(s => s.includes(selectedStation.nameAr) || s.includes(selectedStation.nameEn) || s.includes(stationName));
+      const govMatch = activeGovernorate === 'all' || (line.governorate || '').toLowerCase() === activeGovernorate;
+      const stationMatch = activeStationId === 'all' || [line.fromArea, line.toArea, ...(line.viaStops || [])].some(s => s.trim() === activeStationId);
       const q = searchQuery.trim().toLowerCase();
       const searchMatch = !q ||
         (line.lineNumber ?? '').toLowerCase().includes(q) ||
@@ -182,12 +196,12 @@ const AdminMap = () => {
         line.fromArea.toLowerCase().includes(q) ||
         line.toArea.toLowerCase().includes(q) ||
         line.viaStops.some(s => s.toLowerCase().includes(q));
-      return typeMatch && stationMatch && searchMatch;
+      return typeMatch && govMatch && stationMatch && searchMatch;
     });
-  }, [activeTypeId, language, searchQuery, selectedStation, transitLines]);
+  }, [activeTypeId, activeGovernorate, activeStationId, searchQuery, transitLines]);
 
   useEffect(() => {
-    const limit = activeTypeId === 'all' && !searchQuery && !selectedStation ? 25 : 45;
+    const limit = activeTypeId === 'all' && !searchQuery && activeStationId === 'all' ? 25 : 45;
     const missing = filteredLines
       .filter(line => !line.routePath?.coordinates?.length && !generatedPaths[line.id] && !generatingRef.current.has(line.id))
       .slice(0, limit);
@@ -207,7 +221,7 @@ const AdminMap = () => {
       }
     })();
     return () => { cancelled = true; };
-  }, [activeTypeId, buildPathFromLineText, filteredLines, generatedPaths, searchQuery, selectedStation]);
+  }, [activeTypeId, buildPathFromLineText, filteredLines, generatedPaths, searchQuery, activeStationId]);
 
   const getLineGeometry = (line: TransitLine) => line.routePath?.coordinates?.length ? line.routePath : generatedPaths[line.id];
   const visibleLines = filteredLines.filter(line => getLineGeometry(line));
@@ -388,10 +402,10 @@ const AdminMap = () => {
           <p className="text-sm font-semibold">{getTypeName(activeTypeId) || 'All'} Routes ({filteredLines.length})</p>
           <p className="text-xs text-muted-foreground">{visibleLines.length} visible on map · text routes auto-snap to streets</p>
         </div>
-        {selectedStation && (
+        {activeStationId !== 'all' && (
           <div className="p-3 border-b bg-muted/40">
             <p className="text-xs text-muted-foreground">Station</p>
-            <p className="text-sm font-medium">{language === 'ar' ? selectedStation.nameAr : selectedStation.nameEn}</p>
+            <p className="text-sm font-medium">{activeStationId}</p>
             <p className="text-xs text-muted-foreground">{filteredLines.length} connected routes</p>
           </div>
         )}
@@ -457,22 +471,18 @@ const AdminMap = () => {
                 {transportTypes.map(tt => <SelectItem key={tt.id} value={tt.id}>{ICONS[tt.icon] || '🚌'} {tt.nameEn}</SelectItem>)}
               </SelectContent>
             </Select>
-            <Select value={activeGovernorate} onValueChange={setActiveGovernorate}>
+            <Select value={activeGovernorate} onValueChange={value => { setActiveGovernorate(value); setActiveStationId('all'); }}>
               <SelectTrigger className="h-10 bg-card/95 backdrop-blur-sm"><SelectValue placeholder="Governorate" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All governorates</SelectItem>
-                {GOVERNORATES.map(g => <SelectItem key={g} value={g.toLowerCase()}>{g}</SelectItem>)}
+                {governorateOptions.map(g => <SelectItem key={g} value={g.toLowerCase()}>{g}</SelectItem>)}
               </SelectContent>
             </Select>
-            <Select value={activeStationId} onValueChange={value => {
-              setActiveStationId(value);
-              const station = mawaqef.find(s => s.id === value);
-              if (station) setViewState(v => ({ ...v, latitude: station.latitude, longitude: station.longitude, zoom: 13 }));
-            }}>
+            <Select value={activeStationId} onValueChange={setActiveStationId}>
               <SelectTrigger className="h-10 bg-card/95 backdrop-blur-sm"><SelectValue placeholder="Stations / المواقف" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All stations and terminals</SelectItem>
-                {mawaqef.map(s => <SelectItem key={s.id} value={s.id}>{language === 'ar' ? s.nameAr : s.nameEn}</SelectItem>)}
+                {stationOptions.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -550,7 +560,7 @@ const AdminMap = () => {
 
           {mawaqef.map(station => (
             <Marker key={station.id} latitude={station.latitude} longitude={station.longitude}>
-              <button onClick={e => { e.stopPropagation(); setActiveStationId(station.id); }} className="h-7 w-7 rounded-full bg-card/90 border border-primary shadow-lg flex items-center justify-center">
+              <button onClick={e => { e.stopPropagation(); setViewState(v => ({ ...v, latitude: station.latitude, longitude: station.longitude, zoom: 13 })); }} className="h-7 w-7 rounded-full bg-card/90 border border-primary shadow-lg flex items-center justify-center">
                 <MapPin className="h-3.5 w-3.5 text-primary" />
               </button>
             </Marker>

@@ -393,7 +393,7 @@ const TripResult = () => {
 
       {!isTracking && (
         <div className="sticky bottom-0 p-4 bg-card/95 backdrop-blur-sm border-t">
-          <Button className="w-full h-14 text-base rounded-xl gap-2" onClick={startTracking}>
+          <Button className="w-full h-14 text-base rounded-xl gap-2" onClick={() => navigate('/')}>
             <Navigation className="h-5 w-5" />
             {t('startGuide', language)}
           </Button>

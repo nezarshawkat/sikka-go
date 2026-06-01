@@ -76,7 +76,7 @@ const TripPlan = () => {
         tripType,
         startLat, startLng, destLat, destLng,
       }));
-      navigate('/');
+      navigate('/trip-result');
     } catch (err: unknown) {
       console.error('Plan error:', err);
       toast.error(err instanceof Error ? err.message : 'Failed to plan trip');

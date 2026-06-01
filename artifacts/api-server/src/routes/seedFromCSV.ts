@@ -10,10 +10,10 @@ const router = Router();
 
 // Latest uploaded CSV filenames (attached_assets)
 const CSV_FILES = {
-  nta: "NTA_Busses_data_Cairo_1780318927061.csv",
+  nta: "NTA_Busses_data_Cairo_1780323547442.csv",
   cta: "Cairo_Bus_Lines_All_1780318927059.csv",
   microbus: "Cairo_Microbus_Full_Data_1780318927060.csv",
-  serfis: "serfis_with_stations_1780318927062.csv",
+  serfis: "serfis_with_stations_1780323656593.csv",
 };
 
 function parsePriceEGP(str: string): number {
@@ -28,6 +28,15 @@ function parsePriceEGP(str: string): number {
 function parseArabicStops(raw: string): string[] {
   if (!raw || raw.trim() === "-") return [];
   return raw.split(/[,،]/).map((s) => s.trim()).filter(Boolean);
+}
+
+// Stops listed in the المسار / خطوط السير column, separated by dashes or dots.
+function parseRouteStops(raw: string): string[] {
+  if (!raw || raw.trim() === "-") return [];
+  return raw
+    .split(/\s+[-–—.]\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 function parseCSVLine(line: string): string[] {
@@ -70,6 +79,7 @@ async function insertLine(opts: {
   toArea: string;
   viaStops: string[];
   priceEgp: number;
+  governorate?: string;
 }): Promise<"seeded" | "skipped"> {
   try {
     await db.insert(transitLinesTable).values({
@@ -79,6 +89,7 @@ async function insertLine(opts: {
       nameEn: opts.nameEn,
       fromArea: opts.fromArea,
       toArea: opts.toArea,
+      governorate: opts.governorate || "Cairo",
       viaStops: opts.viaStops,
       priceEgp: opts.priceEgp,
       hasFixedStops: false,
@@ -138,12 +149,13 @@ export async function runCSVSeed(opts: { clearFirst?: boolean } = {}): Promise<S
       if (cols.length < 3) continue;
       const lineNum = cols[0]?.trim() || null;
       const routeAr = cols[1]?.trim() || "";
-      const stopsRaw = cols[2]?.trim() || "";
       const price = parsePriceEGP(cols[3] || "20");
 
-      const stops = parseArabicStops(stopsRaw);
-      const fromArea = stops[0] || routeAr.split(/[–-]/)[0].trim();
-      const toArea = stops[stops.length - 1] || routeAr.split(/[–-]/).pop()?.trim() || "";
+      // Full stops live in المسار (cols[1]); المواقف is often empty.
+      const stops = parseRouteStops(routeAr);
+      if (stops.length < 2) continue;
+      const fromArea = stops[0];
+      const toArea = stops[stops.length - 1];
       const viaStops = stops.slice(1, -1);
 
       const nameAr = lineNum ? `خط ${lineNum}: ${fromArea} → ${toArea}` : `${fromArea} → ${toArea}`;
@@ -158,6 +170,7 @@ export async function runCSVSeed(opts: { clearFirst?: boolean } = {}): Promise<S
         toArea,
         viaStops,
         priceEgp: price,
+        governorate: "Cairo",
       });
       if (result === "seeded") counts.ntaBus++;
       else counts.skipped++;
@@ -195,6 +208,7 @@ export async function runCSVSeed(opts: { clearFirst?: boolean } = {}): Promise<S
         toArea,
         viaStops,
         priceEgp: price,
+        governorate: "Cairo",
       });
       if (result === "seeded") counts.ctaBus++;
       else counts.skipped++;
@@ -233,6 +247,7 @@ export async function runCSVSeed(opts: { clearFirst?: boolean } = {}): Promise<S
         toArea,
         viaStops,
         priceEgp: price,
+        governorate: "Cairo",
       });
       if (result === "seeded") counts.microbus++;
       else counts.skipped++;
@@ -251,15 +266,15 @@ export async function runCSVSeed(opts: { clearFirst?: boolean } = {}): Promise<S
       if (cols.length < 4) continue;
       const lineNum = cols[0]?.trim() || null;
       const routeAr = cols[1]?.trim() || "";
-      const stopsRaw = cols[2]?.trim() || "";
       const pricePounds = parseFloat(cols[5] || cols[3] || "8") || 0;
       const pricePiastres = parseFloat(cols[6] || cols[4] || "0") || 0;
       const price = pricePounds + pricePiastres / 100;
 
-      const routeParts = routeAr.split(/\s*-\s*/);
-      const stops = parseArabicStops(stopsRaw);
-      const fromArea = routeParts[0]?.trim() || stops[0] || "";
-      const toArea = routeParts[routeParts.length - 1]?.trim() || stops[stops.length - 1] || "";
+      // Full stops live in خطوط السير (cols[1]).
+      const stops = parseRouteStops(routeAr);
+      if (stops.length < 2) continue;
+      const fromArea = stops[0];
+      const toArea = stops[stops.length - 1];
       const viaStops = stops.slice(1, -1);
 
       const nameAr = routeAr || `${fromArea} → ${toArea}`;
@@ -274,6 +289,7 @@ export async function runCSVSeed(opts: { clearFirst?: boolean } = {}): Promise<S
         toArea,
         viaStops,
         priceEgp: price,
+        governorate: "Cairo",
       });
       if (result === "seeded") counts.serfis++;
       else counts.skipped++;

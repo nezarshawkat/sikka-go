@@ -1,16 +1,19 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { t } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { ArrowLeft, LogOut, Shield, User } from 'lucide-react';
+import { ArrowLeft, LogOut, Shield, User, Milestone } from 'lucide-react';
 import { motion } from 'framer-motion';
 import LanguageSelect from '@/components/LanguageSelect';
 import ThemeToggle from '@/components/ThemeToggle';
+import ContributeTransportDialog from '@/components/ContributeTransportDialog';
 
 const Profile = () => {
   const { user, profile, isAdmin, language, setLanguage, signOut } = useAuth();
   const navigate = useNavigate();
+  const [contributeOpen, setContributeOpen] = useState(false);
 
   const handleLogout = async () => {
     await signOut();
@@ -64,6 +67,13 @@ const Profile = () => {
           </Card>
         </motion.div>
 
+        <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.15 }}>
+          <Button variant="outline" className="w-full" onClick={() => setContributeOpen(true)}>
+            <Milestone className="h-4 w-4 mr-2" />
+            {t('contributeRoute', language)}
+          </Button>
+        </motion.div>
+
         {isAdmin && (
           <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.2 }}>
             <Button variant="outline" className="w-full" onClick={() => navigate('/admin')}>
@@ -80,6 +90,12 @@ const Profile = () => {
           </Button>
         </motion.div>
       </div>
+
+      <ContributeTransportDialog
+        open={contributeOpen}
+        onClose={() => setContributeOpen(false)}
+        language={language}
+      />
     </div>
   );
 };

@@ -3,19 +3,61 @@ import { db } from "@workspace/db";
 import { transportTypesTable, transitLinesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { requireAuth } from "../middlewares/requireAuth";
+import { EGYPT_CITIES } from "../lib/intercitySearch.js";
+import { runIntercitySearch } from "../lib/intercitySearch.js";
 
 const router = Router();
+
+function haversineKm(aLat: number, aLng: number, bLat: number, bLng: number) {
+  const R = 6371;
+  const dLat = (bLat - aLat) * Math.PI / 180;
+  const dLng = (bLng - aLng) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(aLat * Math.PI / 180) * Math.cos(bLat * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// Cairo + Giza are one metro area — travel within them stays "city" mode.
+const GREATER_CAIRO = new Set(["Cairo", "Giza"]);
+
+function nearestCity(lat: number, lng: number) {
+  let best: (typeof EGYPT_CITIES)[number] | null = null;
+  let bestDist = Infinity;
+  for (const c of EGYPT_CITIES) {
+    if (c.lat == null || c.lng == null) continue;
+    const d = haversineKm(lat, lng, c.lat, c.lng);
+    if (d < bestDist) { bestDist = d; best = c; }
+  }
+  return best ? { city: best, dist: bestDist } : null;
+}
+
+function zoneOf(governorate: string) {
+  return GREATER_CAIRO.has(governorate) ? "greater_cairo" : governorate;
+}
 
 router.post("/", requireAuth, async (req, res) => {
   const { startLat, startLng, endLat, endLng, tripType, budget, language } = req.body;
 
-  const distanceKm = (() => {
-    const R = 6371;
-    const dLat = (endLat - startLat) * Math.PI / 180;
-    const dLng = (endLng - startLng) * Math.PI / 180;
-    const a = Math.sin(dLat / 2) ** 2 + Math.cos(startLat * Math.PI / 180) * Math.cos(endLat * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
-    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  })();
+  const distanceKm = haversineKm(startLat, startLng, endLat, endLng);
+  const isArabicLang = language === "ar";
+
+  // ── Intercity auto-mode: destination in a different governorate / far away ──
+  const startNear = nearestCity(startLat, startLng);
+  const endNear = nearestCity(endLat, endLng);
+  if (
+    startNear && endNear &&
+    distanceKm > 50 &&
+    zoneOf(startNear.city.governorate) !== zoneOf(endNear.city.governorate)
+  ) {
+    try {
+      const intercityPlan = await buildIntercityPlan(
+        startNear.city, endNear.city, distanceKm, isArabicLang,
+      );
+      if (intercityPlan) return res.json(intercityPlan);
+    } catch (err) {
+      console.error("Intercity plan error:", err);
+      // fall through to normal city planning
+    }
+  }
 
   const transportTypes = await db.select().from(transportTypesTable).where(eq(transportTypesTable.isActive, true));
   const transitLines   = await db.select().from(transitLinesTable).where(eq(transitLinesTable.isActive, true));
@@ -171,6 +213,109 @@ Plan 1–5 segments. Return ONLY valid JSON.`;
     return res.json(generateFallbackPlan(distanceKm, tripType, taxiEst, isArabic));
   }
 });
+
+type IntercityCity = (typeof EGYPT_CITIES)[number];
+
+async function buildIntercityPlan(
+  fromCity: IntercityCity,
+  toCity: IntercityCity,
+  distanceKm: number,
+  isArabic: boolean,
+) {
+  const tr = (en: string, ar: string) => (isArabic ? ar : en);
+  const fromName = isArabic ? fromCity.nameAr : fromCity.nameEn;
+  const toName = isArabic ? toCity.nameAr : toCity.nameEn;
+
+  const date = new Date().toISOString().slice(0, 10);
+  let trips: Awaited<ReturnType<typeof runIntercitySearch>>["trips"] = [];
+  try {
+    const result = await runIntercitySearch(fromCity.nameEn, toCity.nameEn, date);
+    trips = result.trips;
+  } catch (err) {
+    console.error("Intercity search failed inside plan:", err);
+  }
+
+  // Cheapest trip becomes the primary segment; others become alternatives.
+  trips = [...trips].sort((a, b) => a.priceEgp - b.priceEgp);
+  const primary = trips[0];
+
+  const estPrice = primary?.priceEgp ?? Math.round(80 + distanceKm * 0.9);
+  const estDuration = primary?.durationMinutes ?? Math.round((distanceKm / 80) * 60);
+
+  const operatorName = primary?.operator ?? tr("Intercity Bus", "أتوبيس السفر");
+
+  const instructions = primary
+    ? [
+        tr(
+          `Go to ${primary.fromStation || fromName} station.`,
+          `اذهب إلى محطة ${primary.fromStation || fromName}.`,
+        ),
+        tr(
+          `Take the ${primary.operator} bus departing at ${primary.departure}.`,
+          `اركب أتوبيس ${primary.operator} المغادر الساعة ${primary.departure}.`,
+        ),
+        tr(
+          primary.bookingUrl
+            ? `Book online or at the office (~${estPrice} EGP).`
+            : `Buy your ticket at the station office (~${estPrice} EGP).`,
+          primary.bookingUrl
+            ? `احجز أونلاين أو من المكتب (~${estPrice} جنيه).`
+            : `اشترِ تذكرتك من مكتب المحطة (~${estPrice} جنيه).`,
+        ),
+        tr(
+          `Arrive in ${toName}${primary.arrival ? ` around ${primary.arrival}` : ""}.`,
+          `تصل إلى ${toName}${primary.arrival ? ` حوالي ${primary.arrival}` : ""}.`,
+        ),
+      ]
+    : [
+        tr(`Head to the intercity bus terminal in ${fromName}.`, `توجه إلى موقف أتوبيس السفر في ${fromName}.`),
+        tr(`Take an intercity bus toward ${toName}.`, `اركب أتوبيس سفر متجه إلى ${toName}.`),
+        tr(`Pay at the station (~${estPrice} EGP).`, `ادفع في المحطة (~${estPrice} جنيه).`),
+      ];
+
+  const alternatives = trips.slice(1, 4).map((t) => ({
+    transport_type_id: "intercity",
+    transport_name: `${t.operator} — ${t.departure}`,
+    cost_egp: t.priceEgp,
+    duration_minutes: t.durationMinutes,
+    color: "#0EA5E9",
+    icon: "bus",
+  }));
+
+  const segment = {
+    transport_type_id: "intercity",
+    transport_name: `${operatorName} — ${fromName} → ${toName}`,
+    government_type: "private",
+    category: "comfortable",
+    start_name: primary?.fromStation || fromName,
+    end_name: primary?.toStation || toName,
+    cost_egp: estPrice,
+    duration_minutes: estDuration,
+    color: "#0EA5E9",
+    icon: "bus",
+    line_id: null,
+    line_number: null,
+    info: tr(
+      `Intercity trip from ${fromName} to ${toName} (~${Math.round(distanceKm)} km).`,
+      `رحلة سفر من ${fromName} إلى ${toName} (~${Math.round(distanceKm)} كم).`,
+    ),
+    instructions,
+    route_geometry: null,
+    booking_url: primary?.bookingUrl ?? null,
+    alternatives,
+  };
+
+  return {
+    segments: [segment],
+    total_cost_egp: estPrice,
+    total_duration_minutes: estDuration,
+    budget_range: { min: Math.round(estPrice * 0.8), max: Math.round(estPrice * 1.4) },
+    distance_km: parseFloat(distanceKm.toFixed(1)),
+    intercity: true,
+    from_city: fromName,
+    to_city: toName,
+  };
+}
 
 function generateFallbackPlan(distanceKm: number, tripType: string, taxiEst: number, isArabic: boolean) {
   const tr = (en: string, ar: string) => (isArabic ? ar : en);

@@ -67,6 +67,9 @@ export default function TripGuideSheet({
     <div className="absolute bottom-0 left-0 right-0 z-30 px-3 pb-3">
       <motion.div
         layout
+        initial={{ y: 140, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ type: 'spring', damping: 26, stiffness: 280 }}
         drag="y"
         dragConstraints={{ top: 0, bottom: 0 }}
         dragElastic={0.2}
@@ -130,7 +133,7 @@ export default function TripGuideSheet({
               exit={{ height: 0, opacity: 0 }}
               className="overflow-hidden"
             >
-              <div className="px-4 pb-4 max-h-[55vh] overflow-y-auto space-y-4">
+              <div className="px-4 pb-4 space-y-4">
                 {/* overall ETA + cost */}
                 <div className="flex items-center justify-between rounded-xl bg-muted/50 px-3 py-2">
                   <div className="flex items-center gap-1.5 text-sm">

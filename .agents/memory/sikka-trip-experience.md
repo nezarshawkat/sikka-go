@@ -5,8 +5,8 @@ description: How the active-trip guide, reviews/reports, and request auth work i
 
 # Sikka active-trip experience
 
-- Trips are NOT a separate page. `pages/TripPlan.tsx` writes sessionStorage `tripPlan` then navigates to `/` (home). `pages/Index.tsx` reads it, draws per-segment road geometry on the home Mapbox map, and renders `components/trip/TripGuideSheet.tsx` (minimized/expanded bottom sheet) with live GPS via `hooks/useTripTracking.ts`.
-- `TripResult.tsx` is kept only as a fallback route, not the primary flow.
+- Flow: `pages/TripPlan.tsx` writes sessionStorage `tripPlan` then navigates to `/trip-result` (review page). `TripResult.tsx`'s "Start guide" button navigates to `/` (home) to begin the live trip. `pages/Index.tsx` reads `tripPlan`, draws per-segment road geometry on the home Mapbox map, and renders `components/trip/TripGuideSheet.tsx` (bottom sheet, defaults EXPANDED) with live GPS via `hooks/useTripTracking.ts`.
+- **Why:** users wanted a review/options screen before committing to the live guide; don't collapse the plan→review→home flow back into a direct navigate('/').
 
 # AI segment ids are slugs, not UUIDs
 - `/api/trips/plan` segments use slug `transport_type_id` like `metro`/`bus`/`car` (NOT DB UUIDs).

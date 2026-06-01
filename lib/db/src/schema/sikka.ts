@@ -48,6 +48,7 @@ export const transitLinesTable = pgTable("transit_lines", {
   nameAr: text("name_ar").notNull().default(""),
   fromArea: text("from_area").notNull(),
   toArea: text("to_area").notNull(),
+  governorate: text("governorate").notNull().default("Cairo"),
   viaStops: text("via_stops").array().notNull().default([]),
   routePath: jsonb("route_path").$type<{ type: string; coordinates: [number, number][] } | null>(),
   priceEgp: real("price_egp").notNull().default(5),
