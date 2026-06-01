@@ -201,7 +201,7 @@ router.post("/", requireAdmin, async (_req, res) => {
 
       const result = await insertLine({
         transportTypeId: microbusId,
-        lineNumber: null,
+        lineNumber: null, // microbus lines have no fixed number
         nameAr,
         nameEn,
         fromArea,

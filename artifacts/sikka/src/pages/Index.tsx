@@ -8,6 +8,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import Map, { Marker } from 'react-map-gl/mapbox';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import LocationAutocomplete from '@/components/LocationAutocomplete';
+import { Milestone } from 'lucide-react';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
 const CAIRO_CENTER = { latitude: 30.0444, longitude: 31.2357 };
@@ -244,24 +245,45 @@ const Index = () => {
                 </div>
               </div>
             </motion.div>
-          ) : userLocation ? (
+          ) : (
             <motion.div
               key="location"
               initial={{ y: 20, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: 20, opacity: 0 }}
               transition={{ delay: 0.3 }}
-              className="bg-card/95 backdrop-blur-sm rounded-xl shadow-lg p-4 flex items-center gap-3"
+              className="space-y-2"
             >
-              <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                <Navigation className="h-5 w-5 text-primary" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-foreground">{t('myLocation', language)}</p>
-                <p className="text-xs text-muted-foreground truncate">{locationName || `${userLocation.lat.toFixed(4)}, ${userLocation.lng.toFixed(4)}`}</p>
-              </div>
+              {userLocation && (
+                <div className="bg-card/95 backdrop-blur-sm rounded-xl shadow-lg p-4 flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                    <Navigation className="h-5 w-5 text-primary" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-foreground">{t('myLocation', language)}</p>
+                    <p className="text-xs text-muted-foreground truncate">{locationName || `${userLocation.lat.toFixed(4)}, ${userLocation.lng.toFixed(4)}`}</p>
+                  </div>
+                </div>
+              )}
+              <button
+                onClick={() => navigate('/intercity')}
+                className="w-full bg-card/95 backdrop-blur-sm rounded-xl shadow-lg px-4 py-3 flex items-center gap-3 hover:bg-card active:scale-[0.98] transition-all border border-border/50"
+              >
+                <div className="h-10 w-10 rounded-full bg-blue-500/10 flex items-center justify-center shrink-0">
+                  <Milestone className="h-5 w-5 text-blue-500" />
+                </div>
+                <div className="flex-1 text-start">
+                  <p className="text-sm font-medium text-foreground">
+                    {language === 'ar' ? 'السفر بين المحافظات' : 'Intercity Travel'}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {language === 'ar' ? 'سوبر جت · جو باص · بلو باص' : 'SuperJet · GoBus · BlueBus'}
+                  </p>
+                </div>
+                <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+              </button>
             </motion.div>
-          ) : null}
+          )}
         </AnimatePresence>
       </div>
     </div>

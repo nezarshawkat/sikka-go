@@ -14,6 +14,7 @@ import SignUpPage from "./pages/SignUp";
 import Profile from "./pages/Profile";
 import TripPlan from "./pages/TripPlan";
 import TripResult from "./pages/TripResult";
+import Intercity from "./pages/Intercity";
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import AdminTransport from "./pages/admin/AdminTransport";
 import AdminLocations from "./pages/admin/AdminLocations";
@@ -88,6 +89,7 @@ function AppRoutes() {
           <Route path="/profile" element={<Profile />} />
           <Route path="/plan" element={<TripPlan />} />
           <Route path="/trip-result" element={<TripResult />} />
+          <Route path="/intercity" element={<Intercity />} />
           <Route path="/admin" element={<AdminDashboard />}>
             <Route index element={<AdminMap />} />
             <Route path="map" element={<AdminMap />} />
