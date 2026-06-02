@@ -15,6 +15,7 @@ import seedCairoRouter from "./seedCairo";
 import seedAlexandriaRouter from "./seedAlexandria";
 import seedFromCSVRouter from "./seedFromCSV";
 import seedHeatmapsRouter from "./seedHeatmaps";
+import seedStopsRouter from "./seedStops";
 import intercityRouter from "./intercity";
 import reportsRouter from "./reports";
 import transportReportsRouter from "./transportReports";
@@ -52,6 +53,8 @@ router.use("/admin/seed-alexandria", seedAlexandriaRouter);
 router.use("/admin/seed-from-csv", seedFromCSVRouter);
 // POST /api/admin/seed-heatmaps — Tuktuk + White Taxi density hotspots
 router.use("/admin/seed-heatmaps", seedHeatmapsRouter);
+// POST /api/admin/seed-stops — geo-located stop dictionary (locations + mawaqef) + microbus coverage
+router.use("/admin/seed-stops", seedStopsRouter);
 
 // User-scoped routes
 router.use("/profile", profileRouter);
