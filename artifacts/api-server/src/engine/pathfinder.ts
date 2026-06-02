@@ -65,12 +65,17 @@ function edgeWeight(e: Edge, profile: PlanProfile): number {
 const MAX_SINGLE_WALK_MIN = 20; // spec: max single walking segment
 const MAX_TOTAL_WALK_MIN = 30; // spec: max total walking across the journey
 
-// A search label = one Pareto-optimal way to reach a node, tracked by both its
-// accumulated weight and its accumulated walking (the constrained resource).
+// A search label = one Pareto-optimal way to reach a node, tracked by its
+// accumulated weight and two constrained resources: total walking across the
+// whole journey, and the current *contiguous* walk run (reset whenever a
+// non-walk edge is taken). The contiguous run guards the single-walk-segment
+// limit, which a per-edge check alone misses when two short walk edges chain
+// through a stop the rider never actually boards at.
 interface Label {
   node: string;
   weight: number;
-  walk: number;
+  walk: number; // total walk minutes so far
+  cwalk: number; // contiguous walk minutes since the last non-walk edge
   prev: Label | null;
   edge: Edge | null;
   alive: boolean; // cleared when a strictly-better label dominates it
@@ -101,26 +106,31 @@ export function findRoute(
   };
 
   // Insert a candidate label unless an existing one dominates it; if accepted,
-  // retire any existing labels it now dominates.
+  // retire any existing labels it now dominates. Domination is over the full
+  // resource vector (weight, total walk, contiguous walk): a label (w,k,c)
+  // dominates (w',k',c') iff w<=w' AND k<=k' AND c<=c'. Including the
+  // contiguous-walk term keeps the search exact — a path that arrives "fresher"
+  // (less pending walk) is never pruned by a cheaper one that is mid-long-walk.
   const addLabel = (
-    node: string, weight: number, walk: number, prev: Label | null, edge: Edge | null,
+    node: string, weight: number, walk: number, cwalk: number,
+    prev: Label | null, edge: Edge | null,
   ): void => {
     const existing = labelsByNode.get(node);
     if (existing) {
       for (const l of existing) {
-        if (l.alive && l.weight <= weight && l.walk <= walk) return; // dominated
+        if (l.alive && l.weight <= weight && l.walk <= walk && l.cwalk <= cwalk) return; // dominated
       }
       for (const l of existing) {
-        if (l.alive && l.weight >= weight && l.walk >= walk) l.alive = false;
+        if (l.alive && l.weight >= weight && l.walk >= walk && l.cwalk >= cwalk) l.alive = false;
       }
     }
-    const lab: Label = { node, weight, walk, prev, edge, alive: true };
+    const lab: Label = { node, weight, walk, cwalk, prev, edge, alive: true };
     if (existing) existing.push(lab);
     else labelsByNode.set(node, [lab]);
     heap.push(weight, lab);
   };
 
-  addLabel(start, 0, 0, null, null);
+  addLabel(start, 0, 0, 0, null, null);
 
   let goalLabel: Label | null = null;
   while (heap.size > 0) {
@@ -132,10 +142,15 @@ export function findRoute(
     }
     for (const e of neighbors(lab.node)) {
       if (e.mode !== "walk" && !allowed.has(e.mode)) continue;
-      if (e.kind === "walk" && e.walkMin > MAX_SINGLE_WALK_MIN) continue;
+      const isWalk = e.kind === "walk";
+      // Contiguous walk run: grows across consecutive walk edges, resets on any
+      // other mode. Guards the single-segment limit even when short walk edges
+      // chain through an unboarded stop.
+      const nextCwalk = isWalk ? lab.cwalk + (e.walkMin || 0) : 0;
+      if (isWalk && nextCwalk > MAX_SINGLE_WALK_MIN) continue;
       const nextWalk = lab.walk + (e.walkMin || 0);
       if (e.walkMin > 0 && nextWalk > MAX_TOTAL_WALK_MIN) continue; // hard cap
-      addLabel(e.to, lab.weight + edgeWeight(e, profile), nextWalk, lab, e);
+      addLabel(e.to, lab.weight + edgeWeight(e, profile), nextWalk, nextCwalk, lab, e);
     }
   }
 

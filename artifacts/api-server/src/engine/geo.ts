@@ -100,3 +100,24 @@ export function slicePath(
   // preserve travel direction (from -> to)
   return from <= to ? seg : seg.reverse();
 }
+
+// Sample polyline vertex indices roughly every `spacingKm` (measured by cumulative
+// distance), always including the first and last vertex. Used to place virtual
+// boarding points along flag-down routes so riders can get on/off near any point.
+export function sampleIndicesAlongPath(
+  path: [number, number][],
+  spacingKm: number,
+): number[] {
+  if (path.length <= 2) return path.map((_, i) => i);
+  const out: number[] = [0];
+  let acc = 0;
+  for (let i = 1; i < path.length - 1; i++) {
+    acc += haversineKm(pathPointToCoord(path[i - 1]), pathPointToCoord(path[i]));
+    if (acc >= spacingKm) {
+      out.push(i);
+      acc = 0;
+    }
+  }
+  out.push(path.length - 1);
+  return out;
+}

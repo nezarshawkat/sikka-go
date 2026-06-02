@@ -25,6 +25,7 @@ import {
   nearestPathIndex,
   normalizeName,
   pathPointToCoord,
+  sampleIndicesAlongPath,
 } from "./geo.js";
 import {
   boardingFare,
@@ -37,6 +38,8 @@ import {
 const WALK_TRANSFER_KM = 0.45; // stops closer than this are walk-transferable
 const MAX_TRANSFER_LINKS = 6; // cap transfer edges per stop
 const GRID_CELL_DEG = 0.01; // ~1.1 km
+const DENSE_SPACING_KM = 1.0; // board-anywhere: virtual boarding point every ~1 km
+const DENSE_MIN_GAP_KM = 0.5; // never place a synthetic point this close to another stop
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 let cached: TransitGraph | null = null;
@@ -89,6 +92,50 @@ function addEdge(edges: Map<string, Edge[]>, from: string, e: Edge) {
   const arr = edges.get(from);
   if (arr) arr.push(e);
   else edges.set(from, [e]);
+}
+
+// For flag-down modes (bus/serfis/microbus) riders board/alight anywhere along
+// the route, not only at the sparse named stops. We add virtual boarding points
+// sampled along the polyline so the planner can get on near the origin and off
+// near the destination, riding only the needed slice instead of the whole route.
+// Named stops are always kept — they anchor transfers and provide readable labels.
+function densifyAlongPath(
+  lineId: string,
+  path: [number, number][],
+  named: LineStop[],
+): LineStop[] {
+  if (path.length <= 2 || named.length === 0) return named;
+  const byIdx = new Map<number, LineStop>();
+  for (const s of named) byIdx.set(s.pathIndex, s);
+  for (const idx of sampleIndicesAlongPath(path, DENSE_SPACING_KM)) {
+    if (byIdx.has(idx)) continue;
+    // label the virtual point after the nearest named stop so steps read well
+    let disp = named[0].name;
+    let best = Infinity;
+    for (const s of named) {
+      const d = Math.abs(s.pathIndex - idx);
+      if (d < best) {
+        best = d;
+        disp = s.displayName ?? s.name;
+      }
+    }
+    byIdx.set(idx, {
+      name: `${lineId} pt${idx}`,
+      coord: pathPointToCoord(path[idx]),
+      pathIndex: idx,
+      displayName: disp,
+      synthetic: true,
+    });
+  }
+  const ordered = [...byIdx.values()].sort((a, b) => a.pathIndex - b.pathIndex);
+  const pruned: LineStop[] = [];
+  let last: Coord | null = null;
+  for (const s of ordered) {
+    if (s.synthetic && last && haversineKm(last, s.coord) < DENSE_MIN_GAP_KM) continue;
+    pruned.push(s);
+    last = s.coord;
+  }
+  return pruned;
 }
 
 export async function buildGraph(force = false): Promise<TransitGraph> {
@@ -157,7 +204,7 @@ export async function buildGraph(force = false): Promise<TransitGraph> {
     }
 
     const viaIndices = distributeStopsAlongPath(path, via.length);
-    const stops: LineStop[] = [];
+    const namedStops: LineStop[] = [];
     stopNames.forEach((name, i) => {
       let pathIdx: number;
       if (i === 0) pathIdx = 0;
@@ -174,8 +221,11 @@ export async function buildGraph(force = false): Promise<TransitGraph> {
         coord = pathPointToCoord(path[Math.min(pathIdx, path.length - 1)]);
         register(name, coord);
       }
-      stops.push({ name, coord, pathIndex: pathIdx });
+      namedStops.push({ name, coord, pathIndex: pathIdx });
     });
+
+    // Flag-down routes get virtual boarding points; fixed-stop rail keeps stations.
+    const stops = l.hasFixedStops ? namedStops : densifyAlongPath(l.id, path, namedStops);
 
     lines.set(l.id, {
       id: l.id,
@@ -198,10 +248,10 @@ export async function buildGraph(force = false): Promise<TransitGraph> {
   const edges = new Map<string, Edge[]>();
   const grid: SpatialGrid = { cell: GRID_CELL_DEG, buckets: new Map() };
 
-  const ensureStopNode = (name: string, coord: Coord): string => {
+  const ensureStopNode = (name: string, coord: Coord, displayName?: string): string => {
     const id = `stop:${normalizeName(name)}`;
     if (!nodes.has(id)) {
-      nodes.set(id, { id, coord, kind: "stop", name });
+      nodes.set(id, { id, coord, kind: "stop", name: displayName ?? name });
       gridInsert(grid, id, coord);
     }
     return id;
@@ -220,14 +270,14 @@ export async function buildGraph(force = false): Promise<TransitGraph> {
         id: lsId,
         coord: s.coord,
         kind: "linestop",
-        name: s.name,
+        name: s.displayName ?? s.name,
         lineId: line.id,
         stopIndex: i,
         typeId: type.id,
       });
       lsIds.push(lsId);
 
-      const stopId = ensureStopNode(s.name, s.coord);
+      const stopId = ensureStopNode(s.name, s.coord, s.displayName);
       // board: pay fare + wait to get on this line here
       addEdge(edges, stopId, {
         to: lsId,

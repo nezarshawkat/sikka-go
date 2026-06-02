@@ -94,6 +94,16 @@ All Drizzle columns use camelCase in JS/TS. API responses are camelCase.
 | `POST /api/admin/seed-alexandria` | Alexandria APTA routes (CTA Bus type, 31 routes) |
 | `POST /api/admin/seed-alexandria?generatePaths=true` | Also geocode + snap to roads |
 
+### Deterministic Routing Engine (`artifacts/api-server/src/engine/`)
+
+`POST /api/trips/plan` (city mode) runs a deterministic transfer-graph + Dijkstra search over verified DB data only — it never invents routes (AI is for optional explanations only, with a deterministic fallback).
+
+- **Board-anywhere densification** (`graph.ts`): bus/serfis/microbus lines (`hasFixedStops=false`) get synthetic boarding points sampled ~every 1 km along `route_path` (labeled with nearest named stop). Riders board at the nearest point and ride only the needed slice instead of detouring to sparse hubs. Rail keeps named stops only.
+- **Pathfinder** (`pathfinder.ts`): Pareto-dominance labeling over `(weight, totalWalk, contiguousWalk)`. The contiguous-walk term forbids chaining two short walk edges through an unboarded stop into one over-long walk. Walk caps: 20 min single / 30 min total. Access walk threshold ~1.5 km.
+- **Profiles** (`planner.ts`): `buildOverlay`/`ladderFor` are profile-aware. Economic = informal cheap modes (bus/serfis/microbus + tuktuk first/last mile, never taxi/rail). Comfortable = bus/rail + taxi/tuktuk only for short ≤1.5 km access hops. Premium = taxi-first (≤5 km connectors + direct door-to-door).
+- **Detour cap**: a plan's total distance must stay under `max(directKm*2.8 + 3, 5)` km; otherwise the least-distance valid plan is returned. `validatePlan` is a hard gate — only valid plans are returned, else the caller falls back to a verified taxi option.
+- Leg distance is computed from consecutive `line.stops[]` haversine (NOT from the stored `route_path` polyline, which can be noisy); the polyline is for map display only.
+
 ### Route Path Generation
 
 - Client-side: `buildPathFromLineText` in AdminMap.tsx — geocodes stops + Mapbox Directions snap-to-roads

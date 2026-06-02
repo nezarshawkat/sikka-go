@@ -18,10 +18,11 @@ import { scorePlan, planConfidence } from "./score.js";
 import { explainPlan } from "./explain.js";
 import { validatePlan } from "./validate.js";
 
-const WALK_ACCESS_KM = 1.3; // origin/dest → stop on foot
-const TAXI_CONNECT_KM = 5; // origin/dest → stop by car (first/last mile)
+const WALK_ACCESS_KM = 1.5; // origin/dest → stop on foot (spec: ~1.5 km)
+const SHORT_HOP_KM = 1.5; // taxi/tuktuk may replace a short access walk (comfortable)
+const TAXI_CONNECT_KM = 5; // origin/dest → stop by car (first/last mile, premium)
 const TUKTUK_CONNECT_KM = 3; // spec: tuktuk max distance
-const ACCESS_STOP_LIMIT = 35;
+const ACCESS_STOP_LIMIT = 120; // dense board-anywhere points → allow more candidates
 
 const PUBLIC: ModeKey[] = ["metro", "monorail", "train", "bus", "serfis", "microbus"];
 
@@ -46,6 +47,7 @@ function buildOverlay(
   graph: TransitGraph,
   origin: Coord,
   dest: Coord,
+  planKey: PlanKey,
 ): SearchOverlay {
   const nodes = new Map<string, GraphNode>();
   const edges = new Map<string, Edge[]>();
@@ -55,6 +57,16 @@ function buildOverlay(
   const taxiType = pickType(graph, "taxi", /uber|careem/i);
   const tuktukType = pickType(graph, "tuktuk");
 
+  // Profile rules: economic never uses a taxi; comfortable may take one only to
+  // replace a short access walk; premium may taxi the first/last mile or whole
+  // trip. Tuktuk is an economic first/last-mile mode (or a short comfortable hop).
+  const taxiAccessKm =
+    planKey === "premium" ? TAXI_CONNECT_KM : planKey === "comfortable" ? SHORT_HOP_KM : 0;
+  const tuktukAccessKm =
+    planKey === "economic" ? TUKTUK_CONNECT_KM : planKey === "comfortable" ? SHORT_HOP_KM : 0;
+  const offerDirectTaxi = planKey === "premium";
+  const offerDirectTuktuk = planKey === "economic";
+
   const nearO = nearestStops(graph, origin, TAXI_CONNECT_KM, ACCESS_STOP_LIMIT);
   for (const s of nearO) {
     if (s.distKm <= WALK_ACCESS_KM) {
@@ -63,14 +75,14 @@ function buildOverlay(
         to: s.id, kind: "walk", timeMin: t, costEgp: 0, walkMin: t, isBoarding: false, mode: "walk",
       });
     }
-    if (taxiType) {
+    if (taxiType && s.distKm <= taxiAccessKm) {
       pushEdge(edges, "origin", {
         to: s.id, kind: "taxi", timeMin: (s.distKm / taxiType.speedKmh) * 60,
         costEgp: directFare(taxiType, s.distKm), walkMin: 0, isBoarding: true,
         mode: "taxi", typeId: taxiType.id,
       });
     }
-    if (tuktukType && s.distKm <= TUKTUK_CONNECT_KM) {
+    if (tuktukType && s.distKm <= tuktukAccessKm) {
       pushEdge(edges, "origin", {
         to: s.id, kind: "tuktuk", timeMin: (s.distKm / tuktukType.speedKmh) * 60,
         costEgp: directFare(tuktukType, s.distKm), walkMin: 0, isBoarding: true,
@@ -87,14 +99,14 @@ function buildOverlay(
         to: "dest", kind: "walk", timeMin: t, costEgp: 0, walkMin: t, isBoarding: false, mode: "walk",
       });
     }
-    if (taxiType) {
+    if (taxiType && s.distKm <= taxiAccessKm) {
       pushEdge(edges, s.id, {
         to: "dest", kind: "taxi", timeMin: (s.distKm / taxiType.speedKmh) * 60,
         costEgp: directFare(taxiType, s.distKm), walkMin: 0, isBoarding: true,
         mode: "taxi", typeId: taxiType.id,
       });
     }
-    if (tuktukType && s.distKm <= TUKTUK_CONNECT_KM) {
+    if (tuktukType && s.distKm <= tuktukAccessKm) {
       pushEdge(edges, s.id, {
         to: "dest", kind: "tuktuk", timeMin: (s.distKm / tuktukType.speedKmh) * 60,
         costEgp: directFare(tuktukType, s.distKm), walkMin: 0, isBoarding: true,
@@ -112,13 +124,13 @@ function buildOverlay(
       to: "dest", kind: "walk", timeMin: wt, costEgp: 0, walkMin: wt, isBoarding: false, mode: "walk",
     });
   }
-  if (taxiType) {
+  if (taxiType && offerDirectTaxi) {
     pushEdge(edges, "origin", {
       to: "dest", kind: "taxi", timeMin: (direct / taxiType.speedKmh) * 60,
       costEgp: directFare(taxiType, direct), walkMin: 0, isBoarding: true, mode: "taxi", typeId: taxiType.id,
     });
   }
-  if (tuktukType && direct <= TUKTUK_CONNECT_KM) {
+  if (tuktukType && offerDirectTuktuk && direct <= TUKTUK_CONNECT_KM) {
     pushEdge(edges, "origin", {
       to: "dest", kind: "tuktuk", timeMin: (direct / tuktukType.speedKmh) * 60,
       costEgp: directFare(tuktukType, direct), walkMin: 0, isBoarding: true, mode: "tuktuk", typeId: tuktukType.id,
@@ -128,20 +140,31 @@ function buildOverlay(
   return { nodes, edges };
 }
 
+// Mode ladders per profile, ordered most-preferred → fallback. The planner tries
+// each rung and stops at the first that yields a sensible (non-detour) plan.
+// economic = cheap/informal (bus/serfis/microbus + tuktuk); comfortable = formal
+// transit (bus + rail) with a taxi only for short hops; premium = taxi-first.
+// A taxi door-to-door fallback is produced upstream when every rung returns null.
 function ladderFor(planKey: PlanKey): Set<ModeKey>[] {
   const rungs: ModeKey[][] = [];
   if (planKey === "economic") {
-    rungs.push([...PUBLIC]);
-    rungs.push([...PUBLIC, "tuktuk"]);
-    rungs.push([...PUBLIC, "tuktuk", "taxi"]);
+    // Spec: economic = cheap informal modes only (tuktuk / microbus / bus).
+    // Rail belongs to comfortable; if no informal route exists the planner
+    // returns null and the caller falls back to a verified taxi option.
+    rungs.push(["bus", "serfis", "microbus"]);
+    rungs.push(["bus", "serfis", "microbus", "tuktuk"]);
+    rungs.push([]); // walking only
   } else if (planKey === "comfortable") {
-    rungs.push([...PUBLIC, "taxi", "tuktuk"]);
+    rungs.push(["bus", "metro", "monorail", "train"]);
+    rungs.push(["bus", "metro", "monorail", "train", "serfis", "microbus"]);
+    rungs.push(["bus", "metro", "monorail", "train", "serfis", "microbus", "tuktuk", "taxi"]);
+    rungs.push([]); // walking only
   } else {
-    rungs.push([...PUBLIC, "taxi", "tuktuk"]);
+    rungs.push(["taxi"]);
+    rungs.push(["taxi", "metro", "monorail", "train"]);
+    rungs.push(["taxi", "metro", "monorail", "train", "bus", "serfis", "microbus", "tuktuk"]);
+    rungs.push([]); // walking only
   }
-  rungs.push([...PUBLIC, "taxi", "tuktuk"]); // widen
-  rungs.push([]); // walking only
-  rungs.push(["taxi"]); // full taxi
   return rungs.map((r) => new Set(r));
 }
 
@@ -246,9 +269,17 @@ function reconstruct(
       }
       if (distance <= 0) distance = haversineKm(startStop.coord, endStop.coord);
 
+      // Count only real named stops ridden through (synthetic board-anywhere
+      // points are not landmarks, so they should not inflate "ride N stops").
+      let namedRidden = 0;
+      for (let k = lo + 1; k <= hi; k++) {
+        if (!line.stops[k]?.synthetic) namedRidden++;
+      }
+
       legs.push({
         mode: board.mode, typeId: board.typeId ?? null, lineId: line.id, lineNumber: line.lineNumber,
-        startName: startStop.name, endName: endStop.name,
+        startName: startStop.displayName ?? startStop.name,
+        endName: endStop.displayName ?? endStop.name,
         startCoord: startStop.coord, endCoord: endStop.coord,
         timeMin: board.timeMin + rideTime, waitMin: board.timeMin, costEgp: board.costEgp + rideCost,
         distanceKm: distance,
@@ -257,7 +288,7 @@ function reconstruct(
           [endStop.coord.lng, endStop.coord.lat],
         ],
         crowding: estimateCrowding(board.mode, startStop.coord, graph.heatPoints),
-        stopsCount: rides.length,
+        stopsCount: namedRidden,
       });
       continue;
     }
@@ -333,18 +364,23 @@ function legInstructions(
   }
   const ln = leg.lineNumber ? ` ${leg.lineNumber}` : "";
   const stops = leg.stopsCount ?? 0;
+  const km = Math.round(leg.distanceKm * 10) / 10;
   if (isArabic) {
     return [
       `اذهب إلى ${leg.startName} واركب ${name}${ln}.`,
       `ادفع حوالي ${cost} جنيه.`,
-      `اركب ${stops} محطة/محطات حتى ${leg.endName}.`,
+      stops > 0
+        ? `اركب ${stops} محطة/محطات حتى ${leg.endName}.`
+        : `ابقَ على الخط حوالي ${km} كم حتى ${leg.endName}.`,
       `انزل عند ${leg.endName}.`,
     ];
   }
   return [
     `Go to ${leg.startName} and board ${name}${ln}.`,
     `Pay about ${cost} EGP.`,
-    `Ride ${stops} stop${stops === 1 ? "" : "s"} to ${leg.endName}.`,
+    stops > 0
+      ? `Ride ${stops} stop${stops === 1 ? "" : "s"} to ${leg.endName}.`
+      : `Stay on for about ${km} km to ${leg.endName}.`,
     `Get off at ${leg.endName}.`,
   ];
 }
@@ -418,22 +454,32 @@ export function adaptPlanToApi(
 // Main entry: build graph, run fallback ladder, validate, return best EnginePlan.
 export async function computeEnginePlan(req: PlanRequest): Promise<EnginePlan | null> {
   const graph = await buildGraph();
-  const overlay = buildOverlay(graph, req.origin, req.dest);
+  const overlay = buildOverlay(graph, req.origin, req.dest, req.planKey);
   const profile = PROFILES[req.planKey];
   const rungs = ladderFor(req.planKey);
+
+  // Reject absurd detours (e.g. routing through a far hub for a short trip): a
+  // plan may wander, but its total distance must stay near the straight line.
+  const directKm = haversineKm(req.origin, req.dest);
+  const detourCap = Math.max(directKm * 2.8 + 3, 5);
 
   // Validation is a hard gate: we ONLY return a plan that passes simulation.
   // An invalid plan (disconnected transfer, walk-limit breach, unverified leg)
   // is never adapted or returned — the caller falls back to a verified taxi
-  // option instead of showing the user an impossible journey.
+  // option instead of showing the user an impossible journey. Rungs are tried
+  // in preference order; the first valid, non-detour plan wins. If every valid
+  // plan detours, the least-detour one is returned rather than nothing.
+  let best: EnginePlan | null = null;
   for (const allowed of rungs) {
     const res = findRoute(graph, overlay, "origin", "dest", profile, allowed);
     if (!res) continue;
     const plan = reconstruct(graph, overlay, res, req.planKey, req.isArabic);
     if (plan.legs.length === 0) continue;
-    if (validatePlan(plan).ok) return plan;
+    if (!validatePlan(plan).ok) continue;
+    if (plan.distanceKm <= detourCap) return plan;
+    if (!best || plan.distanceKm < best.distanceKm) best = plan;
   }
-  return null;
+  return best;
 }
 
 export async function planTripApi(req: PlanRequest) {

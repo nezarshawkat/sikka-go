@@ -34,9 +34,11 @@ export interface TransportTypeInfo {
 }
 
 export interface LineStop {
-  name: string;
+  name: string; // unique node key (synthetic points use a line-private id)
   coord: Coord;
   pathIndex: number; // index into the line's route_path coordinate list
+  displayName?: string; // human-readable label shown to the user
+  synthetic?: boolean; // virtual board-anywhere point (not a real named stop)
 }
 
 export interface LineInfo {
