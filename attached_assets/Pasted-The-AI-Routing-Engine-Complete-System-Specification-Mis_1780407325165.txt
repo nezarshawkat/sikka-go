@@ -1,0 +1,742 @@
+The AI Routing Engine – Complete System Specification
+
+Mission
+
+Build a production-grade multi-modal transportation routing platform capable of generating realistic, validated, end-to-end journeys between any two locations.
+
+The platform must support:
+
+- Bus
+- Microbus
+- Metro
+- Monorail
+- Train
+- White Taxi
+- Tuk-Tuk
+- Walking
+
+The system must never invent routes.
+
+Every route shown to users must be fully supported by verified transportation, road, station, and walking data.
+
+The system must prioritize reliability, scalability, explainability, and continuous improvement.
+
+---
+
+System Architecture
+
+The platform shall be divided into independent modules.
+
+Module 1: Transportation Data Engine
+
+Responsible for storing and managing transportation information.
+
+Responsibilities
+
+Store:
+
+- Transportation routes
+- Transportation route directions
+- Stations
+- Stops
+- Pickup points
+- Drop-off points
+- Road network
+- Walking paths
+- Transportation schedules
+- Service status
+- Historical travel data
+- Historical crowding data
+
+Supported Data Types
+
+Metro
+
+Store:
+
+- Stations
+- Entrances
+- Exits
+- Connections
+- Operating hours
+- Schedules
+
+Monorail
+
+Store:
+
+- Stations
+- Entrances
+- Exits
+- Connections
+- Operating hours
+- Schedules
+
+Train
+
+Store:
+
+- Stations
+- Platforms
+- Operating hours
+- Schedules
+
+Bus
+
+Store:
+
+- Routes
+- Route directions
+- Stops
+- Verified pickup locations
+- Verified drop-off locations
+
+Microbus
+
+Store:
+
+- Routes
+- Route directions
+- Verified pickup locations
+- Verified drop-off locations
+
+White Taxi
+
+Store:
+
+- Availability zones
+- Historical availability
+
+Tuk-Tuk
+
+Store:
+
+- Availability zones
+- Maximum operating distance
+- Historical availability
+
+---
+
+Data Confidence System
+
+Every record must contain:
+
+- Source
+- Last Updated Timestamp
+- Confidence Score
+
+Confidence Levels
+
+High
+
+- Official source
+
+Medium
+
+- Verified by multiple users
+
+Low
+
+- Limited community verification
+
+The routing engine must prioritize higher-confidence data.
+
+---
+
+Route Versioning System
+
+Every route must support version history.
+
+Never overwrite routes.
+
+Store:
+
+- Route Version
+- Creation Date
+- Update Date
+- Source
+- Confidence
+
+Allow rollback.
+
+Allow auditing.
+
+---
+
+Module 2: Routing Engine
+
+The Routing Engine is the source of truth.
+
+The Routing Engine must NOT use AI.
+
+The Routing Engine must use deterministic graph algorithms.
+
+Recommended:
+
+- A*
+- Dijkstra
+- Contraction Hierarchies (future scaling)
+
+---
+
+Transportation Graph
+
+Represent the city as a graph.
+
+Nodes
+
+Nodes include:
+
+- User location
+- Destination
+- Road intersections
+- Metro stations
+- Monorail stations
+- Train stations
+- Bus stops
+- Microbus pickup points
+- Transfer points
+- Taxi zones
+- Tuk-Tuk zones
+
+Edges
+
+Edges include:
+
+- Walking segments
+- Bus route segments
+- Microbus route segments
+- Metro route segments
+- Monorail route segments
+- Train route segments
+- Taxi route segments
+- Tuk-Tuk route segments
+
+Each edge stores:
+
+- Distance
+- Travel time
+- Waiting time
+- Cost
+- Reliability
+- Crowding estimate
+- Transportation type
+- Availability status
+
+---
+
+Transportation Rules
+
+Metro
+
+Boarding:
+
+Only official stations.
+
+Exiting:
+
+Only official stations.
+
+Users must walk to station first.
+
+---
+
+Monorail
+
+Boarding:
+
+Only official stations.
+
+Exiting:
+
+Only official stations.
+
+Users must walk to station first.
+
+---
+
+Train
+
+Boarding:
+
+Only official stations.
+
+Exiting:
+
+Only official stations.
+
+Users must walk to station first.
+
+---
+
+Bus
+
+Boarding:
+
+- Official stops
+- Verified pickup points
+
+Exiting:
+
+- Official stops
+- Verified drop-off points
+
+---
+
+Microbus
+
+Boarding:
+
+- Verified pickup points
+- Verified roadside pickup zones
+
+Exiting:
+
+- Verified drop-off points
+
+---
+
+White Taxi
+
+Can start and end at any accessible road location.
+
+---
+
+Tuk-Tuk
+
+Short-distance transportation only.
+
+Default maximum distance:
+
+3 km
+
+Configurable by administrators.
+
+---
+
+Walking
+
+Allowed only on valid pedestrian paths.
+
+Maximum walking segment:
+
+20 minutes
+
+Maximum total walking:
+
+30 minutes
+
+Configurable.
+
+---
+
+Module 3: Validation Engine
+
+Every generated route must pass validation before display.
+
+Validation is mandatory.
+
+---
+
+Validation Checks
+
+Check:
+
+- Route exists
+- Transportation route exists
+- Stations exist
+- Stops exist
+- Pickup points exist
+- Transfer points exist
+- Road exists
+- Walking path exists
+- Transportation available
+- Service active
+- Route direction correct
+- Destination reachable
+- Walking limits respected
+- Transfer physically possible
+
+Reject route if any validation fails.
+
+Automatically recalculate.
+
+---
+
+Route Simulation Layer
+
+Before displaying a route:
+
+Simulate the entire journey.
+
+Verify:
+
+- User can reach first transportation segment
+- User can complete all transfers
+- Walking paths are valid
+- Timing is realistic
+- Destination can be reached
+
+Reject impossible journeys.
+
+---
+
+Module 4: Recommendation Engine
+
+Receives validated routes.
+
+Ranks routes.
+
+Selects best recommendation.
+
+---
+
+Transportation Plans
+
+Economic
+
+Priority:
+
+- Lowest cost
+- Public transportation first
+
+Preference Order:
+
+1. Walking
+2. Bus
+3. Microbus
+4. Metro
+5. Monorail
+6. Train
+7. White Taxi
+8. Tuk-Tuk
+
+Allow:
+
+- Longer travel times
+- Additional transfers
+
+---
+
+Comfortable
+
+Balance:
+
+- Cost
+- Travel time
+- Comfort
+
+Preference Order:
+
+1. Metro
+2. Monorail
+3. Train
+4. Bus
+5. Microbus
+6. White Taxi
+7. Tuk-Tuk
+
+Reduce transfers.
+
+Reduce walking.
+
+---
+
+Premium
+
+Priority:
+
+- Speed
+- Convenience
+
+Preference Order:
+
+1. White Taxi
+2. Metro
+3. Monorail
+4. Train
+5. Bus
+6. Microbus
+7. Tuk-Tuk
+
+Minimize:
+
+- Walking
+- Transfers
+
+---
+
+Route Quality Score
+
+Each route receives a score from 0–100.
+
+Factors:
+
+- Travel time
+- Waiting time
+- Cost
+- Walking distance
+- Number of transfers
+- Reliability
+- Crowding
+- User plan
+- User preferences
+
+Highest score becomes primary recommendation.
+
+---
+
+Module 5: Real-Time Intelligence Layer
+
+Monitor:
+
+- Traffic
+- Road closures
+- Construction
+- Metro disruptions
+- Monorail disruptions
+- Train disruptions
+- Station closures
+
+Remove unavailable routes automatically.
+
+Update scores in real time.
+
+---
+
+Time-Based Intelligence
+
+Store travel patterns by:
+
+- Hour
+- Day
+- Week
+- Month
+- Holiday
+- Special events
+
+Use historical data to improve ETA predictions.
+
+---
+
+Crowding Prediction Engine
+
+Estimate crowding using:
+
+- Historical demand
+- Time of day
+- User reports
+- Vehicle occupancy data
+- Transportation usage patterns
+
+Categories:
+
+- Low
+- Medium
+- High
+
+Use crowding in route scoring.
+
+---
+
+Destination Accessibility Layer
+
+Before finalizing route:
+
+Check destination accessibility.
+
+Examples:
+
+- Airports
+- Universities
+- Malls
+- Gated compounds
+- Industrial zones
+
+If destination point is inaccessible:
+
+Route user to nearest valid entrance.
+
+Inform user.
+
+---
+
+Reality Check Engine
+
+Compare recommended routes with actual user behavior.
+
+If users consistently choose different routes:
+
+Reduce recommendation confidence.
+
+Learn real-world transportation behavior.
+
+Use data to improve scoring.
+
+Do NOT modify transportation routes automatically.
+
+---
+
+Module 6: AI Intelligence Layer
+
+AI is NOT responsible for route generation.
+
+AI responsibilities:
+
+- Route explanations
+- ETA prediction improvements
+- Crowding prediction
+- Demand prediction
+- User assistance
+- Transportation insights
+- Recommendation optimization
+
+AI must never invent routes.
+
+AI must never bypass validation.
+
+AI must never create transportation paths.
+
+---
+
+Learning System
+
+AI may learn:
+
+- Travel times
+- Waiting times
+- Crowding patterns
+- Popular pickup locations
+- Popular drop-off locations
+- User transportation preferences
+- Demand forecasting
+
+AI may not:
+
+- Create routes
+- Delete routes
+- Modify routes automatically
+
+Route modifications require verification.
+
+---
+
+User Feedback System
+
+After trip completion:
+
+Collect:
+
+- Route accuracy
+- ETA accuracy
+- Transportation availability
+- Crowding accuracy
+- User satisfaction
+
+Use feedback to improve predictions.
+
+Never use a single report to modify routes.
+
+Require verification.
+
+---
+
+Route Explanation Generation
+
+Generate explanations for all recommendations.
+
+Example:
+
+Recommended Route
+
+Time: 34 minutes
+
+Cost: 18 EGP
+
+Transfers: 1
+
+Walking: 6 minutes
+
+Reason:
+
+This route is the fastest available option within your Comfortable transportation plan while maintaining low walking distance and high reliability.
+
+---
+
+Fallback Strategy
+
+If no route found:
+
+Attempt:
+
+1. Public transportation only
+2. Multi-modal transportation
+3. Transportation + White Taxi
+4. Transportation + Tuk-Tuk
+5. Walking only (within limits)
+6. Full White Taxi route
+
+If still impossible:
+
+Inform user destination is currently unreachable.
+
+---
+
+Error Handling
+
+Handle:
+
+- Missing route data
+- Missing station data
+- Missing stop data
+- GPS inaccuracies
+- Network outages
+- Invalid coordinates
+- Closed roads
+- Closed stations
+- Duplicate routes
+- Circular routes
+- Infinite loops
+- Stale data
+- Partial route failures
+- API failures
+- Real-time service outages
+
+System must fail safely.
+
+Always attempt alternative routes.
+
+---
+
+Security & Reliability Rules
+
+Never trust user-generated route changes without verification.
+
+Never expose internal routing logic.
+
+Log all routing decisions.
+
+Log all route failures.
+
+Maintain audit history.
+
+Support rollback of route data.
+
+---
+
+Final Rule
+
+A route may only be displayed if every segment can be verified using:
+
+- Transportation route data
+- Station data
+- Stop data
+- Road network data
+- Walking path data
+- Service availability data
+
+The system must never display a route based on assumptions, guesses, hallucinations, or unverified transportation paths.
+
+The routing engine remains the source of truth.
+
+The AI layer exists only to improve recommendations, predictions, learning, and explanations.
