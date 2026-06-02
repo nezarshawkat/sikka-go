@@ -44,6 +44,40 @@ export async function geocodeStop(
   }
 }
 
+// Snap a single origin→dest connector onto the real network for one travel
+// profile ("walking" or "driving"). Used to turn straight-line walk/taxi/tuktuk
+// legs into on-street geometry. Cached by ~4-decimal coords to limit API calls.
+const connectorCache = new Map<string, [number, number][]>();
+
+export async function snapConnector(
+  profile: "walking" | "driving",
+  a: [number, number],
+  b: [number, number],
+): Promise<[number, number][] | null> {
+  const token = getToken();
+  if (!token) return null;
+  const key =
+    `${profile}|${a[0].toFixed(4)},${a[1].toFixed(4)}|${b[0].toFixed(4)},${b[1].toFixed(4)}`;
+  const cached = connectorCache.get(key);
+  if (cached) return cached;
+
+  const coordStr = `${a[0]},${a[1]};${b[0]},${b[1]}`;
+  const url =
+    `https://api.mapbox.com/directions/v5/mapbox/${profile}/${coordStr}`
+    + `?geometries=geojson&overview=full&access_token=${token}`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json() as { routes?: Array<{ geometry: { coordinates: [number, number][] } }> };
+    const coords = data.routes?.[0]?.geometry?.coordinates;
+    if (!coords || coords.length < 2) return null;
+    connectorCache.set(key, coords);
+    return coords;
+  } catch {
+    return null;
+  }
+}
+
 export async function snapToRoads(points: [number, number][]): Promise<[number, number][]> {
   const token = getToken();
   if (!token || points.length < 2) return points;

@@ -11,16 +11,15 @@ import type {
 } from "./types.js";
 import { buildGraph, nearestStops } from "./graph.js";
 import { findRoute, type SearchOverlay, type SearchResult } from "./pathfinder.js";
-import { PROFILES, directFare, walkMinutes } from "./cost.js";
+import { PROFILES, directFare, walkMinutes, WALK_MAX_KM } from "./cost.js";
 import { haversineKm, slicePath } from "./geo.js";
+import { snapConnector } from "../utils/routePathGenerator.js";
 import { estimateCrowding } from "./crowding.js";
 import { scorePlan, planConfidence } from "./score.js";
 import { explainPlan } from "./explain.js";
 import { validatePlan } from "./validate.js";
 
-const WALK_ACCESS_KM = 1.5; // origin/dest → stop on foot (spec: ~1.5 km)
-const SHORT_HOP_KM = 1.5; // taxi/tuktuk may replace a short access walk (comfortable)
-const TAXI_CONNECT_KM = 5; // origin/dest → stop by car (first/last mile, premium)
+const TAXI_CONNECT_KM = 5; // origin/dest → stop by car (first/last mile)
 const TUKTUK_CONNECT_KM = 3; // spec: tuktuk max distance
 const ACCESS_STOP_LIMIT = 120; // dense board-anywhere points → allow more candidates
 
@@ -57,83 +56,67 @@ function buildOverlay(
   const taxiType = pickType(graph, "taxi", /uber|careem/i);
   const tuktukType = pickType(graph, "tuktuk");
 
-  // Profile rules: economic never uses a taxi; comfortable may take one only to
-  // replace a short access walk; premium may taxi the first/last mile or whole
-  // trip. Tuktuk is an economic first/last-mile mode (or a short comfortable hop).
-  const taxiAccessKm =
-    planKey === "premium" ? TAXI_CONNECT_KM : planKey === "comfortable" ? SHORT_HOP_KM : 0;
-  const tuktukAccessKm =
-    planKey === "economic" ? TUKTUK_CONNECT_KM : planKey === "comfortable" ? SHORT_HOP_KM : 0;
-  const offerDirectTaxi = planKey === "premium";
-  const offerDirectTuktuk = planKey === "economic";
+  // Connector rule (all profiles): walk only while the gap is <= WALK_MAX_KM
+  // (~0.8 km); beyond that the access is bridged on-street by a tuktuk (cheap,
+  // economic/comfortable, within tuktuk range) and/or a taxi (every profile,
+  // within TAXI_CONNECT_KM). Premium also gets an unconditional door-to-door
+  // taxi. The profile weights then decide which connector actually wins.
+  const useTuktukFill = planKey === "economic" || planKey === "comfortable";
 
-  const nearO = nearestStops(graph, origin, TAXI_CONNECT_KM, ACCESS_STOP_LIMIT);
-  for (const s of nearO) {
-    if (s.distKm <= WALK_ACCESS_KM) {
-      const t = walkMinutes(s.distKm);
-      pushEdge(edges, "origin", {
-        to: s.id, kind: "walk", timeMin: t, costEgp: 0, walkMin: t, isBoarding: false, mode: "walk",
+  // Push walk/tuktuk/taxi edges that bridge `fromId` -> `toId` over `distKm`.
+  const connect = (fromId: string, toId: string, distKm: number) => {
+    if (distKm <= WALK_MAX_KM) {
+      const t = walkMinutes(distKm);
+      pushEdge(edges, fromId, {
+        to: toId, kind: "walk", timeMin: t, costEgp: 0, walkMin: t, isBoarding: false, mode: "walk",
       });
+      return; // walkable — no motorized connector needed
     }
-    if (taxiType && s.distKm <= taxiAccessKm) {
-      pushEdge(edges, "origin", {
-        to: s.id, kind: "taxi", timeMin: (s.distKm / taxiType.speedKmh) * 60,
-        costEgp: directFare(taxiType, s.distKm), walkMin: 0, isBoarding: true,
-        mode: "taxi", typeId: taxiType.id,
-      });
-    }
-    if (tuktukType && s.distKm <= tuktukAccessKm) {
-      pushEdge(edges, "origin", {
-        to: s.id, kind: "tuktuk", timeMin: (s.distKm / tuktukType.speedKmh) * 60,
-        costEgp: directFare(tuktukType, s.distKm), walkMin: 0, isBoarding: true,
+    if (useTuktukFill && tuktukType && distKm <= TUKTUK_CONNECT_KM) {
+      pushEdge(edges, fromId, {
+        to: toId, kind: "tuktuk", timeMin: (distKm / tuktukType.speedKmh) * 60,
+        costEgp: directFare(tuktukType, distKm), walkMin: 0, isBoarding: true,
         mode: "tuktuk", typeId: tuktukType.id,
       });
     }
+    if (taxiType && distKm <= TAXI_CONNECT_KM) {
+      pushEdge(edges, fromId, {
+        to: toId, kind: "taxi", timeMin: (distKm / taxiType.speedKmh) * 60,
+        costEgp: directFare(taxiType, distKm), walkMin: 0, isBoarding: true,
+        mode: "taxi", typeId: taxiType.id,
+      });
+    }
+  };
+
+  for (const s of nearestStops(graph, origin, TAXI_CONNECT_KM, ACCESS_STOP_LIMIT)) {
+    connect("origin", s.id, s.distKm);
   }
-
-  const nearD = nearestStops(graph, dest, TAXI_CONNECT_KM, ACCESS_STOP_LIMIT);
-  for (const s of nearD) {
-    if (s.distKm <= WALK_ACCESS_KM) {
-      const t = walkMinutes(s.distKm);
-      pushEdge(edges, s.id, {
-        to: "dest", kind: "walk", timeMin: t, costEgp: 0, walkMin: t, isBoarding: false, mode: "walk",
-      });
-    }
-    if (taxiType && s.distKm <= taxiAccessKm) {
-      pushEdge(edges, s.id, {
-        to: "dest", kind: "taxi", timeMin: (s.distKm / taxiType.speedKmh) * 60,
-        costEgp: directFare(taxiType, s.distKm), walkMin: 0, isBoarding: true,
-        mode: "taxi", typeId: taxiType.id,
-      });
-    }
-    if (tuktukType && s.distKm <= tuktukAccessKm) {
-      pushEdge(edges, s.id, {
-        to: "dest", kind: "tuktuk", timeMin: (s.distKm / tuktukType.speedKmh) * 60,
-        costEgp: directFare(tuktukType, s.distKm), walkMin: 0, isBoarding: true,
-        mode: "tuktuk", typeId: tuktukType.id,
-      });
-    }
+  for (const s of nearestStops(graph, dest, TAXI_CONNECT_KM, ACCESS_STOP_LIMIT)) {
+    connect(s.id, "dest", s.distKm);
   }
 
   // Direct origin → dest
   const direct = haversineKm(origin, dest);
-  const wt = walkMinutes(direct);
-  if (wt <= 20) {
-    // Only offer a direct walk when it respects the single-walk limit.
+  if (direct <= WALK_MAX_KM) {
+    const wt = walkMinutes(direct);
     pushEdge(edges, "origin", {
       to: "dest", kind: "walk", timeMin: wt, costEgp: 0, walkMin: wt, isBoarding: false, mode: "walk",
     });
   }
+  if (useTuktukFill && tuktukType && direct > WALK_MAX_KM && direct <= TUKTUK_CONNECT_KM) {
+    pushEdge(edges, "origin", {
+      to: "dest", kind: "tuktuk", timeMin: (direct / tuktukType.speedKmh) * 60,
+      costEgp: directFare(tuktukType, direct), walkMin: 0, isBoarding: true, mode: "tuktuk", typeId: tuktukType.id,
+    });
+  }
+  // Premium offers a door-to-door taxi for any distance; other profiles only as
+  // a same-distance fill when the trip is too long to walk and within taxi range.
+  const offerDirectTaxi =
+    !!taxiType && (planKey === "premium" || (direct > WALK_MAX_KM && direct <= TAXI_CONNECT_KM));
   if (taxiType && offerDirectTaxi) {
     pushEdge(edges, "origin", {
       to: "dest", kind: "taxi", timeMin: (direct / taxiType.speedKmh) * 60,
       costEgp: directFare(taxiType, direct), walkMin: 0, isBoarding: true, mode: "taxi", typeId: taxiType.id,
-    });
-  }
-  if (tuktukType && offerDirectTuktuk && direct <= TUKTUK_CONNECT_KM) {
-    pushEdge(edges, "origin", {
-      to: "dest", kind: "tuktuk", timeMin: (direct / tuktukType.speedKmh) * 60,
-      costEgp: directFare(tuktukType, direct), walkMin: 0, isBoarding: true, mode: "tuktuk", typeId: tuktukType.id,
     });
   }
 
@@ -385,13 +368,30 @@ function legInstructions(
   ];
 }
 
-export function adaptPlanToApi(
+// Connector legs (walk/taxi/tuktuk) are stored as a straight 2-point line.
+// Snap them to the real street network so the map shows an on-street path
+// rather than a diagonal cutting through blocks. Transit legs already carry
+// their line polyline. Falls back to the straight line if Mapbox is absent.
+async function onStreetGeometry(leg: PlanLeg): Promise<number[][]> {
+  if (leg.mode === "walk" || leg.mode === "taxi" || leg.mode === "tuktuk") {
+    const profile = leg.mode === "walk" ? "walking" : "driving";
+    const snapped = await snapConnector(
+      profile,
+      [leg.startCoord.lng, leg.startCoord.lat],
+      [leg.endCoord.lng, leg.endCoord.lat],
+    );
+    if (snapped && snapped.length >= 2) return snapped;
+  }
+  return leg.geometry;
+}
+
+export async function adaptPlanToApi(
   graph: TransitGraph,
   plan: EnginePlan,
   isArabic: boolean,
 ) {
   const taxiType = pickType(graph, "taxi", /uber|careem/i);
-  const segments = plan.legs.map((leg) => {
+  const segments = await Promise.all(plan.legs.map(async (leg) => {
     const type = leg.typeId ? graph.types.get(leg.typeId) ?? null : null;
     const name = type
       ? `${isArabic ? type.nameAr : type.nameEn}${leg.lineNumber ? ` ${leg.lineNumber}` : ""}`
@@ -426,19 +426,21 @@ export function adaptPlanToApi(
       line_number: leg.lineNumber,
       info: `${Math.round(leg.distanceKm * 10) / 10} km · ${leg.crowding} crowding`,
       instructions: legInstructions(leg, type, isArabic),
-      route_geometry: leg.geometry,
+      route_geometry: await onStreetGeometry(leg),
       crowding: leg.crowding,
       alternatives: taxiAlt,
     };
-  });
+  }));
 
   return {
     segments,
     total_cost_egp: Math.round(plan.totalCostEgp),
     total_duration_minutes: Math.max(1, Math.round(plan.totalTimeMin)),
+    // Prices are estimates, not exact fares — keep the band generous so it is
+    // not presented as strict (real fares vary by driver, traffic and demand).
     budget_range: {
-      min: Math.round(plan.totalCostEgp * 0.85),
-      max: Math.round(plan.totalCostEgp * 1.25),
+      min: Math.round(plan.totalCostEgp * 0.8),
+      max: Math.round(plan.totalCostEgp * 1.6),
     },
     distance_km: Math.round(plan.distanceKm * 10) / 10,
     quality_score: plan.qualityScore,

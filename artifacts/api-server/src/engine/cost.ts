@@ -40,20 +40,31 @@ export function walkMinutes(km: number): number {
   return (km / WALK_SPEED_KMH) * 60;
 }
 
+// Hard walking limit: a rider should never walk more than ~0.8 km in one go.
+// Any longer access gap is bridged by an on-street connector (tuktuk/taxi).
+export const WALK_MAX_KM = 0.8;
+export const WALK_MAX_SINGLE_MIN = walkMinutes(WALK_MAX_KM); // ~10.7 min
+export const WALK_MAX_TOTAL_MIN = walkMinutes(WALK_MAX_KM * 2); // ~21.3 min
+
+// Global fare markup so quoted prices lean toward real-world (slightly higher)
+// fares instead of optimistic seed values. Applied to every fare the engine
+// emits so weights and displayed costs stay consistent.
+export const FARE_MARKUP = 1.25;
+
 // Boarding fare charged once when entering a line. Per-km types charge a small
 // base on boarding and accumulate distance cost on ride edges; flat-fare types
 // (metro/monorail/bus) charge the line's full fare on boarding.
 export function boardingFare(type: TransportTypeInfo, line: LineInfo | null): number {
-  if (type.pricePerKmEgp > 0) return type.basePriceEgp;
-  return line?.priceEgp ?? type.basePriceEgp;
+  const base = type.pricePerKmEgp > 0 ? type.basePriceEgp : line?.priceEgp ?? type.basePriceEgp;
+  return base * FARE_MARKUP;
 }
 
 export function rideCostPerKm(type: TransportTypeInfo): number {
-  return type.pricePerKmEgp;
+  return type.pricePerKmEgp * FARE_MARKUP;
 }
 
 export function directFare(type: TransportTypeInfo, km: number): number {
-  return Math.round(type.basePriceEgp + type.pricePerKmEgp * km);
+  return Math.round((type.basePriceEgp + type.pricePerKmEgp * km) * FARE_MARKUP);
 }
 
 // Reliability proxy per mode (0..1) used in scoring. Rail is most reliable.

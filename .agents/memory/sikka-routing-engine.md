@@ -27,7 +27,12 @@ hallucinated metro line / imaginary station is worse than no answer.
   `validatePlan(plan).ok`. Never return a best-effort invalid plan.
 
 ## Constrained search (walk budget)
-Total walking (cap 30 min, single-walk cap 20 min) is a path-dependent resource.
+Walk caps derive from `WALK_MAX_KM` (0.8 km) in `cost.ts`: single-walk cap
+`WALK_MAX_SINGLE_MIN` (~0.8 km worth) and total cap `WALK_MAX_TOTAL_MIN`
+(~1.6 km worth, 2x single). Pathfinder + validate import these — do NOT hardcode
+20/30 min anymore. **Why:** users complained walks were too long and cut through
+blocks; any access gap over 0.8 km must be ridden, not walked. Total walking is a
+path-dependent resource.
 A plain one-label-per-node Dijkstra is INCORRECT here — it can discard a feasible
 low-walk path for a cheaper high-walk one that later breaks the cap. The
 pathfinder uses full Pareto-dominance labeling: per node keep all non-dominated
@@ -54,18 +59,41 @@ only non-synthetic stops; when zero named stops are ridden, instruct "stay on
 ~X km". Densification roughly 10×'s graph size (~3.6k→50k nodes); still tractable.
 
 ## Per-profile access + mode ladders
-`buildOverlay(graph, origin, dest, planKey)` gates first/last-mile connectors by
-profile, and `ladderFor(planKey)` orders the mode sets tried (most-preferred →
-fallback). Spec intent: economic = informal cheap modes only (bus/serfis/
-microbus + tuktuk first/last mile ≤3 km, NEVER taxi, NEVER rail — rail is a
-comfortable mode); comfortable = bus/rail with taxi/tuktuk only for short ≤1.5 km
-access hops; premium = taxi-first (taxi connectors ≤5 km + direct door-to-door).
+`buildOverlay(graph, origin, dest, planKey)` builds first/last-mile connectors via
+a single `connect(from,to,distKm)` helper, and `ladderFor(planKey)` orders the
+mode sets tried (most-preferred → fallback). Connector policy (ALL profiles):
+walk only if `distKm <= WALK_MAX_KM` (0.8 km); a longer gap is filled on-street by
+a tuktuk (economic/comfortable only, ≤3 km) and/or a taxi (every profile, ≤5 km).
+Premium additionally always offers a door-to-door taxi for any distance.
 `computeEnginePlan` also rejects detours: a plan's total distance must stay under
 `max(directKm*2.8 + 3, 5)` km, else the least-distance valid plan is used.
 
+Connector edges (walk/taxi/tuktuk) exist ONLY as overlay injections — there are
+no taxi/tuktuk "lines" in the base graph — so `pathfinder.ts` marks them in
+`CONNECTOR_MODES` and always lets them be traversed; per-profile availability is
+decided entirely in `buildOverlay` (whether the edge is created at all), NOT by
+the rung's `allowed` mode set.
+
 **Why:** the original engine forced boarding at sparse named stops, so short
 trips detoured through far hubs (real failure: El Narges→Nasr City became a 75-min
-2-bus chain or a full-12 km Uber). Walk-access threshold is ~1.5 km.
+2-bus chain or a full-12 km Uber). The 0.8 km walk cap then required motorized
+connector fill so tightened walking does not make access gaps unroutable.
+
+## Connector geometry snapping
+Connector legs are stored as a straight 2-point line; `adaptPlanToApi` is async
+and snaps walk legs (`walking` profile) and taxi/tuktuk legs (`driving`) onto the
+real street network via `snapConnector()` (`routePathGenerator.ts`, coord-cached,
+returns null → straight-line fallback when no `MAPBOX_TOKEN`/`VITE_MAPBOX_TOKEN`).
+Transit legs keep their DB `route_path` polyline. **Why:** straight diagonals cut
+through blocks and looked wrong on the map.
+
+## Fare markup + budget band
+`cost.ts` `FARE_MARKUP` (1.25) is applied ONCE each in `directFare`,
+`boardingFare`, `rideCostPerKm` so transit + taxi/tuktuk fares all rise together
+(no double-marking — line fares marked at board/ride edge, connector fares via
+`directFare`, totals derive from those). API `budget_range` is `min*0.8 / max*1.6`.
+**Why:** users said prices were too strict/low; the band is an estimate, not an
+exact fare.
 
 ## Distances
 Compute transit-leg `distanceKm` from consecutive `line.stops[]` haversine, NOT

@@ -1,5 +1,6 @@
 import type { Edge, GraphNode, ModeKey, TransitGraph } from "./types.js";
 import type { PlanProfile } from "./cost.js";
+import { WALK_MAX_SINGLE_MIN, WALK_MAX_TOTAL_MIN } from "./cost.js";
 
 export interface SearchOverlay {
   nodes: Map<string, GraphNode>;
@@ -62,8 +63,14 @@ function edgeWeight(e: Edge, profile: PlanProfile): number {
   return w;
 }
 
-const MAX_SINGLE_WALK_MIN = 20; // spec: max single walking segment
-const MAX_TOTAL_WALK_MIN = 30; // spec: max total walking across the journey
+const MAX_SINGLE_WALK_MIN = WALK_MAX_SINGLE_MIN; // ~0.8 km per walking segment
+const MAX_TOTAL_WALK_MIN = WALK_MAX_TOTAL_MIN; // ~1.6 km total walking
+
+// Taxi/tuktuk/walk only ever exist as origin/destination connectors (there are
+// no taxi or tuktuk "lines" in the base graph). They are always traversable —
+// whether they appear at all is decided per-profile when the overlay is built —
+// so a long access gap is filled by an on-street ride instead of a long walk.
+const CONNECTOR_MODES: Set<ModeKey> = new Set(["walk", "taxi", "tuktuk"]);
 
 // A search label = one Pareto-optimal way to reach a node, tracked by its
 // accumulated weight and two constrained resources: total walking across the
@@ -141,7 +148,7 @@ export function findRoute(
       break;
     }
     for (const e of neighbors(lab.node)) {
-      if (e.mode !== "walk" && !allowed.has(e.mode)) continue;
+      if (!CONNECTOR_MODES.has(e.mode) && !allowed.has(e.mode)) continue;
       const isWalk = e.kind === "walk";
       // Contiguous walk run: grows across consecutive walk edges, resets on any
       // other mode. Guards the single-segment limit even when short walk edges

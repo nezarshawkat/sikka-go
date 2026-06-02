@@ -1,7 +1,9 @@
 import type { EnginePlan } from "./types.js";
+import { WALK_MAX_SINGLE_MIN, WALK_MAX_TOTAL_MIN } from "./cost.js";
 
-const MAX_TOTAL_WALK_MIN = 30; // spec: max total walking
-const MAX_SINGLE_WALK_MIN = 20; // spec: max single walking segment
+// Small tolerance over the search caps to absorb rounding in merged walk legs.
+const MAX_TOTAL_WALK_MIN = WALK_MAX_TOTAL_MIN + 0.5; // ~1.6 km total
+const MAX_SINGLE_WALK_MIN = WALK_MAX_SINGLE_MIN + 0.5; // ~0.8 km per segment
 
 export interface ValidationResult {
   ok: boolean;
