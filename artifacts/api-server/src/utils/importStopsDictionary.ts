@@ -14,9 +14,16 @@
  * No coordinates are invented. A stop that never appears on any line's path is
  * not imported (we have no verified location for it).
  *
+ * Rail stations (isStation = true) are the exception: because the route_path
+ * geometry places many of them wrongly (failed geocodes snapped to a downtown
+ * fallback), their locations come from the authoritative, verified RAIL_STATIONS
+ * table (see ./railStations.ts), not from derived geometry. Non-rail areas
+ * (bus / serfis / microbus board-anywhere stops) keep their best-effort derived
+ * coordinates, where exact precision matters far less.
+ *
  * Outputs:
- *  - `locations`  — the full bilingual stop dictionary (isStation = true for
- *                   rail stops: Metro / Monorail / Train).
+ *  - `locations`  — the full bilingual stop dictionary: curated rail stations
+ *                   (isStation = true) + derived non-rail areas (isStation = false).
  *  - `mawaqef`    — the non-rail pickup areas (bus / serfis / microbus), tagged
  *                   with the transport type ids that serve them. The engine
  *                   registers ALL mawaqef as authoritative coordinates, so this
@@ -49,6 +56,7 @@ import {
   haversineKm,
 } from "../engine/geo.js";
 import type { Coord } from "../engine/types.js";
+import { RAIL_STATIONS } from "./railStations.js";
 
 const RAIL_TYPES = new Set(["Metro", "Monorail", "Train"]);
 
@@ -104,6 +112,7 @@ export interface StopImportSummary {
   skippedLinesNoPath: number;
   fallbackCoordsDetected: number;
   stopsDroppedNoLocation: number;
+  railStopsUncurated: number;
 }
 
 // A 5-decimal coordinate key (~1m). Two physically distinct stops never share a
@@ -237,12 +246,41 @@ export async function runStopImport(): Promise<StopImportSummary> {
 
   const locationRows: (typeof locationsTable.$inferInsert)[] = [];
   const mawaqefRows: (typeof mawaqefTable.$inferInsert)[] = [];
-  let stationStops = 0;
   let stopsDroppedNoLocation = 0;
+  let railStopsUncurated = 0;
 
-  for (const a of agg.values()) {
+  // ── Rail backbone: authoritative curated coordinates ──────────────────────
+  // Rail station locations come from the verified RAIL_STATIONS table, not from
+  // the (partly corrupted) route_path geometry. Index curated entries by the
+  // same normalized key the engine uses so they reconcile with line data.
+  const curatedByKey = new Map<string, { display: string; coord: Coord }>();
+  for (const [display, [lat, lng]] of Object.entries(RAIL_STATIONS)) {
+    curatedByKey.set(normalizeName(display), { display, coord: { lat, lng } });
+  }
+  for (const { display, coord } of curatedByKey.values()) {
+    locationRows.push({
+      nameEn: display,
+      nameAr: display,
+      latitude: coord.lat,
+      longitude: coord.lng,
+      city: "cairo",
+      isStation: true,
+    });
+  }
+  const stationStops = locationRows.length;
+
+  // ── Non-rail areas: best-effort coordinates derived from route geometry ───
+  for (const [key, a] of agg) {
+    if (a.isStation) {
+      // Rail stops are governed entirely by the curated backbone above.
+      // A rail name with no curated entry is skipped rather than placed at an
+      // unreliable derived coordinate.
+      if (!curatedByKey.has(key)) railStopsUncurated++;
+      continue;
+    }
     const name = bestName(a);
     if (!name) continue;
+    if (curatedByKey.has(key)) continue; // already covered as a rail station
     const coord = chooseCoord(a);
     if (!coord) {
       stopsDroppedNoLocation++;
@@ -258,21 +296,17 @@ export async function runStopImport(): Promise<StopImportSummary> {
       latitude: coord.lat,
       longitude: coord.lng,
       city: "cairo",
-      isStation: a.isStation,
+      isStation: false,
     });
-    if (a.isStation) stationStops++;
-
-    if (!a.isStation) {
-      mawaqefRows.push({
-        nameEn,
-        nameAr,
-        city: "cairo",
-        latitude: coord.lat,
-        longitude: coord.lng,
-        transportTypeIds: [...a.typeIds],
-        isActive: true,
-      });
-    }
+    mawaqefRows.push({
+      nameEn,
+      nameAr,
+      city: "cairo",
+      latitude: coord.lat,
+      longitude: coord.lng,
+      transportTypeIds: [...a.typeIds],
+      isActive: true,
+    });
   }
 
   // Microbus coverage zones — one per microbus stop, weighted by how many
@@ -332,5 +366,6 @@ export async function runStopImport(): Promise<StopImportSummary> {
     skippedLinesNoPath,
     fallbackCoordsDetected: blacklist.size,
     stopsDroppedNoLocation,
+    railStopsUncurated,
   };
 }

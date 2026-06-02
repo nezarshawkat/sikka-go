@@ -1,4 +1,5 @@
 - [Intercity aggregator architecture](intercity-arch.md) — adapters (SuperJet/GoBus/BlueBus) are in api-server, all public under /api/intercity/*, no Clerk auth needed
 - [Sikka transit_lines seeding](sikka-seeding.md) — via_stops is text[] (pass raw array not JSON.stringify); line_number nullable for microbuses; seed needs admin auth
 - [Sikka trip experience & auth](sikka-trip-experience.md) — trips render on home map (no separate page); AI segment ids are slugs not UUIDs; request auth is cookie-based Clerk (no Bearer token)
+- [Sikka stop dictionary & route_path corruption](sikka-stop-dictionary.md) — route_path geometry is partly corrupt (failed geocodes → one downtown fallback); rail coords are curated in railStations.ts, never derived
 - [Sikka routing engine](sikka-routing-engine.md) — city trip planner is deterministic graph+Dijkstra over verified DB data ONLY, never invents routes; Pareto-label walk-budget search; taxi-only fallback; intercity flow is out of scope
