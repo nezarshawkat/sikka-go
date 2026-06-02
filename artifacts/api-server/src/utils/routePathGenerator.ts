@@ -56,12 +56,20 @@ export async function snapConnector(
 ): Promise<[number, number][] | null> {
   const token = getToken();
   if (!token) return null;
-  const key =
-    `${profile}|${a[0].toFixed(4)},${a[1].toFixed(4)}|${b[0].toFixed(4)},${b[1].toFixed(4)}`;
+
+  // Auto-detect axis orientation for Cairo (lng ≈ 31, lat ≈ 30: lng > lat).
+  // If the first element is already the larger value it is longitude; otherwise
+  // swap so the Mapbox API always receives [lng, lat] order.
+  const lngA = a[0] > a[1] ? a[0] : a[1];
+  const latA = a[0] > a[1] ? a[1] : a[0];
+  const lngB = b[0] > b[1] ? b[0] : b[1];
+  const latB = b[0] > b[1] ? b[1] : b[0];
+
+  const key = `${profile}|${latA.toFixed(4)},${lngA.toFixed(4)}|${latB.toFixed(4)},${lngB.toFixed(4)}`;
   const cached = connectorCache.get(key);
   if (cached) return cached;
 
-  const coordStr = `${a[0]},${a[1]};${b[0]},${b[1]}`;
+  const coordStr = `${lngA},${latA};${lngB},${latB}`;
   const url =
     `https://api.mapbox.com/directions/v5/mapbox/${profile}/${coordStr}`
     + `?geometries=geojson&overview=full&access_token=${token}`;

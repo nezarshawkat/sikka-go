@@ -52,8 +52,22 @@ class MinHeap<T> {
   }
 }
 
+function isInsideHeatmap(coord: { lat: number; lng: number }, heatPoints: { mode: string; coord: { lat: number; lng: number }; radiusKm: number }[]): boolean {
+  for (const hp of heatPoints) {
+    if (hp.mode !== "tuktuk") continue;
+    const R = 6371;
+    const dLat = (hp.coord.lat - coord.lat) * Math.PI / 180;
+    const dLng = (hp.coord.lng - coord.lng) * Math.PI / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(coord.lat * Math.PI / 180) * Math.cos(hp.coord.lat * Math.PI / 180) *
+      Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    if (R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) <= hp.radiusKm) return true;
+  }
+  return false;
+}
+
 function edgeWeight(e: Edge, profile: PlanProfile): number {
-  // Enforce a strict minimum floor for time weights to protect economic routing profiles from meandering loops
   const baselineTimeW = Math.max(0.4, profile.timeW);
 
   let w =
@@ -76,7 +90,9 @@ function edgeWeight(e: Edge, profile: PlanProfile): number {
 const MAX_SINGLE_WALK_MIN = WALK_MAX_SINGLE_MIN;
 const MAX_TOTAL_WALK_MIN = WALK_MAX_TOTAL_MIN;
 
-const CONNECTOR_MODES: Set<ModeKey> = new Set(["walk", "taxi", "tuktuk"]);
+// Tuktuk removed from universal connectors — it must appear in the profile's
+// allowed set AND the destination must fall inside a DB heatmap zone.
+const CONNECTOR_MODES: Set<ModeKey> = new Set(["walk", "taxi"]);
 
 interface Label {
   node: string;
@@ -136,6 +152,16 @@ export function findRoute(
     }
     for (const e of neighbors(lab.node)) {
       if (!CONNECTOR_MODES.has(e.mode) && !allowed.has(e.mode)) continue;
+
+      // Tuktuk must be in the profile's allowed set AND the destination
+      // must fall inside a DB heatmap zone — prevents phantom tuktuk legs
+      // in areas with no coverage data.
+      if (e.mode === "tuktuk") {
+        if (!allowed.has("tuktuk")) continue;
+        const targetNode = graph.nodes.get(e.to) ?? overlay.nodes.get(e.to);
+        if (!targetNode || !isInsideHeatmap(targetNode.coord, graph.heatPoints)) continue;
+      }
+
       const isWalk = e.kind === "walk";
 
       const nextCwalk = isWalk ? lab.cwalk + (e.walkMin || 0) : 0;

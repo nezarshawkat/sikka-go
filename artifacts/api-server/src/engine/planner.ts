@@ -123,32 +123,38 @@ function buildOverlay(
   return { nodes, edges };
 }
 
-// Mode ladders per profile, ordered most-preferred → fallback. The planner tries
-// each rung and stops at the first that yields a sensible (non-detour) plan.
-// economic = cheap/informal (bus/serfis/microbus + tuktuk); comfortable = formal
-// transit (bus + rail) with a taxi only for short hops; premium = taxi-first.
-// A taxi door-to-door fallback is produced upstream when every rung returns null.
+// Mode ladders per profile. Rungs are tried in order; the first rung that
+// returns a valid, non-detour plan wins. Tuktuk is gated by the pathfinder's
+// spatial heatmap check so it only fires where DB coverage exists.
 function ladderFor(planKey: PlanKey): Set<ModeKey>[] {
-  const rungs: ModeKey[][] = [];
   if (planKey === "economic") {
-    // Spec: economic = cheap informal modes only (tuktuk / microbus / bus).
-    // Rail belongs to comfortable; if no informal route exists the planner
-    // returns null and the caller falls back to a verified taxi option.
-    rungs.push(["bus", "serfis", "microbus"]);
-    rungs.push(["bus", "serfis", "microbus", "tuktuk"]);
-    rungs.push([]); // walking only
-  } else if (planKey === "comfortable") {
-    rungs.push(["bus", "metro", "monorail", "train"]);
-    rungs.push(["bus", "metro", "monorail", "train", "serfis", "microbus"]);
-    rungs.push(["bus", "metro", "monorail", "train", "serfis", "microbus", "tuktuk", "taxi"]);
-    rungs.push([]); // walking only
-  } else {
-    rungs.push(["taxi"]);
-    rungs.push(["taxi", "metro", "monorail", "train"]);
-    rungs.push(["taxi", "metro", "monorail", "train", "bus", "serfis", "microbus", "tuktuk"]);
-    rungs.push([]); // walking only
+    return [
+      // Rung 1: pure mass transit — cheapest base fares, no informal pollution
+      new Set<ModeKey>(["bus", "metro", "monorail", "train"]),
+      // Rung 2: pure informal alternatives + rail
+      new Set<ModeKey>(["microbus", "serfis", "metro", "monorail", "train"]),
+      // Rung 3: combined rubber-tire + rail if isolated passes fail
+      new Set<ModeKey>(["bus", "serfis", "microbus", "metro", "monorail", "train"]),
+      // Rung 4: tuktuk strictly as localised final-connectivity fallback
+      new Set<ModeKey>(["bus", "serfis", "microbus", "metro", "monorail", "train", "tuktuk"]),
+      new Set<ModeKey>([]), // walking only
+    ];
   }
-  return rungs.map((r) => new Set(r));
+  if (planKey === "comfortable") {
+    return [
+      // Rung 1: high-capacity mass transit only (no informal, no tuktuk)
+      new Set<ModeKey>(["bus", "metro", "monorail", "train"]),
+      // Rung 2: add taxi for first/last-mile; still no tuktuk or microbus
+      new Set<ModeKey>(["bus", "metro", "monorail", "train", "taxi"]),
+      new Set<ModeKey>([]), // walking only
+    ];
+  }
+  // premium
+  return [
+    new Set<ModeKey>(["taxi"]),
+    new Set<ModeKey>(["taxi", "metro", "monorail", "train"]),
+    new Set<ModeKey>([]), // walking only
+  ];
 }
 
 function nodeCoord(graph: TransitGraph, overlay: SearchOverlay, id: string): Coord {
@@ -478,6 +484,24 @@ export async function computeEnginePlan(req: PlanRequest): Promise<EnginePlan | 
     const plan = reconstruct(graph, overlay, res, req.planKey, req.isArabic);
     if (plan.legs.length === 0) continue;
     if (!validatePlan(plan).ok) continue;
+
+    // Tag connector legs with which on-street modes are swappable on the
+    // review screen. Tuktuk is only offered for economic profile legs that
+    // fall inside a heatmap zone.
+    for (const leg of plan.legs as (typeof plan.legs[number] & { allowedSwaps?: string[] })[]) {
+      if (leg.mode === "walk" || leg.mode === "taxi" || leg.mode === "tuktuk") {
+        leg.allowedSwaps = ["walk", "taxi"];
+        if (
+          req.planKey === "economic" &&
+          graph.heatPoints.some(
+            (hp) => hp.mode === "tuktuk" && haversineKm(leg.startCoord, hp.coord) <= hp.radiusKm,
+          )
+        ) {
+          leg.allowedSwaps.push("tuktuk");
+        }
+      }
+    }
+
     if (plan.distanceKm <= detourCap) return plan;
     if (!best || plan.distanceKm < best.distanceKm) best = plan;
   }

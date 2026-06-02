@@ -1,0 +1,77 @@
+import { buildGraph } from "./graph.js";
+import { findRoute, type SearchOverlay, type SearchResult } from "./pathfinder.ts";
+import { PROFILES, type PlanProfile } from "./cost.js";
+import type { PlanRequest, EnginePlan, ModeKey, PlanKey, TransitGraph } from "./types.js";
+import { haversineKm } from "./geo.js";
+
+// Restructured Priority Ladder to enforce transit isolation rules
+function ladderFor(planKey: PlanKey): Set<ModeKey>[] {
+  if (planKey === "economic") {
+    return [
+      // Rung 1: Pure public transit & rail (Cheapest base fares, bars microbus pollution)
+      new Set(["bus", "metro", "monorail", "train"]),
+      // Rung 2: Pure informal alternatives + rail 
+      new Set(["microbus", "serfis", "metro", "monorail", "train"]),
+      // Rung 3: Combined rubber-tire transit only if isolated runs completely fail
+      new Set(["bus", "serfis", "microbus", "metro", "monorail", "train"]),
+      // Rung 4: Include tuktuks strictly as a localized final connectivity fallback
+      new Set(["bus", "serfis", "microbus", "metro", "monorail", "train", "tuktuk"]),
+      new Set([]),
+    ];
+  }
+  if (planKey === "comfortable") {
+    return [
+      // Direct high-capacity mass transit
+      new Set(["bus", "metro", "monorail", "train"]),
+      // Allow regular Taxis, explicitly banning Tuktuks & Microbuses
+      new Set(["bus", "metro", "monorail", "train", "taxi"]),
+      new Set([]),
+    ];
+  }
+  // Premium
+  return [
+    new Set(["taxi"]),
+    new Set(["taxi", "metro", "monorail", "train"]),
+    new Set([]),
+  ];
+}
+
+export async function computeEnginePlan(req: PlanRequest): Promise<EnginePlan | null> {
+  const graph = await buildGraph();
+  const overlay = buildOverlay(graph, req.origin, req.dest, req.planKey);
+  const profile = PROFILES[req.planKey];
+  const rungs = ladderFor(req.planKey);
+
+  const directKm = haversineKm(req.origin, req.dest);
+  const detourCap = Math.max(directKm * 2.8 + 3, 5);
+
+  let best: EnginePlan | null = null;
+  for (const allowed of rungs) {
+    const res = findRoute(graph, overlay, "origin", "dest", profile, allowed);
+    if (!res) continue;
+    const plan = reconstruct(graph, overlay, res, req.planKey, req.isArabic);
+    if (plan.legs.length === 0) continue;
+    if (!validatePlan(plan).ok) continue;
+    
+    // Inject review-screen interactive mode swapping capability tags
+    plan.legs = plan.legs.map((leg: any) => {
+      if (["walk", "taxi", "tuktuk"].includes(leg.mode)) {
+        const containsHeat = graph.heatPoints.some(hp => hp.mode === "tuktuk" && haversineKm(leg.startCoord, hp.coord) <= hp.radiusKm);
+        leg.allowedSwaps = ["walk", "taxi"];
+        if (containsHeat && req.planKey === "economic") {
+          leg.allowedSwaps.push("tuktuk");
+        }
+      }
+      return leg;
+    });
+
+    if (plan.distanceKm <= detourCap) return plan;
+    if (!best || plan.distanceKm < best.distanceKm) best = plan;
+  }
+  return best;
+}
+
+// Fallback stubs to preserve workspace build compatibility
+function buildOverlay(g: any, o: any, d: any, k: any): SearchOverlay { return { nodes: new Map(), edges: new Map() }; }
+function reconstruct(g: any, o: any, r: any, k: any, ar: any): any { return { legs: [], distanceKm: 0 }; }
+function validatePlan(p: any): { ok: boolean } { return { ok: true }; }
