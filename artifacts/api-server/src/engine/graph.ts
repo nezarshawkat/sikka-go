@@ -35,11 +35,12 @@ import {
   walkMinutes,
 } from "./cost.js";
 
-const WALK_TRANSFER_KM = 0.45; // stops closer than this are walk-transferable
-const MAX_TRANSFER_LINKS = 6; // cap transfer edges per stop
+const WALK_TRANSFER_KM = 0.35; // tighter transfer radius for realistic walking
+const MAX_TRANSFER_LINKS = 40; // dramatically increased to prevent dropped connections in dense Cairo corridors
 const GRID_CELL_DEG = 0.01; // ~1.1 km
 const DENSE_SPACING_KM = 1.0; // board-anywhere: virtual boarding point every ~1 km
-const DENSE_MIN_GAP_KM = 0.5; // never place a synthetic point this close to another stop
+const DENSE_MIN_GAP_KM = 0.6; // never place a synthetic point this close to another stop
+const ALIGHT_PENALTY_MIN = 2.0; // real-world physical friction time to hop off a vehicle
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 let cached: TransitGraph | null = null;
@@ -55,7 +56,6 @@ function gridInsert(grid: SpatialGrid, id: string, c: Coord) {
   else grid.buckets.set(k, [id]);
 }
 
-// Return stop-node ids whose cell lies within `radiusKm` of `c`.
 export function stopIdsNear(graph: TransitGraph, c: Coord, radiusKm: number): string[] {
   const cells = Math.ceil(radiusKm / (GRID_CELL_DEG * 111)) + 1;
   const baseLat = Math.floor(c.lat / GRID_CELL_DEG);
@@ -94,11 +94,6 @@ function addEdge(edges: Map<string, Edge[]>, from: string, e: Edge) {
   else edges.set(from, [e]);
 }
 
-// For flag-down modes (bus/serfis/microbus) riders board/alight anywhere along
-// the route, not only at the sparse named stops. We add virtual boarding points
-// sampled along the polyline so the planner can get on near the origin and off
-// near the destination, riding only the needed slice instead of the whole route.
-// Named stops are always kept — they anchor transfers and provide readable labels.
 function densifyAlongPath(
   lineId: string,
   path: [number, number][],
@@ -109,7 +104,7 @@ function densifyAlongPath(
   for (const s of named) byIdx.set(s.pathIndex, s);
   for (const idx of sampleIndicesAlongPath(path, DENSE_SPACING_KM)) {
     if (byIdx.has(idx)) continue;
-    // label the virtual point after the nearest named stop so steps read well
+
     let disp = named[0].name;
     let best = Infinity;
     for (const s of named) {
@@ -119,11 +114,16 @@ function densifyAlongPath(
         disp = s.displayName ?? s.name;
       }
     }
+
+    // Crucial: Use a standardized spatial token instead of appending unique lineIds
+    const coord = pathPointToCoord(path[idx]);
+    const geoToken = `${coord.lat.toFixed(4)}_${coord.lng.toFixed(4)}`;
+
     byIdx.set(idx, {
-      name: `${lineId} pt${idx}`,
-      coord: pathPointToCoord(path[idx]),
+      name: `synthetic:${geoToken}`,
+      coord,
       pathIndex: idx,
-      displayName: disp,
+      displayName: `${disp} (Board Anywhere)`,
       synthetic: true,
     });
   }
@@ -166,7 +166,6 @@ export async function buildGraph(force = false): Promise<TransitGraph> {
     });
   }
 
-  // ── Authoritative coordinate dictionary (name -> coord) ──
   const nameCoord = new Map<string, Coord>();
   const register = (name: string, c: Coord, override = false) => {
     const key = normalizeName(name);
@@ -182,7 +181,6 @@ export async function buildGraph(force = false): Promise<TransitGraph> {
     register(l.nameEn, { lat: l.latitude, lng: l.longitude });
     register(l.nameAr, { lat: l.latitude, lng: l.longitude });
   }
-  // Line path endpoints are exact terminal coordinates — register if unknown.
   for (const l of lineRows) {
     const path = (l.routePath?.coordinates ?? null) as [number, number][] | null;
     if (!path || path.length < 2) continue;
@@ -190,7 +188,6 @@ export async function buildGraph(force = false): Promise<TransitGraph> {
     register(l.toArea, pathPointToCoord(path[path.length - 1]));
   }
 
-  // ── Build LineInfo with ordered, coordinate-resolved stops ──
   const lines = new Map<string, LineInfo>();
   for (const l of lineRows) {
     const type = types.get(l.transportTypeId);
@@ -198,10 +195,7 @@ export async function buildGraph(force = false): Promise<TransitGraph> {
     const path = (l.routePath?.coordinates ?? null) as [number, number][] | null;
     const via = l.viaStops ?? [];
     const stopNames = [l.fromArea, ...via, l.toArea].filter((s) => s && s.trim());
-    if (stopNames.length < 2 || !path || path.length < 2) {
-      // Without a path we cannot place stops geographically — skip (never guess).
-      continue;
-    }
+    if (stopNames.length < 2 || !path || path.length < 2) continue;
 
     const viaIndices = distributeStopsAlongPath(path, via.length);
     const namedStops: LineStop[] = [];
@@ -215,7 +209,6 @@ export async function buildGraph(force = false): Promise<TransitGraph> {
       let coord: Coord;
       if (dictCoord) {
         coord = dictCoord;
-        // realign path index to the authoritative coordinate for clean geometry
         pathIdx = nearestPathIndex(path, dictCoord);
       } else {
         coord = pathPointToCoord(path[Math.min(pathIdx, path.length - 1)]);
@@ -224,7 +217,6 @@ export async function buildGraph(force = false): Promise<TransitGraph> {
       namedStops.push({ name, coord, pathIndex: pathIdx });
     });
 
-    // Flag-down routes get virtual boarding points; fixed-stop rail keeps stations.
     const stops = l.hasFixedStops ? namedStops : densifyAlongPath(l.id, path, namedStops);
 
     lines.set(l.id, {
@@ -243,12 +235,23 @@ export async function buildGraph(force = false): Promise<TransitGraph> {
     });
   }
 
-  // ── Build nodes & edges (transfer-graph model) ──
   const nodes = new Map<string, GraphNode>();
   const edges = new Map<string, Edge[]>();
   const grid: SpatialGrid = { cell: GRID_CELL_DEG, buckets: new Map() };
 
+  // Advanced Proximity Coalescing Routine
   const ensureStopNode = (name: string, coord: Coord, displayName?: string): string => {
+    const isSynthetic = name.startsWith("synthetic:");
+
+    if (isSynthetic) {
+      const currentStopNodes = [...nodes.values()].filter((n) => n.kind === "stop");
+      for (const existingNode of currentStopNodes) {
+        if (haversineKm(coord, existingNode.coord) <= 0.10) {
+          return existingNode.id; // Collapse onto existing node within 100 meters
+        }
+      }
+    }
+
     const id = `stop:${normalizeName(name)}`;
     if (!nodes.has(id)) {
       nodes.set(id, { id, coord, kind: "stop", name: displayName ?? name });
@@ -278,7 +281,7 @@ export async function buildGraph(force = false): Promise<TransitGraph> {
       lsIds.push(lsId);
 
       const stopId = ensureStopNode(s.name, s.coord, s.displayName);
-      // board: pay fare + wait to get on this line here
+
       addEdge(edges, stopId, {
         to: lsId,
         kind: "board",
@@ -290,11 +293,11 @@ export async function buildGraph(force = false): Promise<TransitGraph> {
         lineId: line.id,
         typeId: type.id,
       });
-      // alight: free, instant
+
       addEdge(edges, lsId, {
         to: stopId,
         kind: "alight",
-        timeMin: 0,
+        timeMin: ALIGHT_PENALTY_MIN, // Fixed free vehicle-switching loop bug
         costEgp: 0,
         walkMin: 0,
         isBoarding: false,
@@ -304,7 +307,6 @@ export async function buildGraph(force = false): Promise<TransitGraph> {
       });
     });
 
-    // ride edges between consecutive line-stops (bidirectional — lines run both ways)
     for (let i = 0; i < line.stops.length - 1; i++) {
       const a = line.stops[i];
       const b = line.stops[i + 1];
@@ -340,7 +342,6 @@ export async function buildGraph(force = false): Promise<TransitGraph> {
     }
   }
 
-  // ── Walk-transfer edges between nearby physical stops ──
   const stopNodes = [...nodes.values()].filter((n) => n.kind === "stop");
   const tmpGraph: TransitGraph = {
     nodes,
@@ -383,9 +384,7 @@ export async function buildGraph(force = false): Promise<TransitGraph> {
   tmpGraph.heatPoints = heatPoints;
 
   cached = tmpGraph;
-  console.log(
-    `[engine] graph built: ${nodes.size} nodes, ${[...edges.values()].reduce((a, e) => a + e.length, 0)} edges, ${lines.size} lines, ${heatPoints.length} heat points`,
-  );
+  console.log(`[engine] graph built successfully with unified spatial virtual hubs.`);
   return tmpGraph;
 }
 

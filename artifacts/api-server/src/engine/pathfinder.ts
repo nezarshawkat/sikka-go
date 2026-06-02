@@ -9,11 +9,10 @@ export interface SearchOverlay {
 
 export interface SearchResult {
   nodeIds: string[];
-  edges: Edge[]; // edges[i] connects nodeIds[i] -> nodeIds[i+1]
+  edges: Edge[];
   weight: number;
 }
 
-// Minimal binary min-heap keyed by numeric priority.
 class MinHeap<T> {
   private items: { p: number; v: T }[] = [];
   get size() {
@@ -54,47 +53,41 @@ class MinHeap<T> {
 }
 
 function edgeWeight(e: Edge, profile: PlanProfile): number {
+  // Enforce a strict minimum floor for time weights to protect economic routing profiles from meandering loops
+  const baselineTimeW = Math.max(0.4, profile.timeW);
+
   let w =
-    profile.timeW * e.timeMin +
+    baselineTimeW * e.timeMin +
     profile.costW * e.costEgp +
     profile.walkW * e.walkMin +
     (e.isBoarding ? profile.transferPenalty : 0);
+
+  // Apply a dynamic compounding penalty for lengthy rides on informal modes
+  if (e.kind === "ride" && (e.mode === "microbus" || e.mode === "serfis")) {
+    if (e.timeMin > 12) {
+      w += (e.timeMin - 12) * 0.55;
+    }
+  }
+
   if (e.isBoarding) w *= profile.modePref[e.mode] ?? 1;
   return w;
 }
 
-const MAX_SINGLE_WALK_MIN = WALK_MAX_SINGLE_MIN; // ~0.8 km per walking segment
-const MAX_TOTAL_WALK_MIN = WALK_MAX_TOTAL_MIN; // ~1.6 km total walking
+const MAX_SINGLE_WALK_MIN = WALK_MAX_SINGLE_MIN;
+const MAX_TOTAL_WALK_MIN = WALK_MAX_TOTAL_MIN;
 
-// Taxi/tuktuk/walk only ever exist as origin/destination connectors (there are
-// no taxi or tuktuk "lines" in the base graph). They are always traversable —
-// whether they appear at all is decided per-profile when the overlay is built —
-// so a long access gap is filled by an on-street ride instead of a long walk.
 const CONNECTOR_MODES: Set<ModeKey> = new Set(["walk", "taxi", "tuktuk"]);
 
-// A search label = one Pareto-optimal way to reach a node, tracked by its
-// accumulated weight and two constrained resources: total walking across the
-// whole journey, and the current *contiguous* walk run (reset whenever a
-// non-walk edge is taken). The contiguous run guards the single-walk-segment
-// limit, which a per-edge check alone misses when two short walk edges chain
-// through a stop the rider never actually boards at.
 interface Label {
   node: string;
   weight: number;
-  walk: number; // total walk minutes so far
-  cwalk: number; // contiguous walk minutes since the last non-walk edge
+  walk: number;
+  cwalk: number;
   prev: Label | null;
   edge: Edge | null;
-  alive: boolean; // cleared when a strictly-better label dominates it
+  alive: boolean;
 }
 
-// Deterministic least-weight search over a resource-constrained graph. No AI,
-// no guessing. Total walking is a hard budget, and because it is path-dependent
-// a plain one-label-per-node Dijkstra can discard a feasible low-walk path in
-// favour of a cheaper high-walk one that later breaks the cap. We therefore
-// keep, per node, the full Pareto frontier of non-dominated (weight, walk)
-// labels — a label (w,k) dominates (w',k') iff w<=w' AND k<=k'. This is exact:
-// no feasible cheapest route is ever pruned, and none is ever invented.
 export function findRoute(
   graph: TransitGraph,
   overlay: SearchOverlay,
@@ -112,12 +105,6 @@ export function findRoute(
     return extra.length ? base.concat(extra) : base;
   };
 
-  // Insert a candidate label unless an existing one dominates it; if accepted,
-  // retire any existing labels it now dominates. Domination is over the full
-  // resource vector (weight, total walk, contiguous walk): a label (w,k,c)
-  // dominates (w',k',c') iff w<=w' AND k<=k' AND c<=c'. Including the
-  // contiguous-walk term keeps the search exact — a path that arrives "fresher"
-  // (less pending walk) is never pruned by a cheaper one that is mid-long-walk.
   const addLabel = (
     node: string, weight: number, walk: number, cwalk: number,
     prev: Label | null, edge: Edge | null,
@@ -125,7 +112,7 @@ export function findRoute(
     const existing = labelsByNode.get(node);
     if (existing) {
       for (const l of existing) {
-        if (l.alive && l.weight <= weight && l.walk <= walk && l.cwalk <= cwalk) return; // dominated
+        if (l.alive && l.weight <= weight && l.walk <= walk && l.cwalk <= cwalk) return;
       }
       for (const l of existing) {
         if (l.alive && l.weight >= weight && l.walk >= walk && l.cwalk >= cwalk) l.alive = false;
@@ -142,28 +129,26 @@ export function findRoute(
   let goalLabel: Label | null = null;
   while (heap.size > 0) {
     const lab = heap.pop()!;
-    if (!lab.alive) continue; // retired by a dominating label after being queued
+    if (!lab.alive) continue;
     if (lab.node === goal) {
-      goalLabel = lab; // first popped goal label is the global minimum weight
+      goalLabel = lab;
       break;
     }
     for (const e of neighbors(lab.node)) {
       if (!CONNECTOR_MODES.has(e.mode) && !allowed.has(e.mode)) continue;
       const isWalk = e.kind === "walk";
-      // Contiguous walk run: grows across consecutive walk edges, resets on any
-      // other mode. Guards the single-segment limit even when short walk edges
-      // chain through an unboarded stop.
+
       const nextCwalk = isWalk ? lab.cwalk + (e.walkMin || 0) : 0;
       if (isWalk && nextCwalk > MAX_SINGLE_WALK_MIN) continue;
       const nextWalk = lab.walk + (e.walkMin || 0);
-      if (e.walkMin > 0 && nextWalk > MAX_TOTAL_WALK_MIN) continue; // hard cap
+      if (e.walkMin > 0 && nextWalk > MAX_TOTAL_WALK_MIN) continue;
+
       addLabel(e.to, lab.weight + edgeWeight(e, profile), nextWalk, nextCwalk, lab, e);
     }
   }
 
   if (!goalLabel) return null;
 
-  // reconstruct
   const nodeIds: string[] = [];
   const edges: Edge[] = [];
   let cur: Label | null = goalLabel;
