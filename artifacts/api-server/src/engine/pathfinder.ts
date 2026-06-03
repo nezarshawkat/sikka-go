@@ -76,7 +76,6 @@ function edgeWeight(e: Edge, profile: PlanProfile): number {
     profile.walkW * e.walkMin +
     (e.isBoarding ? profile.transferPenalty : 0);
 
-  // Apply a dynamic compounding penalty for lengthy rides on informal modes
   if (e.kind === "ride" && (e.mode === "microbus" || e.mode === "serfis")) {
     if (e.timeMin > 12) {
       w += (e.timeMin - 12) * 0.55;
@@ -90,9 +89,8 @@ function edgeWeight(e: Edge, profile: PlanProfile): number {
 const MAX_SINGLE_WALK_MIN = WALK_MAX_SINGLE_MIN;
 const MAX_TOTAL_WALK_MIN = WALK_MAX_TOTAL_MIN;
 
-// Tuktuk removed from universal connectors — it must appear in the profile's
-// allowed set AND the destination must fall inside a DB heatmap zone.
-const CONNECTOR_MODES: Set<ModeKey> = new Set(["walk", "taxi"]);
+// Only walk is a universal connector. Taxi must obey allowed tiers.
+const CONNECTOR_MODES: Set<ModeKey> = new Set(["walk"]);
 
 interface Label {
   node: string;
@@ -153,9 +151,6 @@ export function findRoute(
     for (const e of neighbors(lab.node)) {
       if (!CONNECTOR_MODES.has(e.mode) && !allowed.has(e.mode)) continue;
 
-      // Tuktuk must be in the profile's allowed set AND the destination
-      // must fall inside a DB heatmap zone — prevents phantom tuktuk legs
-      // in areas with no coverage data.
       if (e.mode === "tuktuk") {
         if (!allowed.has("tuktuk")) continue;
         const targetNode = graph.nodes.get(e.to) ?? overlay.nodes.get(e.to);

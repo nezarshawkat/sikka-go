@@ -1,3 +1,197 @@
+The Corrected, Error-Free Files
+1. Update engine/pathfinder.ts
+We must strip taxi out of CONNECTOR_MODES. This ensures taxis are strictly locked out of public transit search tiers until explicitly permitted by the profile ladder.
+
+TypeScript
+import type { Edge, GraphNode, ModeKey, TransitGraph } from "./types.js";
+import type { PlanProfile } from "./cost.js";
+import { WALK_MAX_SINGLE_MIN, WALK_MAX_TOTAL_MIN } from "./cost.js";
+
+export interface SearchOverlay {
+  nodes: Map<string, GraphNode>;
+  edges: Map<string, Edge[]>;
+}
+
+export interface SearchResult {
+  nodeIds: string[];
+  edges: Edge[];
+  weight: number;
+}
+
+class MinHeap<T> {
+  private items: { p: number; v: T }[] = [];
+  get size() {
+    return this.items.length;
+  }
+  push(p: number, v: T) {
+    const a = this.items;
+    a.push({ p, v });
+    let i = a.length - 1;
+    while (i > 0) {
+      const parent = (i - 1) >> 1;
+      if (a[parent].p <= a[i].p) break;
+      [a[parent], a[i]] = [a[i], a[parent]];
+      i = parent;
+    }
+  }
+  pop(): T | undefined {
+    const a = this.items;
+    if (a.length === 0) return undefined;
+    const top = a[0];
+    const last = a.pop()!;
+    if (a.length > 0) {
+      a[0] = last;
+      let i = 0;
+      for (;;) {
+        const l = 2 * i + 1;
+        const r = 2 * i + 2;
+        let s = i;
+        if (l < a.length && a[l].p < a[s].p) s = l;
+        if (r < a.length && a[r].p < a[s].p) s = r;
+        if (s === i) break;
+        [a[s], a[i]] = [a[i], a[s]];
+        i = s;
+      }
+    }
+    return top.v;
+  }
+}
+
+function isInsideHeatmap(coord: { lat: number; lng: number }, heatPoints: { mode: string; coord: { lat: number; lng: number }; radiusKm: number }[]): boolean {
+  for (const hp of heatPoints) {
+    if (hp.mode !== "tuktuk") continue;
+    const R = 6371;
+    const dLat = (hp.coord.lat - coord.lat) * Math.PI / 180;
+    const dLng = (hp.coord.lng - coord.lng) * Math.PI / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(coord.lat * Math.PI / 180) * Math.cos(hp.coord.lat * Math.PI / 180) *
+      Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    if (R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) <= hp.radiusKm) return true;
+  }
+  return false;
+}
+
+function edgeWeight(e: Edge, profile: PlanProfile): number {
+  const baselineTimeW = Math.max(0.4, profile.timeW);
+
+  let w =
+    baselineTimeW * e.timeMin +
+    profile.costW * e.costEgp +
+    profile.walkW * e.walkMin +
+    (e.isBoarding ? profile.transferPenalty : 0);
+
+  if (e.kind === "ride" && (e.mode === "microbus" || e.mode === "serfis")) {
+    if (e.timeMin > 12) {
+      w += (e.timeMin - 12) * 0.55;
+    }
+  }
+
+  if (e.isBoarding) w *= profile.modePref[e.mode] ?? 1;
+  return w;
+}
+
+const MAX_SINGLE_WALK_MIN = WALK_MAX_SINGLE_MIN;
+const MAX_TOTAL_WALK_MIN = WALK_MAX_TOTAL_MIN;
+
+// FIX: Only walk is a universal connector. Taxi must obey allowed tiers.
+const CONNECTOR_MODES: Set<ModeKey> = new Set(["walk"]);
+
+interface Label {
+  node: string;
+  weight: number;
+  walk: number;
+  cwalk: number;
+  prev: Label | null;
+  edge: Edge | null;
+  alive: boolean;
+}
+
+export function findRoute(
+  graph: TransitGraph,
+  overlay: SearchOverlay,
+  start: string,
+  goal: string,
+  profile: PlanProfile,
+  allowed: Set<ModeKey>,
+): SearchResult | null {
+  const labelsByNode = new Map<string, Label[]>();
+  const heap = new MinHeap<Label>();
+
+  const neighbors = (id: string): Edge[] => {
+    const base = graph.edges.get(id) ?? [];
+    const extra = overlay.edges.get(id) ?? [];
+    return extra.length ? base.concat(extra) : base;
+  };
+
+  const addLabel = (
+    node: string, weight: number, walk: number, cwalk: number,
+    prev: Label | null, edge: Edge | null,
+  ): void => {
+    const existing = labelsByNode.get(node);
+    if (existing) {
+      for (const l of existing) {
+        if (l.alive && l.weight <= weight && l.walk <= walk && l.cwalk <= cwalk) return;
+      }
+      for (const l of existing) {
+        if (l.alive && l.weight >= weight && l.walk >= walk && l.cwalk >= cwalk) l.alive = false;
+      }
+    }
+    const lab: Label = { node, weight, walk, cwalk, prev, edge, alive: true };
+    if (existing) existing.push(lab);
+    else labelsByNode.set(node, [lab]);
+    heap.push(weight, lab);
+  };
+
+  addLabel(start, 0, 0, 0, null, null);
+
+  let goalLabel: Label | null = null;
+  while (heap.size > 0) {
+    const lab = heap.pop()!;
+    if (!lab.alive) continue;
+    if (lab.node === goal) {
+      goalLabel = lab;
+      break;
+    }
+    for (const e of neighbors(lab.node)) {
+      if (!CONNECTOR_MODES.has(e.mode) && !allowed.has(e.mode)) continue;
+
+      if (e.mode === "tuktuk") {
+        if (!allowed.has("tuktuk")) continue;
+        const targetNode = graph.nodes.get(e.to) ?? overlay.nodes.get(e.to);
+        if (!targetNode || !isInsideHeatmap(targetNode.coord, graph.heatPoints)) continue;
+      }
+
+      const isWalk = e.kind === "walk";
+
+      const nextCwalk = isWalk ? lab.cwalk + (e.walkMin || 0) : 0;
+      if (isWalk && nextCwalk > MAX_SINGLE_WALK_MIN) continue;
+      const nextWalk = lab.walk + (e.walkMin || 0);
+      if (e.walkMin > 0 && nextWalk > MAX_TOTAL_WALK_MIN) continue;
+
+      addLabel(e.to, lab.weight + edgeWeight(e, profile), nextWalk, nextCwalk, lab, e);
+    }
+  }
+
+  if (!goalLabel) return null;
+
+  const nodeIds: string[] = [];
+  const edges: Edge[] = [];
+  let cur: Label | null = goalLabel;
+  while (cur && cur.prev) {
+    nodeIds.push(cur.node);
+    edges.push(cur.edge!);
+    cur = cur.prev;
+  }
+  nodeIds.push(start);
+  nodeIds.reverse();
+  edges.reverse();
+  return { nodeIds, edges, weight: goalLabel.weight };
+}
+2. Update engine/planner.ts
+This version defines lastRide correctly to prevent the engine crash, adds bidirectional safety when slicing static geometries, and structures the search combinations thoroughly to force public transit options first.
+
+TypeScript
 import type {
   Coord,
   Edge,
@@ -19,9 +213,9 @@ import { scorePlan, planConfidence } from "./score.js";
 import { explainPlan } from "./explain.js";
 import { validatePlan } from "./validate.js";
 
-const TAXI_CONNECT_KM = 5;
-const TUKTUK_CONNECT_KM = 3;
-const ACCESS_STOP_LIMIT = 120;
+const TAXI_CONNECT_KM = 5; 
+const TUKTUK_CONNECT_KM = 3; 
+const ACCESS_STOP_LIMIT = 120; 
 
 function pushEdge(map: Map<string, Edge[]>, from: string, e: Edge) {
   const arr = map.get(from);
@@ -104,7 +298,7 @@ function buildOverlay(
       to: "dest", kind: "walk", timeMin: wt, costEgp: 0, walkMin: wt, isBoarding: false, mode: "walk",
     });
   }
-
+  
   if (taxiType && (planKey === "premium" || (direct > WALK_MAX_KM && direct <= TAXI_CONNECT_KM))) {
     pushEdge(edges, "origin", {
       to: "dest", kind: "taxi", timeMin: (direct / taxiType.speedKmh) * 60,
@@ -115,8 +309,7 @@ function buildOverlay(
   return { nodes, edges };
 }
 
-// Rung-by-rung ladder: public transit options are evaluated before taxis are
-// introduced. The first rung to yield a valid plan wins.
+// Fixes Problem 4: Exhaustive sequence combinations to evaluate public options before adding taxis.
 function ladderFor(planKey: PlanKey): Set<ModeKey>[] {
   if (planKey === "economic") {
     return [
@@ -136,7 +329,6 @@ function ladderFor(planKey: PlanKey): Set<ModeKey>[] {
       new Set<ModeKey>([]),
     ];
   }
-  // premium
   return [
     new Set<ModeKey>(["taxi"]),
     new Set<ModeKey>(["taxi", "metro", "monorail", "train"]),
@@ -218,14 +410,14 @@ function reconstruct(
 
       if (rides.length === 0 || !line) continue;
 
-      // Declare lastRide to prevent ReferenceError crash.
+      // FIX: Declare lastRide to resolve the ReferenceError crash completely.
       const lastRide = rides[rides.length - 1];
       const boardLs = graph.nodes.get(board.to);
       const endLs = graph.nodes.get(lastRide.to);
       const startStop = boardLs?.stopIndex != null ? line.stops[boardLs.stopIndex] : line.stops[0];
       const endStop = endLs?.stopIndex != null ? line.stops[endLs.stopIndex] : line.stops[line.stops.length - 1];
 
-      // Robust bidirectional geometry slice from high-res path.
+      // FIX: Robust bidirectional index extraction from static high-res lines to resolve Problem 1 & 3.
       let geometry: [number, number][] = [];
       if (line.path && line.path.length > 0) {
         const fromPathIdx = findClosestPathIndex(line.path, startStop.coord);
@@ -335,33 +527,23 @@ function legInstructions(leg: PlanLeg, type: TransportTypeInfo | null, isArabic:
     return [
       `اذهب إلى ${leg.startName} واركب ${name}${ln}.`,
       `ادفع حوالي ${cost} جنيه.`,
-      stops > 0
-        ? `اركب ${stops} محطة/محطات حتى ${leg.endName}.`
-        : `ابقَ على الخط حوالي ${km} كم حتى ${leg.endName}.`,
+      stops > 0 ? `اركب ${stops} محطة/محطات حتى ${leg.endName}.` : `ابقَ على الخط حوالي ${km} كم حتى ${leg.endName}.`,
       `انزل عند ${leg.endName}.`,
     ];
   }
   return [
     `Go to ${leg.startName} and board ${name}${ln}.`,
     `Pay about ${cost} EGP.`,
-    stops > 0
-      ? `Ride ${stops} stop${stops === 1 ? "" : "s"} to ${leg.endName}.`
-      : `Stay on for about ${km} km to ${leg.endName}.`,
+    stops > 0 ? `Ride ${stops} stop${stops === 1 ? "" : ""} to ${leg.endName}.` : `Stay on for about ${km} km to ${leg.endName}.`,
     `Get off at ${leg.endName}.`,
   ];
 }
 
-// Snap connector legs to the street network; pin start/end after snapping so the
-// polyline anchors exactly at the logical endpoints. Falls back to straight line.
 async function onStreetGeometry(leg: PlanLeg): Promise<number[][]> {
   if (leg.mode === "walk" || leg.mode === "taxi" || leg.mode === "tuktuk") {
     const profile = leg.mode === "walk" ? "walking" : "driving";
     try {
-      const snapped = await snapConnector(
-        profile,
-        [leg.startCoord.lng, leg.startCoord.lat],
-        [leg.endCoord.lng, leg.endCoord.lat],
-      );
+      const snapped = await snapConnector(profile, [leg.startCoord.lng, leg.startCoord.lat], [leg.endCoord.lng, leg.endCoord.lat]);
       if (snapped && snapped.length >= 2) {
         snapped[0] = [leg.startCoord.lng, leg.startCoord.lat];
         snapped[snapped.length - 1] = [leg.endCoord.lng, leg.endCoord.lat];
@@ -378,18 +560,16 @@ export async function adaptPlanToApi(graph: TransitGraph, plan: EnginePlan, isAr
   const taxiType = pickType(graph, "taxi", /uber|careem/i);
   const segments = await Promise.all(plan.legs.map(async (leg) => {
     const type = leg.typeId ? graph.types.get(leg.typeId) ?? null : null;
-    const name = type
-      ? `${isArabic ? type.nameAr : type.nameEn}${leg.lineNumber ? ` ${leg.lineNumber}` : ""}`
-      : isArabic ? "مشي" : "Walk";
-    const taxiAlt = taxiType && leg.mode !== "taxi" && leg.distanceKm > 0
-      ? [{
-          transport_type_id: taxiType.id,
-          transport_name: isArabic ? taxiType.nameAr : taxiType.nameEn,
-          cost_egp: directFare(taxiType, leg.distanceKm),
-          duration_minutes: Math.round((leg.distanceKm / taxiType.speedKmh) * 60),
-          color: taxiType.color, icon: "car",
-        }]
-      : [];
+    const name = type ? `${isArabic ? type.nameAr : type.nameEn}${leg.lineNumber ? ` ${leg.lineNumber}` : ""}` : (isArabic ? "مشي" : "Walk");
+    const taxiAlt = taxiType && leg.mode !== "taxi" && leg.distanceKm > 0 ? [
+      {
+        transport_type_id: taxiType.id,
+        transport_name: isArabic ? taxiType.nameAr : taxiType.nameEn,
+        cost_egp: directFare(taxiType, leg.distanceKm),
+        duration_minutes: Math.round((leg.distanceKm / taxiType.speedKmh) * 60),
+        color: taxiType.color, icon: "car",
+      }
+    ] : [];
     return {
       transport_type_id: leg.typeId ?? leg.mode,
       transport_name: name,
@@ -417,8 +597,6 @@ export async function adaptPlanToApi(graph: TransitGraph, plan: EnginePlan, isAr
   };
 }
 
-// Main entry: try each rung in order, return the first valid plan.
-// Falls back to a union search over all rungs if none pass individually.
 export async function computeEnginePlan(req: PlanRequest): Promise<EnginePlan | null> {
   const graph = await buildGraph();
   const overlay = buildOverlay(graph, req.origin, req.dest, req.planKey);
@@ -437,11 +615,10 @@ export async function computeEnginePlan(req: PlanRequest): Promise<EnginePlan | 
 
     if (validatePlan(plan).ok) {
       bestPlan = plan;
-      break;
+      break; 
     }
   }
 
-  // Union fallback: if no single rung produced a valid plan, try all modes together.
   if (!bestPlan) {
     const fallbackAllowed = new Set<ModeKey>();
     for (const rung of ladderFor(req.planKey)) {
