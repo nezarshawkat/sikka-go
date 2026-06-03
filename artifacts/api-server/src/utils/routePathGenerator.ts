@@ -8,6 +8,13 @@ function getToken(): string | null {
   return process.env.MAPBOX_TOKEN || process.env.VITE_MAPBOX_TOKEN || null;
 }
 
+function validLngLat(lng: number, lat: number): boolean {
+  return (
+    Number.isFinite(lng) && Number.isFinite(lat) &&
+    lng >= -180 && lng <= 180 && lat >= -90 && lat <= 90
+  );
+}
+
 const geocodeCache = new Map<string, [number, number]>();
 
 export async function geocodeStop(
@@ -44,6 +51,52 @@ export async function geocodeStop(
   }
 }
 
+// Snap a single origin→dest WALK leg onto the pedestrian network via OSRM's foot
+// profile (FOSSGIS public instance by default; override with OSRM_FOOT_URL). No
+// API token required. Returns [lng,lat][] geometry, or null on failure so the
+// caller can fall back to Mapbox walking and then a straight interpolation.
+// Cached by ~4-decimal coords to limit requests.
+const OSRM_FOOT_BASE =
+  process.env.OSRM_FOOT_URL?.replace(/\/+$/, "")
+  || "https://routing.openstreetmap.de/routed-foot";
+const footCache = new Map<string, [number, number][]>();
+
+export async function snapFootOsrm(
+  a: [number, number],
+  b: [number, number],
+): Promise<[number, number][] | null> {
+  // Inputs are canonical [lng, lat]; bail if they fall outside valid ranges
+  // rather than guessing axis order (a relative lng>lat heuristic is wrong for
+  // places like Alexandria where lng < lat).
+  const [lngA, latA] = a;
+  const [lngB, latB] = b;
+  if (!validLngLat(lngA, latA) || !validLngLat(lngB, latB)) return null;
+
+  const key = `${latA.toFixed(4)},${lngA.toFixed(4)}|${latB.toFixed(4)},${lngB.toFixed(4)}`;
+  const cached = footCache.get(key);
+  if (cached) return cached.map((p) => [p[0], p[1]] as [number, number]);
+
+  const coordStr = `${lngA},${latA};${lngB},${latB}`;
+  const url =
+    `${OSRM_FOOT_BASE}/route/v1/foot/${coordStr}`
+    + `?overview=full&geometries=geojson`;
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+    if (!res.ok) return null;
+    const data = await res.json() as {
+      code?: string;
+      routes?: Array<{ geometry: { coordinates: [number, number][] } }>;
+    };
+    if (data.code !== "Ok") return null;
+    const coords = data.routes?.[0]?.geometry?.coordinates;
+    if (!coords || coords.length < 2) return null;
+    footCache.set(key, coords);
+    return coords;
+  } catch {
+    return null;
+  }
+}
+
 // Snap a single origin→dest connector onto the real network for one travel
 // profile ("walking" or "driving"). Used to turn straight-line walk/taxi/tuktuk
 // legs into on-street geometry. Cached by ~4-decimal coords to limit API calls.
@@ -57,24 +110,23 @@ export async function snapConnector(
   const token = getToken();
   if (!token) return null;
 
-  // Auto-detect axis orientation for Cairo (lng ≈ 31, lat ≈ 30: lng > lat).
-  // If the first element is already the larger value it is longitude; otherwise
-  // swap so the Mapbox API always receives [lng, lat] order.
-  const lngA = a[0] > a[1] ? a[0] : a[1];
-  const latA = a[0] > a[1] ? a[1] : a[0];
-  const lngB = b[0] > b[1] ? b[0] : b[1];
-  const latB = b[0] > b[1] ? b[1] : b[0];
+  // Inputs are canonical [lng, lat]; bail if they fall outside valid ranges
+  // rather than guessing axis order (a relative lng>lat heuristic is wrong for
+  // places like Alexandria where lng < lat).
+  const [lngA, latA] = a;
+  const [lngB, latB] = b;
+  if (!validLngLat(lngA, latA) || !validLngLat(lngB, latB)) return null;
 
   const key = `${profile}|${latA.toFixed(4)},${lngA.toFixed(4)}|${latB.toFixed(4)},${lngB.toFixed(4)}`;
   const cached = connectorCache.get(key);
-  if (cached) return cached;
+  if (cached) return cached.map((p) => [p[0], p[1]] as [number, number]);
 
   const coordStr = `${lngA},${latA};${lngB},${latB}`;
   const url =
     `https://api.mapbox.com/directions/v5/mapbox/${profile}/${coordStr}`
     + `?geometries=geojson&overview=full&access_token=${token}`;
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
     if (!res.ok) return null;
     const data = await res.json() as { routes?: Array<{ geometry: { coordinates: [number, number][] } }> };
     const coords = data.routes?.[0]?.geometry?.coordinates;

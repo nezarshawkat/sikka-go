@@ -13,7 +13,7 @@ import { buildGraph, nearestStops } from "./graph.js";
 import { findRoutes, type SearchOverlay, type SearchResult } from "./pathfinder.js";
 import { PROFILES, directFare, walkMinutes, WALK_MAX_KM } from "./cost.js";
 import { haversineKm } from "./geo.js";
-import { snapConnector } from "../utils/routePathGenerator.js";
+import { snapConnector, snapFootOsrm } from "../utils/routePathGenerator.js";
 import { estimateCrowding } from "./crowding.js";
 import { scorePlan, planConfidence } from "./score.js";
 import { explainPlan } from "./explain.js";
@@ -371,17 +371,26 @@ function interpolateLine(a: Coord, b: Coord, n = 5): number[][] {
 // localized interpolated straight line (not the stored 2-point straight line).
 async function onStreetGeometry(leg: PlanLeg): Promise<number[][]> {
   if (leg.mode === "walk" || leg.mode === "taxi" || leg.mode === "tuktuk") {
-    const profile = leg.mode === "walk" ? "walking" : "driving";
+    const a: [number, number] = [leg.startCoord.lng, leg.startCoord.lat];
+    const b: [number, number] = [leg.endCoord.lng, leg.endCoord.lat];
     try {
-      const snapped = await snapConnector(
-        profile,
-        [leg.startCoord.lng, leg.startCoord.lat],
-        [leg.endCoord.lng, leg.endCoord.lat],
-      );
+      // Walk legs follow the pedestrian network (OSRM foot); taxi/tuktuk legs use
+      // the driving network (Mapbox). For walking, prefer OSRM foot and fall back
+      // to Mapbox walking so a transient OSRM failure still yields snapped geometry.
+      let snapped: [number, number][] | null = null;
+      if (leg.mode === "walk") {
+        snapped = await snapFootOsrm(a, b);
+        if (!snapped || snapped.length < 2) snapped = await snapConnector("walking", a, b);
+      } else {
+        snapped = await snapConnector("driving", a, b);
+      }
       if (snapped && snapped.length >= 2) {
-        snapped[0] = [leg.startCoord.lng, leg.startCoord.lat];
-        snapped[snapped.length - 1] = [leg.endCoord.lng, leg.endCoord.lat];
-        return snapped;
+        // Clone before pinning so we never mutate an array still held in the
+        // snap helpers' coord caches.
+        const out = snapped.map((p) => [p[0], p[1]] as [number, number]);
+        out[0] = a;
+        out[out.length - 1] = b;
+        return out;
       }
     } catch (e) {
       console.error("Connector snapped geometry lookup failed", e);

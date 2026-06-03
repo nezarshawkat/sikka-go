@@ -97,11 +97,18 @@ connector fill so tightened walking does not make access gaps unroutable.
 
 ## Connector geometry snapping
 Connector legs are stored as a straight 2-point line; `adaptPlanToApi` is async
-and snaps walk legs (`walking` profile) and taxi/tuktuk legs (`driving`) onto the
-real street network via `snapConnector()` (`routePathGenerator.ts`, coord-cached,
-returns null → straight-line fallback when no `MAPBOX_TOKEN`/`VITE_MAPBOX_TOKEN`).
-Transit legs keep their DB `route_path` polyline. **Why:** straight diagonals cut
-through blocks and looked wrong on the map.
+and snaps them onto the real network in `onStreetGeometry`. WALK legs use OSRM's
+foot profile (`snapFootOsrm()` in `routePathGenerator.ts`) — pedestrian network,
+NO API token, FOSSGIS public instance `routing.openstreetmap.de/routed-foot` by
+default, override with `OSRM_FOOT_URL`. On OSRM failure walk falls back to Mapbox
+`snapConnector("walking")`, then to a straight interpolation. TAXI/TUKTUK legs
+use Mapbox `snapConnector("driving")`. Both helpers are coord-cached and return
+null on failure. Transit legs keep their DB `route_path` polyline (never reshaped).
+**Why:** straight diagonals cut through blocks and looked wrong; OSRM foot keeps
+walk legs on real pedestrian paths and removes the Mapbox dependency for walking
+(part of the wider Mapbox→MapLibre/OSS migration). NOTE: the public OSRM demo
+`router.project-osrm.org` is CAR-ONLY (its "foot" returns car speeds) — must use
+a real foot instance like FOSSGIS.
 
 ## Fare markup + budget band
 `cost.ts` `FARE_MARKUP` (1.25) is applied ONCE each in `directFare`,
