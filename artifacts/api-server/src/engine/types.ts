@@ -55,6 +55,9 @@ export interface LineInfo {
   // route_path coordinates as stored in DB: [lng, lat] pairs
   path: [number, number][] | null;
   stops: LineStop[]; // ordered along the line
+  // true when any consecutive route_path coordinates jump > 500 m apart — a
+  // signal the polyline may be corrupt / skipping main streets.
+  pathSuspect?: boolean;
 }
 
 export type EdgeKind = "ride" | "board" | "alight" | "walk" | "taxi" | "tuktuk";

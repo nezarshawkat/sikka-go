@@ -11,8 +11,9 @@ Mapbox car shortcuts through side-alleys. Rail (metro/monorail/train) keeps fixe
 and is skipped.
 
 Pipeline: vague stops → LLM "Cairo Transit Engineer" expands to hubs + main-road breadcrumbs →
-geocode each → snap via Mapbox `driving-traffic` with strict 50 m radiuses, chunked at the
-25-waypoint limit and stitched (drop 1 overlap point per chunk).
+geocode each → snap via Mapbox `driving-traffic` with tight (~60 m) radiuses, chunked at the
+25-waypoint limit and stitched (drop 1 overlap point per chunk). A hard waypoint cap (~60) trims
+from the CENTER — never the tail — so both terminals and end-of-route breadcrumb density survive.
 
 ## Durable lessons / decisions
 
@@ -23,6 +24,19 @@ geocode each → snap via Mapbox `driving-traffic` with strict 50 m radiuses, ch
   console workflow (no port) survives across tool calls, keeps the in-process geocode/breadcrumb
   caches warm (huge speedup across hundreds of lines), and exposes progress via its output.
   **Why:** a background run died after the first line; the workflow run completed all lines.
+- **The job MUST be idempotent + resumable — the environment can restart mid-run.** A sandbox
+  reboot stops every workflow (including the bulk one) partway through; restarting the workflow
+  re-runs `--all` from scratch. That is fine only because each line's `route_path` is committed to
+  the DB as it completes (no batching) and re-doing a line just overwrites with an equivalent path.
+  Never accumulate results in memory to write at the end.
+- **Parallelize the bulk loop with a small worker pool (concurrency ~4).** The work is I/O-bound
+  on AI + Mapbox calls, so a shared-cursor pool over the line list cut a ~357-line run from ~3 h
+  to ~45 min. Node's single-threaded async makes the shared geocode/breadcrumb Map caches and the
+  plain counters safe without locks. Keep a small per-worker delay as a rate-limit cushion.
+- **For bulk runs, tune the AI client SHORT, not long.** ~45 s timeout + 1 retry converts most
+  slow-but-valid breadcrumb responses into single successes while capping worst-case wait; the
+  default 30 s × 2 retries wasted ~90 s per hang. ~20-25% of lines still fall back to raw-stop
+  snap (AI=false) under proxy cold-starts — that is acceptable, the path is still dense + snapped.
 - **Every external call in a long bulk loop MUST have a timeout.** The OpenAI SDK defaults to a
   ~10 min timeout × retries, and bare `fetch` never times out — one hung request stalls the whole
   run with no error. Bound the OpenAI client (timeout + maxRetries) and wrap geocode/directions

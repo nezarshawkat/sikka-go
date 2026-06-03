@@ -11,7 +11,7 @@
  *      Street", "Abbassia Square Bus Hub"]) so the route is pinned to primary
  *      corridors.
  *   2. Geocode each breadcrumb to a coordinate (reuses geocodeStop).
- *   3. Strict snap via Mapbox Directions `driving-traffic` with a 50 m radius
+ *   3. Strict snap via Mapbox Directions `driving-traffic` with a 60 m radius
  *      per coordinate, chunked to respect the 25-waypoint limit and stitched.
  *   4. Caller saves the resulting LineString to transit_lines.route_path.
  */
@@ -45,19 +45,27 @@ const SYSTEM_PROMPT =
   `which major squares, bridges and primary thoroughfares (main roads) real ` +
   `buses use, and which narrow residential side-streets they NEVER enter.\n\n` +
   `Given an ORDERED list of vague bus-stop area names for a single route, ` +
-  `rewrite it into an ordered list of PRECISE, geocodable waypoints that force ` +
-  `the route to stay on major corridors. Rules:\n` +
+  `rewrite it into a DENSE, ordered list of PRECISE, geocodable waypoints that ` +
+  `pin the route tightly to major corridors so a road router has no room to ` +
+  `divert onto side streets. Rules:\n` +
   `- Keep the same overall direction and order (first stop stays first, last ` +
   `stays last).\n` +
   `- Convert each vague area into a specific, well-known landmark or hub ` +
   `(e.g. "Roxy" -> "Roxy Square, Heliopolis"; "Abbassia" -> "Abbassia Square").\n` +
-  `- BETWEEN consecutive stops, INSERT 1-3 intermediate "breadcrumb" waypoints ` +
-  `naming the actual MAIN road / axis / bridge the bus travels on ` +
-  `(e.g. "Khalifa El-Maamon Street", "Salah Salem Road", "6th October Bridge"). ` +
-  `Never invent tiny residential streets.\n` +
+  `- BETWEEN consecutive stops, name the SPECIFIC street corridor the bus rides ` +
+  `along, adding a breadcrumb waypoint roughly every ~300 m so consecutive ` +
+  `waypoints are close together. Reference Cairo's real major arteries, squares ` +
+  `and bridges by their well-known names (e.g. "Corniche El Nil", "Salah Salem ` +
+  `Road", "Ramsis Street", "Abbas El-Akkad Street", "Shubra Street", "Port Said ` +
+  `Street", "Cleopatra Street", "Khalifa El-Maamon Street", "6th October ` +
+  `Bridge", "Tahrir Square", "Roxy Square").\n` +
+  `- REJECT any waypoint that is not on a named major street, primary ` +
+  `thoroughfare, well-known square or bridge. Never invent tiny residential ` +
+  `streets, alleys or unnamed lanes.\n` +
   `- Every waypoint must be a real, searchable place in the given city so a ` +
-  `geocoder can resolve it.\n` +
-  `- Aim for clarity over quantity; do not exceed ~40 total waypoints.\n` +
+  `geocoder can resolve it. Prefer "Street name, District" form for precision.\n` +
+  `- Use as many breadcrumbs as the corridor needs for ~300 m spacing, but do ` +
+  `NOT exceed 60 total waypoints.\n` +
   `Respond ONLY with strict JSON: {"waypoints": ["...", "..."]}.`;
 
 export async function expandStopsWithAI(
@@ -95,10 +103,20 @@ export async function expandStopsWithAI(
     if (!raw) return clean;
 
     const parsed = JSON.parse(raw) as { waypoints?: unknown };
-    const wp = Array.isArray(parsed.waypoints)
+    let wp = Array.isArray(parsed.waypoints)
       ? parsed.waypoints.map(x => String(x).trim()).filter(Boolean)
       : [];
     if (wp.length < 2) return clean;
+    // Hard cap: keep the model honest about the 60-waypoint ceiling even if it
+    // over-produces. Trim from the CENTER so both terminals AND the breadcrumb
+    // density near each endpoint survive — dropping the whole tail would create a
+    // long unconstrained jump near the end and reintroduce side-street drift.
+    const CAP = 60;
+    if (wp.length > CAP) {
+      const keepHead = Math.ceil(CAP / 2);   // 30
+      const keepTail = CAP - keepHead;       // 30
+      wp = [...wp.slice(0, keepHead), ...wp.slice(wp.length - keepTail)];
+    }
 
     // Hard guard: the AI must never drop the route's true terminals. Re-anchor
     // the original first/last stop so the polyline always starts/ends at the
@@ -114,9 +132,9 @@ export async function expandStopsWithAI(
   }
 }
 
-// ─── 3. Strict road snapping (driving-traffic + 50 m radiuses, chunked) ──────
+// ─── 3. Strict road snapping (driving-traffic + 60 m radiuses, chunked) ──────
 
-const RADIUS_M = 50;          // strict snap radius per coordinate
+const RADIUS_M = 60;          // strict snap radius per coordinate (relaxed for ~300 m dense breadcrumbs)
 const MAX_WAYPOINTS = 24;     // per request (Mapbox hard limit is 25; +1 overlap)
 
 async function fetchDirections(

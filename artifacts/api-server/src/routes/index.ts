@@ -16,6 +16,7 @@ import seedAlexandriaRouter from "./seedAlexandria";
 import seedFromCSVRouter from "./seedFromCSV";
 import seedHeatmapsRouter from "./seedHeatmaps";
 import seedStopsRouter from "./seedStops";
+import reEnrichRoutesRouter from "./reEnrichRoutes";
 import intercityRouter from "./intercity";
 import reportsRouter from "./reports";
 import transportReportsRouter from "./transportReports";
@@ -55,6 +56,9 @@ router.use("/admin/seed-from-csv", seedFromCSVRouter);
 router.use("/admin/seed-heatmaps", seedHeatmapsRouter);
 // POST /api/admin/seed-stops — geo-located stop dictionary (locations + mawaqef) + microbus coverage
 router.use("/admin/seed-stops", seedStopsRouter);
+// POST /api/admin/re-enrich-routes?transportMode=bus&limit=N&offset=M
+//   — small incremental batches re-snapping board-anywhere route_path to main streets
+router.use("/admin/re-enrich-routes", reEnrichRoutesRouter);
 
 // User-scoped routes
 router.use("/profile", profileRouter);

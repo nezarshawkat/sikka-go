@@ -18,7 +18,9 @@ export function getAIClient(): OpenAI | null {
   // otherwise the SDK targets api.openai.com with the user's own key.
   const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL || undefined;
   // Bounded timeout + retries so a single hung request never stalls a batch run.
-  cached = new OpenAI({ apiKey, baseURL, timeout: 30_000, maxRetries: 2 });
+  // Tuned for bulk enrichment: a single ~45 s attempt with one retry keeps slow-
+  // but-valid breadcrumb responses succeeding while capping the worst-case wait.
+  cached = new OpenAI({ apiKey, baseURL, timeout: 45_000, maxRetries: 1 });
   return cached;
 }
 

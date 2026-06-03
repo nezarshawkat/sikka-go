@@ -17,7 +17,7 @@ import { transitLinesTable } from "@workspace/db";
 import { asc, eq } from "drizzle-orm";
 import { buildBusRoutePathAI } from "../utils/busPathEnricher.js";
 
-interface Args { all: boolean; limit: number; offset: number; city: string | null; }
+interface Args { all: boolean; limit: number; offset: number; city: string | null; concurrency: number; }
 
 function parseArgs(): Args {
   const args = process.argv.slice(2);
@@ -30,11 +30,15 @@ function parseArgs(): Args {
     limit: Number(get("limit")) || Infinity,
     offset: Number(get("offset")) || 0,
     city: get("city"),
+    // I/O-bound work (AI + Mapbox) — process a few lines in parallel to keep the
+    // bulk run to a sensible duration. Shared geocode/breadcrumb caches are safe
+    // under Node's single-threaded async model.
+    concurrency: Math.min(8, Math.max(1, Number(get("concurrency")) || 4)),
   };
 }
 
 async function main(): Promise<void> {
-  const { all, limit, offset, city } = parseArgs();
+  const { all, limit, offset, city, concurrency } = parseArgs();
 
   // Stable ordering by id so --offset/--limit batches are deterministic and resumable.
   const lines = await db.select().from(transitLinesTable).orderBy(asc(transitLinesTable.id));
@@ -48,33 +52,50 @@ async function main(): Promise<void> {
 
   console.log(`Enriching ${targets.length} bus line(s) (all=${all}, city=${city ?? "any"})...`);
 
-  let ok = 0, ai = 0, failed = 0;
-  for (const line of targets) {
+  const MIN_COORDS = 10; // never overwrite a good path with a sparse new one
+  const total = targets.length;
+  console.log(`  (concurrency=${concurrency})`);
+  let ok = 0, ai = 0, skipped = 0, failed = 0, done = 0;
+  let cursor = 0;
+
+  async function processOne(index: number): Promise<void> {
+    const line = targets[index];
     const label = `${line.lineNumber ?? line.id} (${line.fromArea} → ${line.toArea})`;
     try {
       const cityForLine = city || gov(line);
       const result = await buildBusRoutePathAI(
         line.fromArea, line.toArea, line.viaStops || [], cityForLine,
       );
-      if (result.routePath) {
+      const coords = result.routePath?.coordinates.length ?? 0;
+      if (result.routePath && coords >= MIN_COORDS) {
         await db.update(transitLinesTable)
           .set({ routePath: result.routePath })
           .where(eq(transitLinesTable.id, line.id));
         ok++;
         if (result.usedAI) ai++;
-        console.log(`  ✓ ${label} — ${result.routePath.coordinates.length} pts` +
+        console.log(`  line ${++done} of ${total}: updated — ${label} — ${coords} pts` +
           ` (${result.geocodedCount} geocoded, AI=${result.usedAI})`);
       } else {
-        failed++;
-        console.log(`  ✗ ${label} — no path (geocoding/token failed)`);
+        skipped++;
+        console.log(`  line ${++done} of ${total}: skipped — ${label} — kept old path (new=${coords} pts)`);
       }
     } catch (err) {
       failed++;
-      console.log(`  ✗ ${label} — ${err instanceof Error ? err.message : err}`);
+      console.log(`  line ${++done} of ${total}: failed — ${label} — ${err instanceof Error ? err.message : err}`);
     }
   }
 
-  console.log(`\nDone. updated=${ok}, ai-expanded=${ai}, failed=${failed}, total=${targets.length}`);
+  // Worker pool: each worker pulls the next index off a shared cursor until drained.
+  async function worker(): Promise<void> {
+    while (cursor < targets.length) {
+      const index = cursor++;
+      await processOne(index);
+      await new Promise(r => setTimeout(r, 150)); // gentle per-worker rate-limit gap
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, total) }, () => worker()));
+
+  console.log(`\nDone. updated=${ok}, ai-expanded=${ai}, skipped=${skipped}, failed=${failed}, total=${total}`);
 }
 
 main()

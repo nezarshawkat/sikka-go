@@ -41,9 +41,20 @@ const GRID_CELL_DEG = 0.01; // ~1.1 km
 const DENSE_SPACING_KM = 1.0; // board-anywhere: virtual boarding point every ~1 km
 const DENSE_MIN_GAP_KM = 0.6; // never place a synthetic point this close to another stop
 const ALIGHT_PENALTY_MIN = 2.0; // real-world physical friction time to hop off a vehicle
+const PATH_SUSPECT_STEP_KM = 0.5; // flag a line if any consecutive route_path step jumps > 500 m
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 let cached: TransitGraph | null = null;
+
+// Max great-circle gap between any two consecutive route_path coordinates (km).
+function maxConsecutiveStepKm(path: [number, number][]): number {
+  let max = 0;
+  for (let i = 1; i < path.length; i++) {
+    const d = haversineKm(pathPointToCoord(path[i - 1]), pathPointToCoord(path[i]));
+    if (d > max) max = d;
+  }
+  return max;
+}
 
 function cellKey(lat: number, lng: number): string {
   return `${Math.floor(lat / GRID_CELL_DEG)}:${Math.floor(lng / GRID_CELL_DEG)}`;
@@ -232,6 +243,7 @@ export async function buildGraph(force = false): Promise<TransitGraph> {
       hasFixedStops: l.hasFixedStops,
       path,
       stops,
+      pathSuspect: maxConsecutiveStepKm(path) > PATH_SUSPECT_STEP_KM,
     });
   }
 
@@ -390,4 +402,18 @@ export async function buildGraph(force = false): Promise<TransitGraph> {
 
 export function invalidateGraph() {
   cached = null;
+}
+
+/**
+ * Data-quality probe: builds (or reuses) the graph and counts how many lines
+ * have a `route_path` with a > 500 m jump between consecutive coordinates —
+ * a signal the polyline may be skipping main streets or be corrupt.
+ */
+export async function countSuspectPaths(): Promise<{ suspect: number; total: number }> {
+  const graph = await buildGraph();
+  let suspect = 0;
+  for (const line of graph.lines.values()) {
+    if (line.pathSuspect) suspect++;
+  }
+  return { suspect, total: graph.lines.size };
 }
