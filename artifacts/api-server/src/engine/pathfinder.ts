@@ -1,6 +1,6 @@
 import type { Edge, GraphNode, ModeKey, TransitGraph } from "./types.js";
 import type { PlanProfile } from "./cost.js";
-import { WALK_MAX_SINGLE_MIN, WALK_MAX_TOTAL_MIN } from "./cost.js";
+import { WALK_MAX_SINGLE_MIN, WALK_MAX_TOTAL_MIN, BOARDING_PENALTY_MIN } from "./cost.js";
 
 export interface SearchOverlay {
   nodes: Map<string, GraphNode>;
@@ -74,7 +74,7 @@ function edgeWeight(e: Edge, profile: PlanProfile): number {
     baselineTimeW * e.timeMin +
     profile.costW * e.costEgp +
     profile.walkW * e.walkMin +
-    (e.isBoarding ? profile.transferPenalty : 0);
+    (e.isBoarding ? baselineTimeW * BOARDING_PENALTY_MIN : 0);
 
   if (e.kind === "ride" && (e.mode === "microbus" || e.mode === "serfis")) {
     if (e.timeMin > 12) {
@@ -102,14 +102,20 @@ interface Label {
   alive: boolean;
 }
 
-export function findRoute(
+// Single pooled search: returns up to `maxResults` non-dominated goal labels in
+// ascending-weight order (the Pareto frontier at the goal). The caller validates
+// candidates in order and keeps the first that passes the plan gates — this
+// preserves the old ladder's "first valid wins" robustness without restricting
+// the mode pool.
+export function findRoutes(
   graph: TransitGraph,
   overlay: SearchOverlay,
   start: string,
   goal: string,
   profile: PlanProfile,
   allowed: Set<ModeKey>,
-): SearchResult | null {
+  maxResults = 6,
+): SearchResult[] {
   const labelsByNode = new Map<string, Label[]>();
   const heap = new MinHeap<Label>();
 
@@ -140,13 +146,17 @@ export function findRoute(
 
   addLabel(start, 0, 0, 0, null, null);
 
-  let goalLabel: Label | null = null;
+  const goalLabels: Label[] = [];
   while (heap.size > 0) {
     const lab = heap.pop()!;
     if (!lab.alive) continue;
     if (lab.node === goal) {
-      goalLabel = lab;
-      break;
+      goalLabels.push(lab);
+      // A goal label collected earlier can be dominated (marked dead) by a later
+      // equal-weight goal label, so count only the still-alive (non-dominated)
+      // ones toward the K cap.
+      if (goalLabels.reduce((n, l) => n + (l.alive ? 1 : 0), 0) >= maxResults) break;
+      continue;
     }
     for (const e of neighbors(lab.node)) {
       if (!CONNECTOR_MODES.has(e.mode) && !allowed.has(e.mode)) continue;
@@ -168,18 +178,22 @@ export function findRoute(
     }
   }
 
-  if (!goalLabel) return null;
-
-  const nodeIds: string[] = [];
-  const edges: Edge[] = [];
-  let cur: Label | null = goalLabel;
-  while (cur && cur.prev) {
-    nodeIds.push(cur.node);
-    edges.push(cur.edge!);
-    cur = cur.prev;
-  }
-  nodeIds.push(start);
-  nodeIds.reverse();
-  edges.reverse();
-  return { nodeIds, edges, weight: goalLabel.weight };
+  // Emit only non-dominated (still-alive) goal labels; a dominated label may have
+  // been collected before the label that dominated it was discovered.
+  return goalLabels
+    .filter((l) => l.alive)
+    .map((goalLabel) => {
+      const nodeIds: string[] = [];
+      const edges: Edge[] = [];
+      let cur: Label | null = goalLabel;
+      while (cur && cur.prev) {
+        nodeIds.push(cur.node);
+        edges.push(cur.edge!);
+        cur = cur.prev;
+      }
+      nodeIds.push(start);
+      nodeIds.reverse();
+      edges.reverse();
+      return { nodeIds, edges, weight: goalLabel.weight };
+    });
 }

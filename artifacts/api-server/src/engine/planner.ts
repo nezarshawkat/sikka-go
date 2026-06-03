@@ -10,7 +10,7 @@ import type {
   TransportTypeInfo,
 } from "./types.js";
 import { buildGraph, nearestStops } from "./graph.js";
-import { findRoute, type SearchOverlay, type SearchResult } from "./pathfinder.js";
+import { findRoutes, type SearchOverlay, type SearchResult } from "./pathfinder.js";
 import { PROFILES, directFare, walkMinutes, WALK_MAX_KM } from "./cost.js";
 import { haversineKm } from "./geo.js";
 import { snapConnector } from "../utils/routePathGenerator.js";
@@ -115,34 +115,14 @@ function buildOverlay(
   return { nodes, edges };
 }
 
-// Rung-by-rung ladder: public transit options are evaluated before taxis are
-// introduced. The first rung to yield a valid plan wins.
-function ladderFor(planKey: PlanKey): Set<ModeKey>[] {
-  if (planKey === "economic") {
-    return [
-      new Set<ModeKey>(["bus", "metro", "monorail", "train"]),
-      new Set<ModeKey>(["microbus", "serfis", "metro", "monorail", "train"]),
-      new Set<ModeKey>(["bus", "serfis", "microbus", "metro", "monorail", "train"]),
-      new Set<ModeKey>(["bus", "serfis", "microbus", "metro", "monorail", "train", "tuktuk"]),
-      new Set<ModeKey>(["bus", "serfis", "microbus", "metro", "monorail", "train", "tuktuk", "taxi"]),
-      new Set<ModeKey>([]),
-    ];
-  }
-  if (planKey === "comfortable") {
-    return [
-      new Set<ModeKey>(["bus", "metro", "monorail", "train"]),
-      new Set<ModeKey>(["bus", "serfis", "microbus", "metro", "monorail", "train"]),
-      new Set<ModeKey>(["bus", "serfis", "microbus", "metro", "monorail", "train", "taxi"]),
-      new Set<ModeKey>([]),
-    ];
-  }
-  // premium
-  return [
-    new Set<ModeKey>(["taxi"]),
-    new Set<ModeKey>(["taxi", "metro", "monorail", "train"]),
-    new Set<ModeKey>([]),
-  ];
-}
+// Single mode pool: every transit + connector mode competes in one search. The
+// rider's tier (economic/comfortable/premium) only changes the cost weights and
+// mode preferences in PROFILES — NOT which modes exist — so the rung ladder is
+// gone. Per-mode admissibility (tuktuk heatmap gate, walk budget) is enforced
+// inside the pathfinder; connector availability is decided in buildOverlay.
+const ALL_MODES = new Set<ModeKey>([
+  "metro", "monorail", "train", "bus", "serfis", "microbus", "taxi", "tuktuk",
+]);
 
 function nodeCoord(graph: TransitGraph, overlay: SearchOverlay, id: string): Coord {
   return (overlay.nodes.get(id) ?? graph.nodes.get(id))!.coord;
@@ -501,42 +481,25 @@ export async function adaptPlanToApi(graph: TransitGraph, plan: EnginePlan, isAr
   };
 }
 
-// Main entry: try each rung in order, return the first valid plan.
-// Falls back to a union search over all rungs if none pass individually.
+// Main entry: ONE pooled Dijkstra over every mode. The search returns its
+// best-weight Pareto candidates; we reconstruct + validate them in order and
+// return the first that passes the hard plan gates (a real, verified route is
+// still mandatory — invalid plans are never returned). When none validate the
+// caller serves a verified door-to-door taxi fallback.
 export async function computeEnginePlan(req: PlanRequest): Promise<EnginePlan | null> {
   const graph = await buildGraph();
   const overlay = buildOverlay(graph, req.origin, req.dest, req.planKey);
   const profile = PROFILES[req.planKey];
 
+  const candidates = findRoutes(graph, overlay, "origin", "dest", profile, ALL_MODES);
+
   let bestPlan: EnginePlan | null = null;
-
-  for (const rung of ladderFor(req.planKey)) {
-    if (rung.size === 0) continue;
-
-    const res = findRoute(graph, overlay, "origin", "dest", profile, rung);
-    if (!res) continue;
-
+  for (const res of candidates) {
     const plan = reconstruct(graph, overlay, res, req.planKey, req.isArabic);
     if (!plan || plan.legs.length === 0) continue;
-
     if (validatePlan(plan, graph).ok) {
       bestPlan = plan;
       break;
-    }
-  }
-
-  // Union fallback: if no single rung produced a valid plan, try all modes together.
-  if (!bestPlan) {
-    const fallbackAllowed = new Set<ModeKey>();
-    for (const rung of ladderFor(req.planKey)) {
-      for (const mode of rung) fallbackAllowed.add(mode);
-    }
-    const res = findRoute(graph, overlay, "origin", "dest", profile, fallbackAllowed);
-    if (res) {
-      const plan = reconstruct(graph, overlay, res, req.planKey, req.isArabic);
-      if (plan && plan.legs.length > 0 && validatePlan(plan, graph).ok) {
-        bestPlan = plan;
-      }
     }
   }
 

@@ -46,6 +46,12 @@ export const WALK_MAX_KM = 0.8;
 export const WALK_MAX_SINGLE_MIN = walkMinutes(WALK_MAX_KM); // ~10.7 min
 export const WALK_MAX_TOTAL_MIN = walkMinutes(WALK_MAX_KM * 2); // ~21.3 min
 
+// Fixed boarding/transfer penalty (~420 s ≈ 7 min) charged once per boarding in
+// the unified single-pool search. Added as a time-equivalent (scaled by the
+// profile's time weight) so it is a real 7-minute cost at every tier instead of
+// a raw weight constant that would mean different things per profile.
+export const BOARDING_PENALTY_MIN = 7;
+
 // Global fare markup so quoted prices lean toward real-world (slightly higher)
 // fares instead of optimistic seed values. Applied to every fare the engine
 // emits so weights and displayed costs stay consistent.
@@ -87,7 +93,6 @@ export interface PlanProfile {
   timeW: number; // weight per minute
   costW: number; // weight per EGP
   walkW: number; // extra weight per walking minute
-  transferPenalty: number; // added weight per boarding
   // multiplier applied to a board edge's weight by the boarded mode
   modePref: Record<ModeKey, number>;
   allowTaxi: boolean;
@@ -101,7 +106,6 @@ export const PROFILES: Record<PlanKey, PlanProfile> = {
     timeW: 0.6,
     costW: 3.0,
     walkW: 0.5,
-    transferPenalty: 6,
     modePref: {
       walk: 0.8,
       bus: 0.85,
@@ -121,7 +125,6 @@ export const PROFILES: Record<PlanKey, PlanProfile> = {
     timeW: 1.2,
     costW: 1.0,
     walkW: 1.6,
-    transferPenalty: 14,
     modePref: {
       metro: 0.8,
       monorail: 0.85,
@@ -141,7 +144,6 @@ export const PROFILES: Record<PlanKey, PlanProfile> = {
     timeW: 2.4,
     costW: 0.25,
     walkW: 3.0,
-    transferPenalty: 26,
     modePref: {
       taxi: 0.7,
       metro: 0.9,

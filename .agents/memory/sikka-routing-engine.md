@@ -21,8 +21,8 @@ hallucinated metro line / imaginary station is worse than no answer.
 - Do not reintroduce a fallback that fabricates metro/bus/serfis segments. The
   only legitimate non-graph fallback is a door-to-door taxi (Uber/Careem):
   a real, metered origin→dest ride with real coords, used solely when the
-  engine throws. The engine's own ladder already has a full-taxi rung, so that
-  fallback should almost never fire.
+  engine throws. The pooled search already includes taxi as a competing mode, so
+  that fallback should almost never fire.
 - `computeEnginePlan` is a hard validation gate: return a plan ONLY if
   `validatePlan(plan).ok`. Never return a best-effort invalid plan.
 
@@ -58,21 +58,37 @@ detouring to a sparse named hub. Rail keeps named stops only.
 only non-synthetic stops; when zero named stops are ridden, instruct "stay on
 ~X km". Densification roughly 10×'s graph size (~3.6k→50k nodes); still tractable.
 
-## Per-profile access + mode ladders
+## Single mode pool (NOT a rung ladder)
+The planner runs ONE pooled search over every mode (`ALL_MODES`), not a
+rung-by-rung ladder. `findRoutes` returns up to K (6) non-dominated Pareto goal
+candidates in ascending-weight order; `computeEnginePlan` reconstructs+validates
+them in order and returns the first that passes the gates (else null → taxi
+fallback). The K-best retry replaces the old ladder's "first valid rung wins"
+robustness without restricting modes. The rider's tier
+(economic/comfortable/premium) ONLY changes the PROFILES weight vector
+(timeW/costW/walkW/modePref) — it does NOT gate which modes exist. A fixed
+boarding/transfer penalty `BOARDING_PENALTY_MIN` (7 min ≈ 420 s, added as
+`baselineTimeW * 7` so it is a real 7-min time cost at every tier) replaced the
+old per-profile `transferPenalty` (6/14/26). **Why:** weights+penalty should
+shape the route in one search; the ladder was harder to reason about and could
+miss cross-mode optima. **Consequence:** taxi now competes directly, so
+comfortable picks direct taxi for short trips and economic uses taxi only as a
+heavily-penalized last-mile connector — this is intended, tune via PROFILES.
+
 `buildOverlay(graph, origin, dest, planKey)` builds first/last-mile connectors via
-a single `connect(from,to,distKm)` helper, and `ladderFor(planKey)` orders the
-mode sets tried (most-preferred → fallback). Connector policy (ALL profiles):
+a single `connect(from,to,distKm)` helper. Connector policy (ALL profiles):
 walk only if `distKm <= WALK_MAX_KM` (0.8 km); a longer gap is filled on-street by
 a tuktuk (economic/comfortable only, ≤3 km) and/or a taxi (every profile, ≤5 km).
 Premium additionally always offers a door-to-door taxi for any distance.
-`computeEnginePlan` also rejects detours: a plan's total distance must stay under
-`max(directKm*2.8 + 3, 5)` km, else the least-distance valid plan is used.
+(There is no separate "detour cap" rung in the current code — `validatePlan` is
+the only hard gate; do not assume one exists.)
 
 Connector edges (walk/taxi/tuktuk) exist ONLY as overlay injections — there are
-no taxi/tuktuk "lines" in the base graph — so `pathfinder.ts` marks them in
-`CONNECTOR_MODES` and always lets them be traversed; per-profile availability is
-decided entirely in `buildOverlay` (whether the edge is created at all), NOT by
-the rung's `allowed` mode set.
+no taxi/tuktuk "lines" in the base graph. In `pathfinder.ts` only `walk` is in
+`CONNECTOR_MODES` (always traversable); taxi/tuktuk must be in the search's
+`allowed` set — but since the pool is now `ALL_MODES`, every connector mode is
+available and whether a given connector edge exists at all is still decided in
+`buildOverlay`. Tuktuk additionally obeys the heatmap gate inside the pathfinder.
 
 **Why:** the original engine forced boarding at sparse named stops, so short
 trips detoured through far hubs (real failure: El Narges→Nasr City became a 75-min
