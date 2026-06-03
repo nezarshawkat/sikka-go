@@ -459,53 +459,46 @@ export async function adaptPlanToApi(
   };
 }
 
-// Main entry: build graph, run fallback ladder, validate, return best EnginePlan.
+// Main entry: build graph, run one combined-mode search, validate, return plan.
 export async function computeEnginePlan(req: PlanRequest): Promise<EnginePlan | null> {
   const graph = await buildGraph();
   const overlay = buildOverlay(graph, req.origin, req.dest, req.planKey);
   const profile = PROFILES[req.planKey];
-  const rungs = ladderFor(req.planKey);
 
-  // Reject absurd detours (e.g. routing through a far hub for a short trip): a
-  // plan may wander, but its total distance must stay near the straight line.
-  const directKm = haversineKm(req.origin, req.dest);
-  const detourCap = Math.max(directKm * 2.8 + 3, 5);
+  // Flatten every mode allowed for this profile into one set and run a single
+  // search. The pathfinder optimizes globally, so one pass over all modes
+  // returns the shortest plan directly — no rung-by-rung fallback needed.
+  const allowed = new Set<ModeKey>();
+  for (const rung of ladderFor(req.planKey)) {
+    for (const mode of rung) allowed.add(mode);
+  }
 
-  // Validation is a hard gate: we ONLY return a plan that passes simulation.
-  // An invalid plan (disconnected transfer, walk-limit breach, unverified leg)
-  // is never adapted or returned — the caller falls back to a verified taxi
-  // option instead of showing the user an impossible journey. Rungs are tried
-  // in preference order; the first valid, non-detour plan wins. If every valid
-  // plan detours, the least-detour one is returned rather than nothing.
-  let best: EnginePlan | null = null;
-  for (const allowed of rungs) {
-    const res = findRoute(graph, overlay, "origin", "dest", profile, allowed);
-    if (!res) continue;
-    const plan = reconstruct(graph, overlay, res, req.planKey, req.isArabic);
-    if (plan.legs.length === 0) continue;
-    if (!validatePlan(plan).ok) continue;
+  const res = findRoute(graph, overlay, "origin", "dest", profile, allowed);
+  if (!res) return null;
+  const plan = reconstruct(graph, overlay, res, req.planKey, req.isArabic);
+  if (plan.legs.length === 0) return null;
+  // Validation is a hard gate: an invalid plan (disconnected transfer,
+  // walk-limit breach, unverified leg) is never returned — the caller falls
+  // back to a verified taxi option instead of an impossible journey.
+  if (!validatePlan(plan).ok) return null;
 
-    // Tag connector legs with which on-street modes are swappable on the
-    // review screen. Tuktuk is only offered for economic profile legs that
-    // fall inside a heatmap zone.
-    for (const leg of plan.legs as (typeof plan.legs[number] & { allowedSwaps?: string[] })[]) {
-      if (leg.mode === "walk" || leg.mode === "taxi" || leg.mode === "tuktuk") {
-        leg.allowedSwaps = ["walk", "taxi"];
-        if (
-          req.planKey === "economic" &&
-          graph.heatPoints.some(
-            (hp) => hp.mode === "tuktuk" && haversineKm(leg.startCoord, hp.coord) <= hp.radiusKm,
-          )
-        ) {
-          leg.allowedSwaps.push("tuktuk");
-        }
+  // Tag connector legs with which on-street modes are swappable on the review
+  // screen. Tuktuk is only offered for economic profile legs inside a heatmap.
+  for (const leg of plan.legs as (typeof plan.legs[number] & { allowedSwaps?: string[] })[]) {
+    if (leg.mode === "walk" || leg.mode === "taxi" || leg.mode === "tuktuk") {
+      leg.allowedSwaps = ["walk", "taxi"];
+      if (
+        req.planKey === "economic" &&
+        graph.heatPoints.some(
+          (hp) => hp.mode === "tuktuk" && haversineKm(leg.startCoord, hp.coord) <= hp.radiusKm,
+        )
+      ) {
+        leg.allowedSwaps.push("tuktuk");
       }
     }
-
-    if (plan.distanceKm <= detourCap) return plan;
-    if (!best || plan.distanceKm < best.distanceKm) best = plan;
   }
-  return best;
+
+  return plan;
 }
 
 export async function planTripApi(req: PlanRequest) {
