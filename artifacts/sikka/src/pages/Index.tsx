@@ -50,6 +50,9 @@ const Index = () => {
   const [locationName, setLocationName] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Destination chosen by tapping the map (reverse-geocoded address shown for confirmation)
+  const [pickedDest, setPickedDest] = useState<{ lat: number; lng: number; name: string; loading: boolean } | null>(null);
+
   const [activeTrip, setActiveTrip] = useState<ActiveTripPlan | null>(null);
   const [currentSegIdx, setCurrentSegIdx] = useState(0);
   const [expanded, setExpanded] = useState(true);
@@ -248,6 +251,25 @@ const Index = () => {
     navigate(planUrl());
   };
 
+  // Tap anywhere on the map to choose a destination. Drops a pin, reverse-geocodes
+  // the chosen point into an address, and shows a confirmation card.
+  const handleMapClick = useCallback(async (evt: { lngLat: { lng: number; lat: number } }) => {
+    if (activeTrip || choiceOpen) return; // don't hijack taps while a trip guide or blocking dialog is open
+    const { lat, lng } = evt.lngLat;
+    setPickedDest({ lat, lng, name: '', loading: true });
+    const name = await reverseGeocode(lat, lng);
+    setPickedDest((prev) => (prev && prev.lat === lat && prev.lng === lng ? { ...prev, name, loading: false } : prev));
+  }, [activeTrip, choiceOpen]);
+
+  // Confirm the tapped destination — runs the exact same flow as a search selection.
+  const confirmPickedDest = () => {
+    if (!pickedDest) return;
+    const name = pickedDest.name || `${pickedDest.lat.toFixed(4)}, ${pickedDest.lng.toFixed(4)}`;
+    const dest = { place_name: name, center: [pickedDest.lng, pickedDest.lat] as [number, number] };
+    setPickedDest(null);
+    void handleDestinationSelect(dest);
+  };
+
   const handleSegmentReviewDone = () => {
     if (!activeTrip) return;
     if (currentSegIdx >= activeTrip.segments.length - 1) {
@@ -301,6 +323,8 @@ const Index = () => {
           ref={mapRef}
           {...viewState}
           onMove={(evt) => setViewState(evt.viewState)}
+          onClick={(evt) => { void handleMapClick(evt); }}
+          cursor={activeTrip ? undefined : 'crosshair'}
           mapboxAccessToken={MAPBOX_TOKEN}
           mapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
           style={{ width: '100%', height: '100%' }}
@@ -325,6 +349,12 @@ const Index = () => {
                 <div className="h-4 w-4 rounded-full bg-destructive border-2 border-white shadow" />
               </Marker>
             </>
+          )}
+
+          {!activeTrip && pickedDest && (
+            <Marker latitude={pickedDest.lat} longitude={pickedDest.lng} anchor="bottom">
+              <MapPin className="h-8 w-8 text-destructive drop-shadow-lg" fill="currentColor" strokeWidth={1.5} />
+            </Marker>
           )}
 
           {(userPos || userLocation) && (
@@ -388,26 +418,61 @@ const Index = () => {
       ) : (
         <div className="absolute bottom-6 left-4 right-4">
           <AnimatePresence mode="wait">
-            <motion.div
-              key="location"
-              initial={{ y: 20, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: 20, opacity: 0 }}
-              transition={{ delay: 0.3 }}
-              className="space-y-2"
-            >
-              {userLocation && (
-                <div className="bg-card/95 backdrop-blur-sm rounded-xl shadow-lg p-4 flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                    <Navigation className="h-5 w-5 text-primary" />
+            {pickedDest ? (
+              <motion.div
+                key="picked"
+                initial={{ y: 20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                exit={{ y: 20, opacity: 0 }}
+                className="bg-card/95 backdrop-blur-sm rounded-xl shadow-lg p-4 space-y-3"
+              >
+                <div className="flex items-start gap-3">
+                  <div className="h-10 w-10 rounded-full bg-destructive/10 flex items-center justify-center shrink-0">
+                    <MapPin className="h-5 w-5 text-destructive" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-foreground">{t('myLocation', language)}</p>
-                    <p className="text-xs text-muted-foreground truncate">{locationName || `${userLocation.lat.toFixed(4)}, ${userLocation.lng.toFixed(4)}`}</p>
+                    <p className="text-sm font-medium text-foreground">{t('chosenDestination', language)}</p>
+                    <p className="text-xs text-muted-foreground line-clamp-2">
+                      {pickedDest.loading
+                        ? t('locating', language)
+                        : pickedDest.name || `${pickedDest.lat.toFixed(4)}, ${pickedDest.lng.toFixed(4)}`}
+                    </p>
                   </div>
                 </div>
-              )}
-            </motion.div>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" className="flex-1 rounded-xl" onClick={() => setPickedDest(null)}>
+                    {t('cancel', language)}
+                  </Button>
+                  <Button className="flex-1 rounded-xl" onClick={confirmPickedDest} disabled={pickedDest.loading}>
+                    {t('planTripHere', language)}
+                  </Button>
+                </div>
+              </motion.div>
+            ) : (
+              <motion.div
+                key="location"
+                initial={{ y: 20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                exit={{ y: 20, opacity: 0 }}
+                transition={{ delay: 0.3 }}
+                className="space-y-2"
+              >
+                {userLocation && (
+                  <div className="bg-card/95 backdrop-blur-sm rounded-xl shadow-lg p-4 flex items-center gap-3">
+                    <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                      <Navigation className="h-5 w-5 text-primary" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-foreground">{t('myLocation', language)}</p>
+                      <p className="text-xs text-muted-foreground truncate">{locationName || `${userLocation.lat.toFixed(4)}, ${userLocation.lng.toFixed(4)}`}</p>
+                    </div>
+                  </div>
+                )}
+                <p className="text-center text-xs text-muted-foreground/90 bg-card/70 backdrop-blur-sm rounded-lg py-1.5 px-3 inline-block mx-auto w-full">
+                  {t('chooseOnMapHint', language)}
+                </p>
+              </motion.div>
+            )}
           </AnimatePresence>
         </div>
       )}

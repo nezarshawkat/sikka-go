@@ -21,3 +21,7 @@ description: How the active-trip guide, reviews/reports, and request auth work i
 
 # transport_types categorization
 - Columns `governmentType` ('government'|'private') and `category` ('economic'|'comfortable'|'premium') drive AI trip-type selection (economic/comfortable/premium). Seeded per type.
+
+## Choosing a destination on the home map
+- The home map (`Index.tsx`) supports picking a destination two ways: search autocomplete OR tapping the map. Both funnel through the SAME `handleDestinationSelect({ place_name, center: [lng, lat] })` (intercity-check → navigate to `/plan`). Add new destination sources by reusing that one entry point, not by duplicating the plan-navigation logic.
+- Map taps reverse-geocode via the in-file Mapbox `reverseGeocode(lat,lng)` helper and confirm via a card before planning (avoids accidental trips). Guard tap handling while `activeTrip` or a blocking dialog (e.g. intercity choice) is open.
