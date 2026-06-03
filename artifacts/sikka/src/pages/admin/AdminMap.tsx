@@ -6,8 +6,9 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { Search, Plus, Eye, EyeOff, Pencil, Trash2, Save, Flame, MapPin, Route as RouteIcon } from 'lucide-react';
-import Map, { Source, Layer, Marker, type MapLayerMouseEvent } from 'react-map-gl/mapbox';
-import 'mapbox-gl/dist/mapbox-gl.css';
+import Map, { Source, Layer, Marker, type MapLayerMouseEvent } from 'react-map-gl/maplibre';
+import 'maplibre-gl/dist/maplibre-gl.css';
+import { MAP_STYLE_DARK } from '@/hooks/useIsDark';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
@@ -505,8 +506,7 @@ const AdminMap = () => {
           {...viewState}
           onMove={evt => setViewState(evt.viewState)}
           onClick={handleMapClick}
-          mapboxAccessToken={MAPBOX_TOKEN}
-          mapStyle="mapbox://styles/mapbox/dark-v11"
+          mapStyle={MAP_STYLE_DARK}
           style={{ width: '100%', height: '100%' }}
           cursor={isDrawing || isHeatmapEditing ? 'crosshair' : 'grab'}
           interactiveLayerIds={routesGeoJSON.features.length ? ['route-lines'] : []}
@@ -522,7 +522,7 @@ const AdminMap = () => {
                   'symbol-spacing': 220,
                   'text-field': ['get', 'name'],
                   'text-size': 14,
-                  'text-font': ['DIN Pro Bold', 'Arial Unicode MS Bold'],
+                  'text-font': ['Noto Sans Bold'],
                   'text-allow-overlap': false,
                   'text-padding': 4,
                   'text-keep-upright': true,

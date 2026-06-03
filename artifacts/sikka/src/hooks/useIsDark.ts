@@ -21,5 +21,6 @@ export function useIsDark(): boolean {
   return isDark;
 }
 
-export const MAP_STYLE_LIGHT = 'mapbox://styles/mapbox/streets-v12';
-export const MAP_STYLE_DARK = 'mapbox://styles/mapbox/dark-v11';
+// OpenFreeMap vector styles — fully free, no API key required.
+export const MAP_STYLE_LIGHT = 'https://tiles.openfreemap.org/styles/liberty';
+export const MAP_STYLE_DARK = 'https://tiles.openfreemap.org/styles/dark';

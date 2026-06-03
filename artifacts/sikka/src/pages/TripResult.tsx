@@ -9,11 +9,9 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, Clock, Wallet, MapPin, RefreshCw, Check, Navigation, X, Info, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
-import Map, { Source, Layer, Marker } from 'react-map-gl/mapbox';
-import 'mapbox-gl/dist/mapbox-gl.css';
-import { getDirections } from '@/lib/routePaths';
-
-const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
+import Map, { Source, Layer, Marker } from 'react-map-gl/maplibre';
+import 'maplibre-gl/dist/maplibre-gl.css';
+import { useIsDark, MAP_STYLE_LIGHT, MAP_STYLE_DARK } from '@/hooks/useIsDark';
 
 interface Segment {
   transport_type_id: string; transport_name: string; start_name: string; end_name: string;
@@ -48,6 +46,7 @@ const TripResult = () => {
   const [isLoadingRoutes, setIsLoadingRoutes] = useState(false);
   const [popupSegIndex, setPopupSegIndex] = useState<number | null>(null);
   const watchRef = useRef<number | null>(null);
+  const isDark = useIsDark();
 
   useEffect(() => {
     const stored = sessionStorage.getItem('tripPlan');
@@ -55,8 +54,9 @@ const TripResult = () => {
     else navigate('/');
   }, [navigate]);
 
-  // Load actual road routes — prefer the AI-supplied geometry from the matched transit line
-  const loadRoutes = useCallback(async () => {
+  // Render the route geometry supplied by the backend directly — no client-side
+  // road snapping. Segments without geometry fall back to a straight line.
+  const loadRoutes = useCallback(() => {
     if (!plan) return;
     setIsLoadingRoutes(true);
     const results: { segIndex: number; coords: [number, number][] }[] = [];
@@ -64,19 +64,17 @@ const TripResult = () => {
     const segCount = plan.segments.length;
     for (let i = 0; i < segCount; i++) {
       const seg = plan.segments[i];
-      // If the AI matched this segment to a real transit line, use that geometry directly
+      // Use the backend-supplied geometry for this segment directly
       if (seg.route_geometry && seg.route_geometry.length >= 2) {
         results.push({ segIndex: i, coords: seg.route_geometry });
         continue;
       }
-      // Otherwise compute a road-snapped path between approximated start/end positions
+      // Otherwise draw a straight line between approximated start/end positions
       const startLng = plan.startLng + (plan.destLng - plan.startLng) * (i / segCount);
       const startLat = plan.startLat + (plan.destLat - plan.startLat) * (i / segCount);
       const endLng = plan.startLng + (plan.destLng - plan.startLng) * ((i + 1) / segCount);
       const endLat = plan.startLat + (plan.destLat - plan.startLat) * ((i + 1) / segCount);
-      const profile = seg.icon === 'walk' ? 'walking' : 'driving';
-      const coords = await getDirections([startLng, startLat], [endLng, endLat], profile);
-      results.push({ segIndex: i, coords });
+      results.push({ segIndex: i, coords: [[startLng, startLat], [endLng, endLat]] });
     }
 
     setRouteCoords(results);
@@ -203,8 +201,7 @@ const TripResult = () => {
           <motion.div initial={{ height: 0 }} animate={{ height: isTracking ? 420 : 320 }} exit={{ height: 0 }} className="overflow-hidden">
             <Map
               initialViewState={{ latitude: userPos?.lat || midLat, longitude: userPos?.lng || midLng, zoom: isTracking ? 14 : 11 }}
-              mapboxAccessToken={MAPBOX_TOKEN}
-              mapStyle="mapbox://styles/mapbox/streets-v12"
+              mapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
               style={{ width: '100%', height: isTracking ? 420 : 320 }}
               attributionControl={false}
             >
@@ -217,7 +214,7 @@ const TripResult = () => {
                 <Layer id="route-line" type="line"
                   paint={{ 'line-color': ['get', 'color'], 'line-width': 5, 'line-opacity': 0.85 }} />
                 <Layer id="route-line-labels" type="symbol"
-                  layout={{ 'symbol-placement': 'line', 'symbol-spacing': 200, 'text-field': ['get', 'name'], 'text-size': 13, 'text-font': ['DIN Pro Bold', 'Arial Unicode MS Bold'] }}
+                  layout={{ 'symbol-placement': 'line', 'symbol-spacing': 200, 'text-field': ['get', 'name'], 'text-size': 13, 'text-font': ['Noto Sans Bold'] }}
                   paint={{ 'text-color': '#fff', 'text-halo-color': ['get', 'color'], 'text-halo-width': 3 }} />
               </Source>
 

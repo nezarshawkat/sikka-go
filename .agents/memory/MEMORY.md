@@ -4,3 +4,4 @@
 - [Sikka bus route_path AI enrichment](sikka-bus-path-enrichment.md) — LLM-breadcrumb + driving-traffic pipeline forces buses onto main roads; route_path is display-only; run bulk job as a workflow w/ timeouts, not a detached bg process
 - [Sikka stop dictionary & route_path corruption](sikka-stop-dictionary.md) — route_path geometry is partly corrupt (failed geocodes → one downtown fallback); rail coords are curated in railStations.ts, never derived
 - [Sikka routing engine](sikka-routing-engine.md) — city trip planner is deterministic graph+Dijkstra over verified DB data ONLY, never invents routes; Pareto-label walk-budget search; taxi-only fallback; intercity flow is out of scope
+- [Sikka frontend map stack](sikka-frontend-map.md) — frontend renders via react-map-gl/maplibre + keyless OpenFreeMap; route_path drawn raw (no client snapping); remaining Mapbox = geocoding+admin authoring; test browser has no WebGL

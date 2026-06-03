@@ -5,11 +5,10 @@ import { t } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
 import { User, MapPin, Navigation } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import Map, { Marker, Source, Layer, type MapRef } from 'react-map-gl/mapbox';
-import 'mapbox-gl/dist/mapbox-gl.css';
+import Map, { Marker, Source, Layer, type MapRef } from 'react-map-gl/maplibre';
+import 'maplibre-gl/dist/maplibre-gl.css';
 import LocationAutocomplete from '@/components/LocationAutocomplete';
 import { useIsDark, MAP_STYLE_LIGHT, MAP_STYLE_DARK } from '@/hooks/useIsDark';
-import { getDirections } from '@/lib/routePaths';
 import { useTripTracking } from '@/hooks/useTripTracking';
 import TripGuideSheet, { type GuidePlan, type GuideSegment, type GuideAlternative } from '@/components/trip/TripGuideSheet';
 import SegmentReviewDialog, { type ReviewSegment } from '@/components/trip/SegmentReviewDialog';
@@ -117,8 +116,10 @@ const Index = () => {
     }
   }, []);
 
-  // Load road geometry for each segment of the active trip
-  const loadRoutes = useCallback(async (plan: ActiveTripPlan) => {
+  // Render the route geometry supplied by the backend directly — no client-side
+  // road snapping. Segments without geometry fall back to a straight line drawn
+  // between their approximated start/end positions along the trip.
+  const loadRoutes = useCallback((plan: ActiveTripPlan) => {
     const results: { segIndex: number; coords: [number, number][] }[] = [];
     const segCount = plan.segments.length;
     for (let i = 0; i < segCount; i++) {
@@ -131,9 +132,7 @@ const Index = () => {
       const startLat = plan.startLat + (plan.destLat - plan.startLat) * (i / segCount);
       const endLng = plan.startLng + (plan.destLng - plan.startLng) * ((i + 1) / segCount);
       const endLat = plan.startLat + (plan.destLat - plan.startLat) * ((i + 1) / segCount);
-      const profile = seg.icon === 'walk' ? 'walking' : 'driving';
-      const coords = await getDirections([startLng, startLat], [endLng, endLat], profile);
-      results.push({ segIndex: i, coords });
+      results.push({ segIndex: i, coords: [[startLng, startLat], [endLng, endLat]] });
     }
     setRouteCoords(results);
   }, []);
@@ -318,14 +317,12 @@ const Index = () => {
 
   return (
     <div className="h-screen w-screen relative overflow-hidden">
-      {MAPBOX_TOKEN ? (
         <Map
           ref={mapRef}
           {...viewState}
           onMove={(evt) => setViewState(evt.viewState)}
           onClick={(evt) => { void handleMapClick(evt); }}
           cursor={activeTrip ? undefined : 'crosshair'}
-          mapboxAccessToken={MAPBOX_TOKEN}
           mapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
           style={{ width: '100%', height: '100%' }}
           attributionControl={false}
@@ -335,7 +332,7 @@ const Index = () => {
               <Layer id="home-route-line" type="line"
                 paint={{ 'line-color': ['get', 'color'], 'line-width': 5, 'line-opacity': 0.85 }} />
               <Layer id="home-route-labels" type="symbol"
-                layout={{ 'symbol-placement': 'line', 'symbol-spacing': 200, 'text-field': ['get', 'name'], 'text-size': 13, 'text-font': ['DIN Pro Bold', 'Arial Unicode MS Bold'] }}
+                layout={{ 'symbol-placement': 'line', 'symbol-spacing': 200, 'text-field': ['get', 'name'], 'text-size': 13, 'text-font': ['Noto Sans Bold'] }}
                 paint={{ 'text-color': '#fff', 'text-halo-color': ['get', 'color'], 'text-halo-width': 3 }} />
             </Source>
           )}
@@ -366,14 +363,6 @@ const Index = () => {
             </Marker>
           )}
         </Map>
-      ) : (
-        <div className="h-full w-full bg-muted flex items-center justify-center">
-          <div className="text-center text-muted-foreground">
-            <MapPin className="h-12 w-12 mx-auto mb-2" />
-            <p className="text-sm">Map requires Mapbox token</p>
-          </div>
-        </div>
-      )}
 
       {/* Search bar overlay */}
       <div className="absolute top-0 left-0 right-0 p-4 safe-area-top z-20">
