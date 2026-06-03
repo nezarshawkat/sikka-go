@@ -101,6 +101,37 @@ from `pathLengthKm(route_path)` — some stored polylines are noisy/corrupt and
 inflate distance wildly (saw a 162 km Maadi→Heliopolis metro leg). The polyline
 is kept for map display only.
 
+## Pre-delivery validation gates + geometry stitching
+`validatePlan(plan, graph?)` is the hard gate before any plan is returned. Beyond
+basic connectivity it enforces, for transit legs only (CONNECTOR_MODES walk/taxi/
+tuktuk are exempt): `stop_not_on_line` (board/alight coord must be ≤300m from the
+line's road-snapped `path`, not just its stop list — checking the path is the
+meaningful test; vs the stops list is trivially true), `geometry_cut` (two adjacent
+transit legs' drawn polyline endpoints must be ≤50m apart), `unbridgeable_transfer`
+(adjacent transit legs' logical transfer ≤800m). `stop_not_on_line` measures
+point-to-SEGMENT distance to the path (not nearest-vertex) so sparse polylines
+don't false-reject. Slicing uses each stop's authoritative `pathIndex` (falls back
+to nearest-vertex only if missing). `adaptPlanToApi` runs `stitchSegmentGeometry`:
+it ONLY reshapes connector legs — a connector endpoint is moved to the adjacent
+transit endpoint, and first/last is pinned to origin/dest only when that boundary
+leg is itself a connector. Transit↔transit boundaries are NEVER snapped (moving a
+transit vertex would alter a fixed route); a real transit-transit cut is left
+intact and rejected by `geometry_cut` (50m) instead.
+
+**Why:** users saw map polylines that cut/teleported and routes on lines whose
+stored geometry doesn't actually serve the boarded stop (the known partly-corrupt
+`route_path` data — see sikka-stop-dictionary.md). The rule "never alter a fixed
+route, only board/alight may change" means we cannot fake continuity by moving a
+transit vertex — so a plan with a real transit-transit cut is REJECTED, not patched.
+
+**How to apply:** when these gates reject every transit candidate, `computeEnginePlan`
+returns null and the route layer (`tripPlan.ts`) serves `generateFallbackPlan` (a
+verified door-to-door taxi) — the app never shows a blank/"no route". This is the
+intended reliability tradeoff (reject unreliable transit, serve a real fallback);
+re-enriching the corrupt paths is separate work, not a reason to loosen the gates.
+Geometry_cut is intentionally scoped to transit-transit pairs only (connector gaps
+are closed by the stitch pass), which deviates from a naive "all boundaries" reading.
+
 ## Scope boundary
 The intercity flow (`buildIntercityPlan`, SuperJet/GoBus/BlueBus adapters) is a
 SEPARATE feature. Its synthetic-estimate fallback when adapters return no live

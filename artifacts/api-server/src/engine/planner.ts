@@ -225,16 +225,39 @@ function reconstruct(
       const startStop = boardLs?.stopIndex != null ? line.stops[boardLs.stopIndex] : line.stops[0];
       const endStop = endLs?.stopIndex != null ? line.stops[endLs.stopIndex] : line.stops[line.stops.length - 1];
 
-      // Robust bidirectional geometry slice from high-res path.
+      // Geometry slice from the high-res path. Travel direction is derived from
+      // the true stop sequence (not path-index magnitude) so a line ridden
+      // against its stored orientation still renders in the rider's direction.
+      // The stored route_path is NEVER reshaped — only sliced and, when riding
+      // in reverse, flipped — so a transport's fixed route cannot be altered.
       let geometry: [number, number][] = [];
       if (line.path && line.path.length > 0) {
-        const fromPathIdx = findClosestPathIndex(line.path, startStop.coord);
-        const toPathIdx = findClosestPathIndex(line.path, endStop.coord);
-        if (fromPathIdx <= toPathIdx) {
-          geometry = line.path.slice(fromPathIdx, toPathIdx + 1);
-        } else {
-          geometry = line.path.slice(toPathIdx, fromPathIdx + 1).reverse();
+        // Prefer each stop's authoritative pathIndex (set at graph build from the
+        // stop's true position along route_path); only fall back to nearest-vertex
+        // search when an index is missing/out of range. This avoids picking the
+        // wrong arc on looped or self-near paths.
+        const N = line.path.length;
+        const inRange = (i: number | undefined): i is number =>
+          typeof i === "number" && i >= 0 && i < N;
+        const fromPathIdx = inRange(startStop.pathIndex)
+          ? startStop.pathIndex
+          : findClosestPathIndex(line.path, startStop.coord);
+        const toPathIdx = inRange(endStop.pathIndex)
+          ? endStop.pathIndex
+          : findClosestPathIndex(line.path, endStop.coord);
+        const lo = Math.min(fromPathIdx, toPathIdx);
+        const hi = Math.max(fromPathIdx, toPathIdx);
+        let slice = line.path.slice(lo, hi + 1);
+        // Degenerate slice (both stops resolve to one path vertex on a coarse
+        // path): widen to a 2-point window taken FROM the stored path rather than
+        // synthesizing a straight line between stop coords — the leg must stay on
+        // the real fixed route.
+        if (slice.length < 2) {
+          const a = Math.max(0, Math.min(lo, N - 2));
+          slice = line.path.slice(a, a + 2);
         }
+        const isForward = (boardLs?.stopIndex ?? 0) <= (endLs?.stopIndex ?? 0);
+        geometry = isForward ? slice : slice.slice().reverse();
       }
 
       const rideTime = rides.reduce((s, r) => s + r.timeMin, 0);
@@ -351,8 +374,21 @@ function legInstructions(leg: PlanLeg, type: TransportTypeInfo | null, isArabic:
   ];
 }
 
+// Straight-line fallback for a connector whose snap failed: a few linearly
+// interpolated points between the leg's OWN endpoints. Never routes through a
+// fixed city centroid (which would warp cross-city legs across Cairo).
+function interpolateLine(a: Coord, b: Coord, n = 5): number[][] {
+  const pts: number[][] = [];
+  for (let k = 0; k < n; k++) {
+    const t = n === 1 ? 0 : k / (n - 1);
+    pts.push([a.lng + (b.lng - a.lng) * t, a.lat + (b.lat - a.lat) * t]);
+  }
+  return pts;
+}
+
 // Snap connector legs to the street network; pin start/end after snapping so the
-// polyline anchors exactly at the logical endpoints. Falls back to straight line.
+// polyline anchors exactly at the logical endpoints. On failure, fall back to a
+// localized interpolated straight line (not the stored 2-point straight line).
 async function onStreetGeometry(leg: PlanLeg): Promise<number[][]> {
   if (leg.mode === "walk" || leg.mode === "taxi" || leg.mode === "tuktuk") {
     const profile = leg.mode === "walk" ? "walking" : "driving";
@@ -370,8 +406,54 @@ async function onStreetGeometry(leg: PlanLeg): Promise<number[][]> {
     } catch (e) {
       console.error("Connector snapped geometry lookup failed", e);
     }
+    return interpolateLine(leg.startCoord, leg.endCoord);
   }
   return leg.geometry;
+}
+
+const STITCH_CONNECTOR_MODES = new Set<ModeKey>(["walk", "taxi", "tuktuk"]);
+
+// Eliminate visual cuts between consecutive segment polylines WITHOUT ever
+// altering a fixed transit route. Only flexible connector legs (walk/taxi/tuktuk)
+// are reshaped: a connector endpoint is moved to meet the adjacent transit
+// polyline, and the journey's very first/last point is pinned to the true
+// origin/destination ONLY when that boundary leg is itself a connector. Two
+// adjacent transit polylines are NEVER snapped — moving a transit vertex would
+// change a fixed route — so a real transit↔transit gap is left intact and
+// rejected by validatePlan (geometry_cut) instead of being papered over.
+function stitchSegmentGeometry(
+  segments: { route_geometry: number[][] }[],
+  legs: PlanLeg[],
+): void {
+  if (segments.length && legs.length) {
+    const first = segments[0].route_geometry;
+    if (first?.length && STITCH_CONNECTOR_MODES.has(legs[0].mode)) {
+      first[0] = [legs[0].startCoord.lng, legs[0].startCoord.lat];
+    }
+    const last = segments[segments.length - 1].route_geometry;
+    const lastLeg = legs[legs.length - 1];
+    if (last?.length && STITCH_CONNECTOR_MODES.has(lastLeg.mode)) {
+      last[last.length - 1] = [lastLeg.endCoord.lng, lastLeg.endCoord.lat];
+    }
+  }
+  for (let i = 0; i < segments.length - 1; i++) {
+    const a = segments[i].route_geometry;
+    const b = segments[i + 1].route_geometry;
+    if (!a?.length || !b?.length) continue;
+    const aEnd = a[a.length - 1];
+    const bStart = b[0];
+    const aConn = STITCH_CONNECTOR_MODES.has(legs[i].mode);
+    const bConn = STITCH_CONNECTOR_MODES.has(legs[i + 1].mode);
+    // Move only the connector side(s). Transit↔transit (neither connector) is
+    // left untouched on purpose.
+    if (aConn && !bConn) {
+      a[a.length - 1] = [bStart[0], bStart[1]];
+    } else if (!aConn && bConn) {
+      b[0] = [aEnd[0], aEnd[1]];
+    } else if (aConn && bConn) {
+      b[0] = [aEnd[0], aEnd[1]];
+    }
+  }
 }
 
 export async function adaptPlanToApi(graph: TransitGraph, plan: EnginePlan, isArabic: boolean) {
@@ -406,6 +488,8 @@ export async function adaptPlanToApi(graph: TransitGraph, plan: EnginePlan, isAr
     };
   }));
 
+  stitchSegmentGeometry(segments, plan.legs);
+
   return {
     segments, total_cost_egp: Math.round(plan.totalCostEgp),
     total_duration_minutes: Math.max(1, Math.round(plan.totalTimeMin)),
@@ -435,7 +519,7 @@ export async function computeEnginePlan(req: PlanRequest): Promise<EnginePlan | 
     const plan = reconstruct(graph, overlay, res, req.planKey, req.isArabic);
     if (!plan || plan.legs.length === 0) continue;
 
-    if (validatePlan(plan).ok) {
+    if (validatePlan(plan, graph).ok) {
       bestPlan = plan;
       break;
     }
@@ -450,7 +534,7 @@ export async function computeEnginePlan(req: PlanRequest): Promise<EnginePlan | 
     const res = findRoute(graph, overlay, "origin", "dest", profile, fallbackAllowed);
     if (res) {
       const plan = reconstruct(graph, overlay, res, req.planKey, req.isArabic);
-      if (plan && plan.legs.length > 0 && validatePlan(plan).ok) {
+      if (plan && plan.legs.length > 0 && validatePlan(plan, graph).ok) {
         bestPlan = plan;
       }
     }
