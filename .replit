@@ -43,6 +43,7 @@ externalPort = 3002
 
 [userenv.shared]
 VITE_CLERK_PUBLISHABLE_KEY = "pk_test_Y2hhcm1lZC1nYXItMjMuY2xlcmsuYWNjb3VudHMuZGV2JA"
+MAPBOX_TOKEN = "pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ"
 
 [userenv.development]
 
