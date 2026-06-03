@@ -30,7 +30,7 @@ export async function geocodeStop(
     + `&proximity=${proximity}`;
 
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
     if (!res.ok) return null;
     const data = await res.json() as { features?: Array<{ center: [number, number] }> };
     if (!data.features?.length) return null;

@@ -9,7 +9,7 @@ import { db } from "@workspace/db";
 import { transportTypesTable, transitLinesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { requireAdmin } from "../middlewares/requireAdmin";
-import { buildRoutePath } from "../utils/routePathGenerator";
+import { buildBusRoutePathAI } from "../utils/busPathEnricher";
 
 const router = Router();
 
@@ -358,7 +358,7 @@ router.post("/", requireAdmin, async (req, res) => {
       let routePath = null;
       if (generatePaths && !line.hasFixedStops) {
         try {
-          routePath = await buildRoutePath(line.from, line.to, line.via, "Cairo");
+          routePath = (await buildBusRoutePathAI(line.from, line.to, line.via, "Cairo")).routePath;
         } catch { /* continue without path */ }
       }
 

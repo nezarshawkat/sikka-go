@@ -18,6 +18,7 @@ async function buildAll() {
     entryPoints: [
       path.resolve(artifactDir, "src/index.ts"),
       path.resolve(artifactDir, "src/scripts/importStops.ts"),
+      path.resolve(artifactDir, "src/scripts/enrichBusPaths.ts"),
     ],
     platform: "node",
     bundle: true,

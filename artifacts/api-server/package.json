@@ -8,6 +8,7 @@
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "seed:stops": "node --enable-source-maps ./dist/scripts/importStops.mjs",
+    "enrich:bus-paths": "node --enable-source-maps ./dist/scripts/enrichBusPaths.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -22,6 +23,7 @@
     "express": "^5",
     "http-proxy-middleware": "^3.0.5",
     "jsonwebtoken": "^9.0.3",
+    "openai": "^6.41.0",
     "pino": "^9",
     "pino-http": "^10"
   },
