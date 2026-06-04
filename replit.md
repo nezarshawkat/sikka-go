@@ -63,7 +63,7 @@ All Drizzle columns use camelCase in JS/TS. API responses are camelCase.
 - `trips`, `trip_segments`, `reviews`, `transport_heatmaps`
 - `trip_notifications`, `trip_shares`
 
-**Unique constraint**: `transit_lines(transport_type_id, line_number)` — added to prevent duplicate route entries.
+**No unique constraint on `transit_lines`** (only PK on `id`). `line_number` is intentionally non-unique: it is nullable for microbuses and is legitimately shared across routes (e.g. dual-number merges like `"123 / 456"`, and the same number reused in different governorates). Do not assume `(transport_type_id, line_number)` is unique.
 
 **`transit_lines.governorate`** (text, default 'Cairo') — drives the admin map's governorate filter; the "All stations" selector derives unique stop strings from `via_stops`/`from_area`/`to_area` of lines in the active governorate.
 
@@ -71,14 +71,14 @@ All Drizzle columns use camelCase in JS/TS. API responses are camelCase.
 
 | Name | Arabic | Price | Routes |
 |---|---|---|---|
-| Metro | مترو | fixed | 77 stop-pair routes (Lines 1-3) |
+| Metro | مترو | fixed | 3 GTFS lines (M1/M2/M3, named stations + real geometry) |
 | Train | قطار | fixed | 28 intercity routes |
 | Monorail | مونوريل | fixed | 16 stop-pair routes |
-| NTA Bus | أتوبيس النقل الجماعي | 19 EGP | 110 Cairo routes |
-| CTA Bus | أتوبيس الهيئة | 13 EGP | 31 Alexandria (APTA) routes |
-| Serfis | سرفيس | 5 EGP + 0.5/km | 20 Cairo routes |
+| NTA Bus | أتوبيس النقل الجماعي | 19 EGP | 177 routes (149 legacy + 28 GTFS CTA) |
+| CTA Bus | أتوبيس الهيئة | 13 EGP | 146 routes (Alexandria APTA + legacy Cairo CTA, untouched by GTFS) |
+| Serfis | سرفيس | 5 EGP + 0.5/km | 61 routes (36 legacy + 25 GTFS CTA_M/COOP) |
 | Bus (CTA) | أتوبيس الهيئة | legacy | 0 (legacy type, superseded by CTA Bus) |
-| Microbus | ميكروباص | variable | variable routes via stops |
+| Microbus | ميكروباص | variable | 187 routes (26 legacy + 161 GTFS BOX/P_B_8/P_O_14) |
 | Tuktuk | توك توك | heatmap only | no fixed routes |
 | White Taxi | تاكسي أبيض | heatmap only | no fixed routes |
 | Uber / Careem | أوبر / كريم | dynamic | always provided as AI fallback |
@@ -93,6 +93,8 @@ All Drizzle columns use camelCase in JS/TS. API responses are camelCase.
 | `POST /api/admin/seed-cairo?generatePaths=true` | Also geocode + snap to roads via Mapbox |
 | `POST /api/admin/seed-alexandria` | Alexandria APTA routes (CTA Bus type, 31 routes) |
 | `POST /api/admin/seed-alexandria?generatePaths=true` | Also geocode + snap to roads |
+| `POST /api/admin/seed-gtfs` | Import authoritative Transport-for-Cairo GTFS (Metro replace + bus/serfis/microbus merge) |
+| `POST /api/admin/seed-gtfs?dryRun=true` | Report what GTFS import would change without writing |
 
 ### Deterministic Routing Engine (`artifacts/api-server/src/engine/`)
 
@@ -105,6 +107,16 @@ All Drizzle columns use camelCase in JS/TS. API responses are camelCase.
 - **Fares** (`cost.ts`): `FARE_MARKUP` (1.25) is applied once each in `directFare`/`boardingFare`/`rideCostPerKm`, so transit + taxi/tuktuk fares rise together. API `budget_range` is `min*0.8 / max*1.6` (estimate band, not exact fare).
 - **Detour cap**: a plan's total distance must stay under `max(directKm*2.8 + 3, 5)` km; otherwise the least-distance valid plan is returned. `validatePlan` is a hard gate — only valid plans are returned, else the caller falls back to a verified taxi option.
 - Leg distance is computed from consecutive `line.stops[]` haversine (NOT from the stored `route_path` polyline, which can be noisy); the polyline is for map display only.
+
+### GTFS Import (Transport-for-Cairo)
+
+`POST /api/admin/seed-gtfs` imports the authoritative Transport-for-Cairo GTFS feed (GCR Digital Cairo 2017 — `20180906_GTFSfullworking_Bus_Metro`). Source data is vendored compact at `artifacts/api-server/src/data/gtfsCairo.json` (3 metro lines + 214 bus/paratransit routes, each with real shape geometry); generated once from the feed, no runtime dependency on the raw CSVs. Core logic is `runGtfsImport()` in `routes/seedGtfs.ts`, also runnable as a build script (`node dist/scripts/runGtfsImport.mjs [--apply]`, dry-run by default).
+
+- **Agency → type mapping** (all target types pre-exist): `NAT`→Metro, `CTA`→NTA Bus, `CTA_M`+`COOP`→Serfis, `P_O_14`+`P_B_8`+`BOX`→Microbus.
+- **Metro = full replace**: existing Metro lines are deleted and replaced by the 3 GTFS lines (`hasFixedStops=true`, ordered named stations in `via_stops`, real `route_path`); station `locations` are upserted (isStation=true).
+- **Bus/Serfis/Microbus = insert + keep**: every GTFS route is inserted; every existing non-covered line is KEPT. When a GTFS route matches an existing same-type line by endpoint proximity (≤1.5 km, either orientation) it is merged into one line carrying BOTH numbers (`"<gtfs#> / <old#>"`) and the authoritative GTFS geometry. In the current feed the GTFS bus routes cover satellite cities (6th October, 10th Ramadan, New Cairo) that don't overlap the legacy central-Cairo data, so no merges occur — all legacy lines are retained.
+- **CTA Bus type (Alexandria) and Monorail are untouched.**
+- GTFS geometry appears on the map automatically: `AdminMap` renders every line's `route_path`, and the routing engine uses it for trip legs.
 
 ### Route Path Generation
 

@@ -16,6 +16,7 @@ import seedAlexandriaRouter from "./seedAlexandria";
 import seedFromCSVRouter from "./seedFromCSV";
 import seedHeatmapsRouter from "./seedHeatmaps";
 import seedStopsRouter from "./seedStops";
+import seedGtfsRouter from "./seedGtfs";
 import reEnrichRoutesRouter from "./reEnrichRoutes";
 import intercityRouter from "./intercity";
 import reportsRouter from "./reports";
@@ -56,6 +57,9 @@ router.use("/admin/seed-from-csv", seedFromCSVRouter);
 router.use("/admin/seed-heatmaps", seedHeatmapsRouter);
 // POST /api/admin/seed-stops — geo-located stop dictionary (locations + mawaqef) + microbus coverage
 router.use("/admin/seed-stops", seedStopsRouter);
+// POST /api/admin/seed-gtfs — authoritative Transport-for-Cairo GTFS (Metro replace + bus/serfis/microbus merge)
+// POST /api/admin/seed-gtfs?dryRun=true — report changes without writing
+router.use("/admin/seed-gtfs", seedGtfsRouter);
 // POST /api/admin/re-enrich-routes?transportMode=bus&limit=N&offset=M
 //   — small incremental batches re-snapping board-anywhere route_path to main streets
 router.use("/admin/re-enrich-routes", reEnrichRoutesRouter);

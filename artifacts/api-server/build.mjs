@@ -19,6 +19,7 @@ async function buildAll() {
       path.resolve(artifactDir, "src/index.ts"),
       path.resolve(artifactDir, "src/scripts/importStops.ts"),
       path.resolve(artifactDir, "src/scripts/enrichBusPaths.ts"),
+      path.resolve(artifactDir, "src/scripts/runGtfsImport.ts"),
     ],
     platform: "node",
     bundle: true,
