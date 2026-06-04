@@ -9,7 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, Clock, Wallet, MapPin, RefreshCw, Check, Navigation, X, Info, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
-import Map, { Marker } from 'react-map-gl/maplibre';
+import Map, { Marker, type MapRef } from 'react-map-gl/maplibre';
 import RouteLayers from '@/components/RouteLayers';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { useIsDark, MAP_STYLE_LIGHT, MAP_STYLE_DARK } from '@/hooks/useIsDark';
@@ -18,11 +18,11 @@ interface Segment {
   transport_type_id: string; transport_name: string; start_name: string; end_name: string;
   cost_egp: number; duration_minutes: number; color: string; icon: string;
   alternatives: Alternative[];
-  line_id?: string | null; line_number?: string; info?: string;
+  line_id?: string | null; line_number?: string | null; info?: string; instructions?: string[];
   route_geometry?: [number, number][] | null;
 }
 interface Alternative {
-  transport_type_id: string; transport_name: string; cost_egp: number; duration_minutes: number; color: string; icon: string; line_number?: string;
+  transport_type_id: string; transport_name: string; cost_egp: number; duration_minutes: number; color: string; icon: string; line_id?: string | null; line_number?: string | null; info?: string; instructions?: string[]; route_geometry?: [number, number][] | null;
 }
 interface TripPlanData {
   segments: Segment[]; total_cost_egp: number; total_duration_minutes: number;
@@ -39,7 +39,7 @@ const TripResult = () => {
   const { language } = useAuth();
   const [plan, setPlan] = useState<TripPlanData | null>(null);
   const [swapIndex, setSwapIndex] = useState<number | null>(null);
-  const [showMap, setShowMap] = useState(false);
+  const [showMap, setShowMap] = useState(true);
   const [isTracking, setIsTracking] = useState(false);
   const [userPos, setUserPos] = useState<{ lat: number; lng: number } | null>(null);
   const [currentSegIndex, setCurrentSegIndex] = useState(0);
@@ -47,6 +47,7 @@ const TripResult = () => {
   const [isLoadingRoutes, setIsLoadingRoutes] = useState(false);
   const [popupSegIndex, setPopupSegIndex] = useState<number | null>(null);
   const watchRef = useRef<number | null>(null);
+  const mapRef = useRef<MapRef | null>(null);
   const isDark = useIsDark();
 
   useEffect(() => {
@@ -82,7 +83,7 @@ const TripResult = () => {
     setIsLoadingRoutes(false);
   }, [plan]);
 
-  useEffect(() => { if (plan && showMap && routeCoords.length === 0) loadRoutes(); }, [plan, showMap, loadRoutes, routeCoords.length]);
+  useEffect(() => { if (plan) loadRoutes(); }, [plan, loadRoutes]);
 
   const startTracking = useCallback(() => {
     setIsTracking(true);
@@ -102,6 +103,18 @@ const TripResult = () => {
     return () => { if (watchRef.current) navigator.geolocation.clearWatch(watchRef.current); };
   }, []);
 
+  useEffect(() => {
+    if (!routeCoords.length || !mapRef.current) return;
+    let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
+    routeCoords.forEach(({ coords }) => coords.forEach(([lng, lat]) => {
+      minLng = Math.min(minLng, lng); maxLng = Math.max(maxLng, lng);
+      minLat = Math.min(minLat, lat); maxLat = Math.max(maxLat, lat);
+    }));
+    if (Number.isFinite(minLng)) {
+      try { mapRef.current.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 48, duration: 600 }); } catch {}
+    }
+  }, [routeCoords]);
+
   const stopTracking = () => {
     setIsTracking(false);
     if (watchRef.current) navigator.geolocation.clearWatch(watchRef.current);
@@ -111,11 +124,28 @@ const TripResult = () => {
     if (!plan) return;
     const newSegments = [...plan.segments];
     const oldSeg = newSegments[segIndex];
-    newSegments[segIndex] = { ...oldSeg, transport_type_id: alt.transport_type_id, transport_name: alt.transport_name, cost_egp: alt.cost_egp, duration_minutes: alt.duration_minutes, color: alt.color, icon: alt.icon, line_number: alt.line_number || '' };
+    newSegments[segIndex] = {
+      ...oldSeg,
+      transport_type_id: alt.transport_type_id,
+      transport_name: alt.transport_name,
+      cost_egp: alt.cost_egp,
+      duration_minutes: alt.duration_minutes,
+      color: alt.color,
+      icon: alt.icon,
+      line_id: alt.line_id ?? null,
+      line_number: alt.line_number || '',
+      info: alt.info ?? oldSeg.info,
+      instructions: alt.instructions ?? oldSeg.instructions,
+      route_geometry: alt.route_geometry && alt.route_geometry.length >= 2 ? alt.route_geometry : oldSeg.route_geometry,
+    };
     const newTotal = newSegments.reduce((s, seg) => s + seg.cost_egp, 0);
     const newTime = newSegments.reduce((s, seg) => s + seg.duration_minutes, 0);
-    setPlan({ ...plan, segments: newSegments, total_cost_egp: newTotal, total_duration_minutes: newTime });
+    const updated = { ...plan, segments: newSegments, total_cost_egp: newTotal, total_duration_minutes: newTime };
+    setPlan(updated);
+    sessionStorage.setItem('tripPlan', JSON.stringify(updated));
+    setRouteCoords((prev) => prev.map((r) => r.segIndex === segIndex && alt.route_geometry?.length ? { ...r, coords: alt.route_geometry! } : r));
     setSwapIndex(null);
+    setPopupSegIndex(segIndex);
     toast.success(t('planUpdated', language));
   };
 
@@ -201,6 +231,7 @@ const TripResult = () => {
         {(showMap || isTracking) && (
           <motion.div initial={{ height: 0 }} animate={{ height: isTracking ? 420 : 320 }} exit={{ height: 0 }} className="overflow-hidden">
             <Map
+              ref={mapRef}
               initialViewState={{ latitude: userPos?.lat || midLat, longitude: userPos?.lng || midLng, zoom: isTracking ? 14 : 11 }}
               mapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
               style={{ width: '100%', height: isTracking ? 420 : 320 }}
@@ -234,7 +265,7 @@ const TripResult = () => {
               {/* Popup-like Marker for clicked segment */}
               {popupSeg && popupMid && (
                 <Marker latitude={popupMid[1]} longitude={popupMid[0]} anchor="bottom" offset={[0, -36]}>
-                  <div className="bg-card border rounded-lg shadow-xl p-3 w-64 text-foreground relative">
+                  <div className="bg-card/90 backdrop-blur-xl border rounded-[1.75rem] shadow-2xl p-4 w-72 text-foreground relative">
                     <button onClick={() => setPopupSegIndex(null)} className="absolute top-1 right-1 h-5 w-5 rounded-full hover:bg-accent flex items-center justify-center">
                       <X className="h-3 w-3" />
                     </button>
@@ -252,7 +283,17 @@ const TripResult = () => {
                       <span>⏱ {Math.round(popupSeg.duration_minutes)} min</span>
                       <span>💰 {Math.round(popupSeg.cost_egp)} EGP</span>
                     </div>
-                    {popupSeg.info && <p className="text-[11px] text-muted-foreground border-t pt-1 mt-2">{popupSeg.info}</p>}
+                    {popupSeg.info && <p className="text-[11px] text-muted-foreground border-t pt-2 mt-2">{popupSeg.info}</p>}
+                    {popupSeg.instructions?.length ? (
+                      <ol className="mt-2 space-y-1.5 border-t pt-2">
+                        {popupSeg.instructions.slice(0, 4).map((ins, idx) => (
+                          <li key={idx} className="flex gap-2 text-[11px] leading-snug">
+                            <span className="h-4 w-4 rounded-full bg-primary/15 text-primary text-[10px] font-bold flex items-center justify-center shrink-0">{idx + 1}</span>
+                            <span>{ins}</span>
+                          </li>
+                        ))}
+                      </ol>
+                    ) : null}
                   </div>
                 </Marker>
               )}
@@ -311,7 +352,7 @@ const TripResult = () => {
                 <div className="w-0.5 h-full" style={{ backgroundColor: seg.color }} />
               </div>
               <div className="flex-1">
-                <Card className="border-l-4" style={{ borderLeftColor: seg.color }}>
+                <Card className="border-l-4 bg-card/80 backdrop-blur-xl" style={{ borderLeftColor: seg.color }}>
                   <CardContent className="p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2 min-w-0">
@@ -355,7 +396,7 @@ const TripResult = () => {
                             <p className="text-xs text-muted-foreground font-medium">{t('alternativeOptions', language)}:</p>
                             {seg.alternatives.map((alt, j) => (
                               <button key={j} onClick={() => handleSwap(i, alt)}
-                                className="w-full flex items-center justify-between p-2 rounded-lg hover:bg-accent/50 transition-colors">
+                                className="w-full flex items-center justify-between gap-3 p-3 rounded-2xl bg-background/45 hover:bg-accent/20 backdrop-blur transition-colors">
                                 <div className="flex items-center gap-2">
                                   <span className="text-lg">{getIcon(alt.icon)}</span>
                                   {alt.line_number && <Badge variant="outline" className="text-[10px] h-4 px-1">{alt.line_number}</Badge>}
@@ -386,7 +427,7 @@ const TripResult = () => {
 
       {!isTracking && (
         <div className="sticky bottom-0 p-4 bg-card/95 backdrop-blur-sm border-t">
-          <Button className="w-full h-14 text-base rounded-xl gap-2" onClick={() => navigate('/')}>
+          <Button className="w-full h-14 text-base rounded-2xl gap-2" onClick={() => navigate('/')}>
             <Navigation className="h-5 w-5" />
             {t('startGuide', language)}
           </Button>

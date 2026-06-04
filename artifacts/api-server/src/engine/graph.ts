@@ -319,11 +319,14 @@ export async function buildGraph(force = false): Promise<TransitGraph> {
       });
     });
 
+    const gtfsQualityBias = line.pathSuspect ? 1.25 : (line.path?.length ?? 0) >= 50 ? 0.9 : 1;
     for (let i = 0; i < line.stops.length - 1; i++) {
       const a = line.stops[i];
       const b = line.stops[i + 1];
       const dist = Math.max(0.05, haversineKm(a.coord, b.coord));
-      const timeMin = (dist / Math.max(8, type.speedKmh)) * 60;
+      // Dense, non-suspect route_path geometry is normally from the GTFS import,
+      // so it gets a small weight advantage over hand-entered/noisy alternatives.
+      const timeMin = ((dist / Math.max(8, type.speedKmh)) * 60) * gtfsQualityBias;
       const cost = perKm * dist;
       addEdge(edges, lsIds[i], {
         to: lsIds[i + 1],

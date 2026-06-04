@@ -38,6 +38,63 @@ function pickType(graph: TransitGraph, mode: ModeKey, prefer?: RegExp): Transpor
   return all[0] ?? null;
 }
 
+function allowedModesForPlan(planKey: PlanKey): Set<ModeKey> {
+  if (planKey === "economic") {
+    return new Set(["metro", "monorail", "train", "bus", "serfis", "microbus", "tuktuk"]);
+  }
+  if (planKey === "comfortable") {
+    // Comfortable should not use GTFS/private microbuses; it favors fixed and larger shared modes.
+    return new Set(["metro", "monorail", "train", "bus", "serfis", "taxi", "tuktuk"]);
+  }
+  return new Set(["metro", "monorail", "train", "bus", "serfis", "taxi", "tuktuk"]);
+}
+
+function isConnectorMode(mode: ModeKey): boolean {
+  return mode === "walk" || mode === "taxi" || mode === "tuktuk";
+}
+
+function connectorLabel(mode: ModeKey, graph: TransitGraph, isArabic: boolean): { id: string; name: string; color: string; icon: string } | null {
+  if (mode === "walk") return { id: "walk", name: isArabic ? "مشي" : "Walk", color: "#64748B", icon: "walk" };
+  const type = pickType(graph, mode, mode === "taxi" ? /uber|careem|taxi/i : undefined);
+  if (!type) return null;
+  return { id: type.id, name: isArabic ? type.nameAr : type.nameEn, color: type.color, icon: UI_ICON[mode] };
+}
+
+function pointToSegmentKm(c: Coord, a: [number, number], b: [number, number]): number {
+  const R = 6371;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const cosLat = Math.cos(toRad(c.lat));
+  const ax = toRad(a[0] - c.lng) * cosLat * R;
+  const ay = toRad(a[1] - c.lat) * R;
+  const bx = toRad(b[0] - c.lng) * cosLat * R;
+  const by = toRad(b[1] - c.lat) * R;
+  const dx = bx - ax;
+  const dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 > 0 ? Math.max(0, Math.min(1, (-ax * dx + -ay * dy) / len2)) : 0;
+  return Math.hypot(ax + t * dx, ay + t * dy);
+}
+
+function nearPath(path: [number, number][] | null, coord: Coord, maxKm: number): boolean {
+  if (!path || path.length < 2) return false;
+  for (let i = 0; i < path.length - 1; i++) {
+    if (pointToSegmentKm(coord, path[i], path[i + 1]) <= maxKm) return true;
+  }
+  return false;
+}
+
+function sliceLinePath(line: { path: [number, number][] | null }, a: Coord, b: Coord): [number, number][] {
+  const path = line.path;
+  if (!path || path.length < 2) return [[a.lng, a.lat], [b.lng, b.lat]];
+  const ia = findClosestPathIndex(path, a);
+  const ib = findClosestPathIndex(path, b);
+  const lo = Math.min(ia, ib);
+  const hi = Math.max(ia, ib);
+  const slice = path.slice(lo, hi + 1);
+  const oriented = ia <= ib ? slice : slice.reverse();
+  return oriented.length >= 2 ? oriented : [[a.lng, a.lat], [b.lng, b.lat]];
+}
+
 function findClosestPathIndex(path: [number, number][], coord: Coord): number {
   let minIdx = 0;
   let minDist = Infinity;
@@ -105,7 +162,10 @@ function buildOverlay(
     });
   }
 
-  if (taxiType && (planKey === "premium" || (direct > WALK_MAX_KM && direct <= TAXI_CONNECT_KM))) {
+  // Door-to-door Uber/Careem is a premium-only product. Non-premium plans may
+  // still use taxi as a short access connector to verified transit, but never as
+  // the whole trip.
+  if (taxiType && planKey === "premium") {
     pushEdge(edges, "origin", {
       to: "dest", kind: "taxi", timeMin: (direct / taxiType.speedKmh) * 60,
       costEgp: directFare(taxiType, direct), walkMin: 0, isBoarding: true, mode: "taxi", typeId: taxiType.id,
@@ -312,46 +372,66 @@ const UI_ICON: Record<ModeKey, string> = {
 };
 
 function legInstructions(leg: PlanLeg, type: TransportTypeInfo | null, isArabic: boolean): string[] {
-  const name = type ? (isArabic ? type.nameAr : type.nameEn) : "";
+  const name = type ? (isArabic ? type.nameAr : type.nameEn) : isArabic ? "مشي" : "Walk";
   const cost = Math.round(leg.costEgp);
-  const mins = Math.round(leg.timeMin);
+  const mins = Math.max(1, Math.round(leg.timeMin));
+  const km = Math.max(0.1, Math.round(leg.distanceKm * 10) / 10);
+  const crowd = isArabic
+    ? leg.crowding === "high" ? "زحمة عالية" : leg.crowding === "medium" ? "زحمة متوسطة" : "زحمة قليلة"
+    : `${leg.crowding} crowding`;
+
   if (leg.mode === "walk") {
     return isArabic
-      ? [`امشِ حوالي ${mins} دقيقة إلى ${leg.endName || "النقطة التالية"}.`]
-      : [`Walk about ${mins} min to ${leg.endName || "the next point"}.`];
-  }
-  if (leg.mode === "taxi" || leg.mode === "tuktuk") {
-    return isArabic
       ? [
-          `اطلب ${name} من ${leg.startName || "موقعك"}.`,
-          `اتجه إلى ${leg.endName || "وجهتك"} (~${cost} جنيه، ${mins} دقيقة).`,
+          `ابدأ من ${leg.startName || "موقعك"}.`,
+          `امشِ أقصر مسار متاح حوالي ${km} كم (${mins} دقيقة).`,
+          `اتجه إلى ${leg.endName || "النقطة التالية"} وتأكد أنك وصلت قبل ركوب الوسيلة التالية.`,
         ]
       : [
-          `Order ${name} from ${leg.startName || "your location"}.`,
-          `Head to ${leg.endName || "your destination"} (~${cost} EGP, ${mins} min).`,
+          `Start at ${leg.startName || "your location"}.`,
+          `Walk the shortest available path for about ${km} km (${mins} min).`,
+          `Arrive at ${leg.endName || "the next point"} before boarding the next leg.`,
         ];
   }
+
+  if (leg.mode === "taxi" || leg.mode === "tuktuk") {
+    const verb = leg.mode === "taxi" ? (isArabic ? "اطلب" : "Request") : (isArabic ? "اركب" : "Take");
+    return isArabic
+      ? [
+          `${verb} ${name} من ${leg.startName || "موقعك"}.`,
+          `اطلب من السائق اتباع أقصر مسار شارع إلى ${leg.endName || "الوجهة"}.`,
+          `المسافة حوالي ${km} كم، الوقت ${mins} دقيقة، والتكلفة المتوقعة ${cost} جنيه.`,
+          `انزل عند ${leg.endName || "نقطة النزول"} وجهّز للخطوة التالية.`,
+        ]
+      : [
+          `${verb} ${name} from ${leg.startName || "your location"}.`,
+          `Ask for the shortest street route to ${leg.endName || "your destination"}.`,
+          `Expect about ${km} km, ${mins} min, and ~${cost} EGP.`,
+          `Get out at ${leg.endName || "the drop-off"} and prepare for the next leg.`,
+        ];
+  }
+
   const ln = leg.lineNumber ? ` ${leg.lineNumber}` : "";
   const stops = leg.stopsCount ?? 0;
-  const km = Math.round(leg.distanceKm * 10) / 10;
-  if (isArabic) {
-    return [
-      `اذهب إلى ${leg.startName} واركب ${name}${ln}.`,
-      `ادفع حوالي ${cost} جنيه.`,
-      stops > 0
-        ? `اركب ${stops} محطة/محطات حتى ${leg.endName}.`
-        : `ابقَ على الخط حوالي ${km} كم حتى ${leg.endName}.`,
-      `انزل عند ${leg.endName}.`,
-    ];
-  }
-  return [
-    `Go to ${leg.startName} and board ${name}${ln}.`,
-    `Pay about ${cost} EGP.`,
-    stops > 0
-      ? `Ride ${stops} stop${stops === 1 ? "" : "s"} to ${leg.endName}.`
-      : `Stay on for about ${km} km to ${leg.endName}.`,
-    `Get off at ${leg.endName}.`,
-  ];
+  const stopText = isArabic
+    ? stops > 0 ? `عدّ ${stops} محطة/محطات تقريباً` : `تابع الخط حوالي ${km} كم`
+    : stops > 0 ? `Count about ${stops} stop${stops === 1 ? "" : "s"}` : `Stay on the line for about ${km} km`;
+
+  return isArabic
+    ? [
+        `توجه إلى نقطة الركوب: ${leg.startName}.`,
+        `اركب ${name}${ln}${leg.lineNumber ? " (تأكد من رقم/لافتة الخط قبل الركوب)" : ""}.`,
+        `ادفع حوالي ${cost} جنيه عند الركوب أو حسب نظام الوسيلة.`,
+        `${stopText}، وراقب الاتجاه نحو ${leg.endName}.`,
+        `انزل عند ${leg.endName}. مستوى الزحام المتوقع: ${crowd}.`,
+      ]
+    : [
+        `Go to the boarding point: ${leg.startName}.`,
+        `Board ${name}${ln}${leg.lineNumber ? " (confirm the number/sign before boarding)" : ""}.`,
+        `Pay about ${cost} EGP when boarding or as the operator requests.`,
+        `${stopText}, watching for the direction toward ${leg.endName}.`,
+        `Get off at ${leg.endName}. Expected condition: ${crowd}.`,
+      ];
 }
 
 // Straight-line fallback for a connector whose snap failed: a few linearly
@@ -445,22 +525,121 @@ function stitchSegmentGeometry(
   }
 }
 
+
+interface ApiAlternative {
+  transport_type_id: string;
+  transport_name: string;
+  cost_egp: number;
+  duration_minutes: number;
+  color: string;
+  icon: string;
+  line_id?: string | null;
+  line_number?: string | null;
+  info?: string;
+  instructions?: string[];
+  route_geometry?: number[][];
+}
+
+async function buildConnectorAlternative(
+  graph: TransitGraph,
+  leg: PlanLeg,
+  mode: ModeKey,
+  isArabic: boolean,
+): Promise<ApiAlternative | null> {
+  if (!isConnectorMode(mode) || mode === leg.mode) return null;
+  if (mode === "walk" && leg.distanceKm > WALK_MAX_KM) return null;
+  const label = connectorLabel(mode, graph, isArabic);
+  if (!label) return null;
+  const type = mode === "walk" ? null : pickType(graph, mode, mode === "taxi" ? /uber|careem|taxi/i : undefined);
+  const speed = mode === "walk" ? 4.5 : type?.speedKmh ?? 25;
+  const cost = mode === "walk" ? 0 : directFare(type!, leg.distanceKm);
+  const altLeg: PlanLeg = { ...leg, mode, typeId: type?.id ?? null, lineId: null, lineNumber: null, costEgp: cost, timeMin: (leg.distanceKm / speed) * 60 };
+  return {
+    transport_type_id: label.id,
+    transport_name: label.name,
+    cost_egp: Math.round(cost),
+    duration_minutes: Math.max(1, Math.round(altLeg.timeMin)),
+    color: label.color,
+    icon: label.icon,
+    line_id: null,
+    line_number: null,
+    info: `${Math.round(leg.distanceKm * 10) / 10} km`,
+    instructions: legInstructions(altLeg, type, isArabic),
+    route_geometry: await onStreetGeometry(altLeg),
+  };
+}
+
+async function buildAlternatives(graph: TransitGraph, leg: PlanLeg, planKey: PlanKey, isArabic: boolean): Promise<ApiAlternative[]> {
+  const alternatives: ApiAlternative[] = [];
+  const seen = new Set<string>([`${leg.mode}:${leg.lineId ?? leg.typeId ?? ""}`]);
+  const push = (alt: ApiAlternative | null) => {
+    if (!alt) return;
+    const key = `${alt.transport_type_id}:${alt.line_id ?? alt.line_number ?? alt.transport_name}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    alternatives.push(alt);
+  };
+
+  // Always expose flexible connector swaps when physically reasonable. This is the
+  // review-screen switcher: choosing one updates the stored trip and home-map drawing.
+  if (leg.distanceKm <= WALK_MAX_KM) push(await buildConnectorAlternative(graph, leg, "walk", isArabic));
+  if (planKey !== "economic" || leg.mode === "taxi") push(await buildConnectorAlternative(graph, leg, "taxi", isArabic));
+  if (planKey === "economic" && leg.distanceKm <= TUKTUK_CONNECT_KM) push(await buildConnectorAlternative(graph, leg, "tuktuk", isArabic));
+
+  // For transit legs, offer nearby real lines that serve the same corridor. Prefer
+  // non-suspect/high-resolution paths first (GTFS imports usually have dense, clean geometry).
+  if (!isConnectorMode(leg.mode)) {
+    const allowed = allowedModesForPlan(planKey);
+    const candidates = [...graph.lines.values()]
+      .filter((line) => line.id !== leg.lineId)
+      .filter((line) => {
+        const type = graph.types.get(line.transportTypeId);
+        return !!type && allowed.has(type.mode) && nearPath(line.path, leg.startCoord, 0.65) && nearPath(line.path, leg.endCoord, 0.65);
+      })
+      .sort((a, b) => Number(a.pathSuspect) - Number(b.pathSuspect) || (b.path?.length ?? 0) - (a.path?.length ?? 0))
+      .slice(0, 4);
+
+    for (const line of candidates) {
+      const type = graph.types.get(line.transportTypeId)!;
+      const geom = sliceLinePath(line, leg.startCoord, leg.endCoord);
+      const dist = Math.max(0.1, leg.distanceKm);
+      const altLeg: PlanLeg = {
+        ...leg,
+        mode: type.mode,
+        typeId: type.id,
+        lineId: line.id,
+        lineNumber: line.lineNumber,
+        timeMin: Math.max(1, (dist / Math.max(8, type.speedKmh)) * 60 + (line.frequencyMinutes ?? 12) / 2),
+        costEgp: directFare(type, dist),
+        geometry: geom as [number, number][],
+        stopsCount: undefined,
+      };
+      push({
+        transport_type_id: type.id,
+        transport_name: `${isArabic ? type.nameAr : type.nameEn}${line.lineNumber ? ` ${line.lineNumber}` : ""}`,
+        cost_egp: Math.round(altLeg.costEgp),
+        duration_minutes: Math.max(1, Math.round(altLeg.timeMin)),
+        color: type.color,
+        icon: UI_ICON[type.mode],
+        line_id: line.id,
+        line_number: line.lineNumber,
+        info: `${Math.round(dist * 10) / 10} km · ${line.pathSuspect ? "community route" : "high-confidence route"}`,
+        instructions: legInstructions(altLeg, type, isArabic),
+        route_geometry: geom,
+      });
+    }
+  }
+
+  return alternatives.slice(0, 6);
+}
+
 export async function adaptPlanToApi(graph: TransitGraph, plan: EnginePlan, isArabic: boolean) {
-  const taxiType = pickType(graph, "taxi", /uber|careem/i);
   const segments = await Promise.all(plan.legs.map(async (leg) => {
     const type = leg.typeId ? graph.types.get(leg.typeId) ?? null : null;
     const name = type
       ? `${isArabic ? type.nameAr : type.nameEn}${leg.lineNumber ? ` ${leg.lineNumber}` : ""}`
       : isArabic ? "مشي" : "Walk";
-    const taxiAlt = taxiType && leg.mode !== "taxi" && leg.distanceKm > 0
-      ? [{
-          transport_type_id: taxiType.id,
-          transport_name: isArabic ? taxiType.nameAr : taxiType.nameEn,
-          cost_egp: directFare(taxiType, leg.distanceKm),
-          duration_minutes: Math.round((leg.distanceKm / taxiType.speedKmh) * 60),
-          color: taxiType.color, icon: "car",
-        }]
-      : [];
+    const alternatives = await buildAlternatives(graph, leg, plan.plan, isArabic);
     return {
       transport_type_id: leg.typeId ?? leg.mode,
       transport_name: name,
@@ -473,7 +652,7 @@ export async function adaptPlanToApi(graph: TransitGraph, plan: EnginePlan, isAr
       info: `${Math.round(leg.distanceKm * 10) / 10} km · ${leg.crowding} crowding`,
       instructions: legInstructions(leg, type, isArabic),
       route_geometry: await onStreetGeometry(leg),
-      crowding: leg.crowding, alternatives: taxiAlt,
+      crowding: leg.crowding, alternatives,
     };
   }));
 
@@ -500,13 +679,18 @@ export async function computeEnginePlan(req: PlanRequest): Promise<EnginePlan | 
   const overlay = buildOverlay(graph, req.origin, req.dest, req.planKey);
   const profile = PROFILES[req.planKey];
 
-  const candidates = findRoutes(graph, overlay, "origin", "dest", profile, ALL_MODES);
+  const allowedModes = allowedModesForPlan(req.planKey);
+  const candidates = findRoutes(graph, overlay, "origin", "dest", profile, allowedModes, 10);
 
   let bestPlan: EnginePlan | null = null;
   for (const res of candidates) {
     const plan = reconstruct(graph, overlay, res, req.planKey, req.isArabic);
     if (!plan || plan.legs.length === 0) continue;
-    if (validatePlan(plan, graph).ok) {
+    const valid = validatePlan(plan, graph);
+    const directKm = haversineKm(req.origin, req.dest);
+    const isLoop = plan.distanceKm > Math.max(directKm * 2.2 + 2, directKm + 5);
+    const wholeTripTaxi = req.planKey !== "premium" && plan.legs.length === 1 && plan.legs[0]?.mode === "taxi";
+    if (valid.ok && !isLoop && !wholeTripTaxi) {
       bestPlan = plan;
       break;
     }

@@ -1,0 +1,1946 @@
+ (cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'EOF' 
+diff --git a/artifacts/api-server/src/engine/graph.ts b/artifacts/api-server/src/engine/graph.ts
+index 8cf60136a4f28c70a9195e20552d26685086d2d7..b7ec598eef2b4ba2fa509512af9822898eab99c5 100644
+--- a/artifacts/api-server/src/engine/graph.ts
++++ b/artifacts/api-server/src/engine/graph.ts
+@@ -297,55 +297,58 @@ export async function buildGraph(force = false): Promise<TransitGraph> {
+       addEdge(edges, stopId, {
+         to: lsId,
+         kind: "board",
+         timeMin: wait,
+         costEgp: fare,
+         walkMin: 0,
+         isBoarding: true,
+         mode: type.mode,
+         lineId: line.id,
+         typeId: type.id,
+       });
+ 
+       addEdge(edges, lsId, {
+         to: stopId,
+         kind: "alight",
+         timeMin: ALIGHT_PENALTY_MIN, // Fixed free vehicle-switching loop bug
+         costEgp: 0,
+         walkMin: 0,
+         isBoarding: false,
+         mode: type.mode,
+         lineId: line.id,
+         typeId: type.id,
+       });
+     });
+ 
++    const gtfsQualityBias = line.pathSuspect ? 1.25 : (line.path?.length ?? 0) >= 50 ? 0.9 : 1;
+     for (let i = 0; i < line.stops.length - 1; i++) {
+       const a = line.stops[i];
+       const b = line.stops[i + 1];
+       const dist = Math.max(0.05, haversineKm(a.coord, b.coord));
+-      const timeMin = (dist / Math.max(8, type.speedKmh)) * 60;
++      // Dense, non-suspect route_path geometry is normally from the GTFS import,
++      // so it gets a small weight advantage over hand-entered/noisy alternatives.
++      const timeMin = ((dist / Math.max(8, type.speedKmh)) * 60) * gtfsQualityBias;
+       const cost = perKm * dist;
+       addEdge(edges, lsIds[i], {
+         to: lsIds[i + 1],
+         kind: "ride",
+         timeMin,
+         costEgp: cost,
+         walkMin: 0,
+         isBoarding: false,
+         mode: type.mode,
+         lineId: line.id,
+         typeId: type.id,
+         fromStopIndex: a.pathIndex,
+         toStopIndex: b.pathIndex,
+       });
+       addEdge(edges, lsIds[i + 1], {
+         to: lsIds[i],
+         kind: "ride",
+         timeMin,
+         costEgp: cost,
+         walkMin: 0,
+         isBoarding: false,
+         mode: type.mode,
+         lineId: line.id,
+         typeId: type.id,
+         fromStopIndex: b.pathIndex,
+diff --git a/artifacts/api-server/src/engine/planner.ts b/artifacts/api-server/src/engine/planner.ts
+index a8596d524efb24be2c8e8af71f3e70cfd5ab4428..023ec344474ff79305f0874bf205725295ba1b16 100644
+--- a/artifacts/api-server/src/engine/planner.ts
++++ b/artifacts/api-server/src/engine/planner.ts
+@@ -16,50 +16,107 @@ import { haversineKm } from "./geo.js";
+ import { snapConnector, snapFootOsrm } from "../utils/routePathGenerator.js";
+ import { estimateCrowding } from "./crowding.js";
+ import { scorePlan, planConfidence } from "./score.js";
+ import { explainPlan } from "./explain.js";
+ import { validatePlan } from "./validate.js";
+ 
+ const TAXI_CONNECT_KM = 5;
+ const TUKTUK_CONNECT_KM = 3;
+ const ACCESS_STOP_LIMIT = 120;
+ 
+ function pushEdge(map: Map<string, Edge[]>, from: string, e: Edge) {
+   const arr = map.get(from);
+   if (arr) arr.push(e);
+   else map.set(from, [e]);
+ }
+ 
+ function pickType(graph: TransitGraph, mode: ModeKey, prefer?: RegExp): TransportTypeInfo | null {
+   const all = [...graph.types.values()].filter((t) => t.mode === mode);
+   if (prefer) {
+     const p = all.find((t) => prefer.test(t.nameEn));
+     if (p) return p;
+   }
+   return all[0] ?? null;
+ }
+ 
++function allowedModesForPlan(planKey: PlanKey): Set<ModeKey> {
++  if (planKey === "economic") {
++    return new Set(["metro", "monorail", "train", "bus", "serfis", "microbus", "tuktuk"]);
++  }
++  if (planKey === "comfortable") {
++    // Comfortable should not use GTFS/private microbuses; it favors fixed and larger shared modes.
++    return new Set(["metro", "monorail", "train", "bus", "serfis", "taxi", "tuktuk"]);
++  }
++  return new Set(["metro", "monorail", "train", "bus", "serfis", "taxi", "tuktuk"]);
++}
++
++function isConnectorMode(mode: ModeKey): boolean {
++  return mode === "walk" || mode === "taxi" || mode === "tuktuk";
++}
++
++function connectorLabel(mode: ModeKey, graph: TransitGraph, isArabic: boolean): { id: string; name: string; color: string; icon: string } | null {
++  if (mode === "walk") return { id: "walk", name: isArabic ? "مشي" : "Walk", color: "#64748B", icon: "walk" };
++  const type = pickType(graph, mode, mode === "taxi" ? /uber|careem|taxi/i : undefined);
++  if (!type) return null;
++  return { id: type.id, name: isArabic ? type.nameAr : type.nameEn, color: type.color, icon: UI_ICON[mode] };
++}
++
++function pointToSegmentKm(c: Coord, a: [number, number], b: [number, number]): number {
++  const R = 6371;
++  const toRad = (d: number) => (d * Math.PI) / 180;
++  const cosLat = Math.cos(toRad(c.lat));
++  const ax = toRad(a[0] - c.lng) * cosLat * R;
++  const ay = toRad(a[1] - c.lat) * R;
++  const bx = toRad(b[0] - c.lng) * cosLat * R;
++  const by = toRad(b[1] - c.lat) * R;
++  const dx = bx - ax;
++  const dy = by - ay;
++  const len2 = dx * dx + dy * dy;
++  const t = len2 > 0 ? Math.max(0, Math.min(1, (-ax * dx + -ay * dy) / len2)) : 0;
++  return Math.hypot(ax + t * dx, ay + t * dy);
++}
++
++function nearPath(path: [number, number][] | null, coord: Coord, maxKm: number): boolean {
++  if (!path || path.length < 2) return false;
++  for (let i = 0; i < path.length - 1; i++) {
++    if (pointToSegmentKm(coord, path[i], path[i + 1]) <= maxKm) return true;
++  }
++  return false;
++}
++
++function sliceLinePath(line: { path: [number, number][] | null }, a: Coord, b: Coord): [number, number][] {
++  const path = line.path;
++  if (!path || path.length < 2) return [[a.lng, a.lat], [b.lng, b.lat]];
++  const ia = findClosestPathIndex(path, a);
++  const ib = findClosestPathIndex(path, b);
++  const lo = Math.min(ia, ib);
++  const hi = Math.max(ia, ib);
++  const slice = path.slice(lo, hi + 1);
++  const oriented = ia <= ib ? slice : slice.reverse();
++  return oriented.length >= 2 ? oriented : [[a.lng, a.lat], [b.lng, b.lat]];
++}
++
+ function findClosestPathIndex(path: [number, number][], coord: Coord): number {
+   let minIdx = 0;
+   let minDist = Infinity;
+   for (let i = 0; i < path.length; i++) {
+     const d = haversineKm({ lng: path[i][0], lat: path[i][1] }, coord);
+     if (d < minDist) {
+       minDist = d;
+       minIdx = i;
+     }
+   }
+   return minIdx;
+ }
+ 
+ function buildOverlay(
+   graph: TransitGraph,
+   origin: Coord,
+   dest: Coord,
+   planKey: PlanKey,
+ ): SearchOverlay {
+   const nodes = new Map<string, GraphNode>();
+   const edges = new Map<string, Edge[]>();
+   nodes.set("origin", { id: "origin", coord: origin, kind: "origin" });
+   nodes.set("dest", { id: "dest", coord: dest, kind: "dest" });
+ 
+   const taxiType = pickType(graph, "taxi", /uber|careem/i);
+@@ -83,51 +140,54 @@ function buildOverlay(
+     }
+     if (taxiType && distKm <= TAXI_CONNECT_KM) {
+       pushEdge(edges, fromId, {
+         to: toId, kind: "taxi", timeMin: (distKm / taxiType.speedKmh) * 60,
+         costEgp: directFare(taxiType, distKm), walkMin: 0, isBoarding: true,
+         mode: "taxi", typeId: taxiType.id,
+       });
+     }
+   };
+ 
+   for (const s of nearestStops(graph, origin, TAXI_CONNECT_KM, ACCESS_STOP_LIMIT)) {
+     connect("origin", s.id, s.distKm);
+   }
+   for (const s of nearestStops(graph, dest, TAXI_CONNECT_KM, ACCESS_STOP_LIMIT)) {
+     connect(s.id, "dest", s.distKm);
+   }
+ 
+   const direct = haversineKm(origin, dest);
+   if (direct <= WALK_MAX_KM) {
+     const wt = walkMinutes(direct);
+     pushEdge(edges, "origin", {
+       to: "dest", kind: "walk", timeMin: wt, costEgp: 0, walkMin: wt, isBoarding: false, mode: "walk",
+     });
+   }
+ 
+-  if (taxiType && (planKey === "premium" || (direct > WALK_MAX_KM && direct <= TAXI_CONNECT_KM))) {
++  // Door-to-door Uber/Careem is a premium-only product. Non-premium plans may
++  // still use taxi as a short access connector to verified transit, but never as
++  // the whole trip.
++  if (taxiType && planKey === "premium") {
+     pushEdge(edges, "origin", {
+       to: "dest", kind: "taxi", timeMin: (direct / taxiType.speedKmh) * 60,
+       costEgp: directFare(taxiType, direct), walkMin: 0, isBoarding: true, mode: "taxi", typeId: taxiType.id,
+     });
+   }
+ 
+   return { nodes, edges };
+ }
+ 
+ // Single mode pool: every transit + connector mode competes in one search. The
+ // rider's tier (economic/comfortable/premium) only changes the cost weights and
+ // mode preferences in PROFILES — NOT which modes exist — so the rung ladder is
+ // gone. Per-mode admissibility (tuktuk heatmap gate, walk budget) is enforced
+ // inside the pathfinder; connector availability is decided in buildOverlay.
+ const ALL_MODES = new Set<ModeKey>([
+   "metro", "monorail", "train", "bus", "serfis", "microbus", "taxi", "tuktuk",
+ ]);
+ 
+ function nodeCoord(graph: TransitGraph, overlay: SearchOverlay, id: string): Coord {
+   return (overlay.nodes.get(id) ?? graph.nodes.get(id))!.coord;
+ }
+ 
+ function reconstruct(
+   graph: TransitGraph,
+   overlay: SearchOverlay,
+@@ -290,90 +350,110 @@ function reconstruct(
+   const transfers = Math.max(0, nonWalk - 1);
+   const distanceKm = finalLegs.reduce((s, l) => s + l.distanceKm, 0);
+ 
+   const plan: EnginePlan = {
+     legs: finalLegs, totalTimeMin, totalCostEgp, totalWalkMin, transfers, distanceKm,
+     qualityScore: 0, confidence: planConfidence(finalLegs), plan: planKey,
+   };
+   plan.qualityScore = scorePlan(plan);
+   return plan;
+ }
+ 
+ export interface PlanRequest {
+   origin: Coord;
+   dest: Coord;
+   planKey: PlanKey;
+   isArabic: boolean;
+ }
+ 
+ const UI_ICON: Record<ModeKey, string> = {
+   metro: "metro", monorail: "monorail", train: "train",
+   bus: "bus", serfis: "bus", microbus: "bus",
+   taxi: "car", tuktuk: "bike", walk: "walk",
+ };
+ 
+ function legInstructions(leg: PlanLeg, type: TransportTypeInfo | null, isArabic: boolean): string[] {
+-  const name = type ? (isArabic ? type.nameAr : type.nameEn) : "";
++  const name = type ? (isArabic ? type.nameAr : type.nameEn) : isArabic ? "مشي" : "Walk";
+   const cost = Math.round(leg.costEgp);
+-  const mins = Math.round(leg.timeMin);
++  const mins = Math.max(1, Math.round(leg.timeMin));
++  const km = Math.max(0.1, Math.round(leg.distanceKm * 10) / 10);
++  const crowd = isArabic
++    ? leg.crowding === "high" ? "زحمة عالية" : leg.crowding === "medium" ? "زحمة متوسطة" : "زحمة قليلة"
++    : `${leg.crowding} crowding`;
++
+   if (leg.mode === "walk") {
+     return isArabic
+-      ? [`امشِ حوالي ${mins} دقيقة إلى ${leg.endName || "النقطة التالية"}.`]
+-      : [`Walk about ${mins} min to ${leg.endName || "the next point"}.`];
++      ? [
++          `ابدأ من ${leg.startName || "موقعك"}.`,
++          `امشِ أقصر مسار متاح حوالي ${km} كم (${mins} دقيقة).`,
++          `اتجه إلى ${leg.endName || "النقطة التالية"} وتأكد أنك وصلت قبل ركوب الوسيلة التالية.`,
++        ]
++      : [
++          `Start at ${leg.startName || "your location"}.`,
++          `Walk the shortest available path for about ${km} km (${mins} min).`,
++          `Arrive at ${leg.endName || "the next point"} before boarding the next leg.`,
++        ];
+   }
++
+   if (leg.mode === "taxi" || leg.mode === "tuktuk") {
++    const verb = leg.mode === "taxi" ? (isArabic ? "اطلب" : "Request") : (isArabic ? "اركب" : "Take");
+     return isArabic
+       ? [
+-          `اطلب ${name} من ${leg.startName || "موقعك"}.`,
+-          `اتجه إلى ${leg.endName || "وجهتك"} (~${cost} جنيه، ${mins} دقيقة).`,
++          `${verb} ${name} من ${leg.startName || "موقعك"}.`,
++          `اطلب من السائق اتباع أقصر مسار شارع إلى ${leg.endName || "الوجهة"}.`,
++          `المسافة حوالي ${km} كم، الوقت ${mins} دقيقة، والتكلفة المتوقعة ${cost} جنيه.`,
++          `انزل عند ${leg.endName || "نقطة النزول"} وجهّز للخطوة التالية.`,
+         ]
+       : [
+-          `Order ${name} from ${leg.startName || "your location"}.`,
+-          `Head to ${leg.endName || "your destination"} (~${cost} EGP, ${mins} min).`,
++          `${verb} ${name} from ${leg.startName || "your location"}.`,
++          `Ask for the shortest street route to ${leg.endName || "your destination"}.`,
++          `Expect about ${km} km, ${mins} min, and ~${cost} EGP.`,
++          `Get out at ${leg.endName || "the drop-off"} and prepare for the next leg.`,
+         ];
+   }
++
+   const ln = leg.lineNumber ? ` ${leg.lineNumber}` : "";
+   const stops = leg.stopsCount ?? 0;
+-  const km = Math.round(leg.distanceKm * 10) / 10;
+-  if (isArabic) {
+-    return [
+-      `اذهب إلى ${leg.startName} واركب ${name}${ln}.`,
+-      `ادفع حوالي ${cost} جنيه.`,
+-      stops > 0
+-        ? `اركب ${stops} محطة/محطات حتى ${leg.endName}.`
+-        : `ابقَ على الخط حوالي ${km} كم حتى ${leg.endName}.`,
+-      `انزل عند ${leg.endName}.`,
+-    ];
+-  }
+-  return [
+-    `Go to ${leg.startName} and board ${name}${ln}.`,
+-    `Pay about ${cost} EGP.`,
+-    stops > 0
+-      ? `Ride ${stops} stop${stops === 1 ? "" : "s"} to ${leg.endName}.`
+-      : `Stay on for about ${km} km to ${leg.endName}.`,
+-    `Get off at ${leg.endName}.`,
+-  ];
++  const stopText = isArabic
++    ? stops > 0 ? `عدّ ${stops} محطة/محطات تقريباً` : `تابع الخط حوالي ${km} كم`
++    : stops > 0 ? `Count about ${stops} stop${stops === 1 ? "" : "s"}` : `Stay on the line for about ${km} km`;
++
++  return isArabic
++    ? [
++        `توجه إلى نقطة الركوب: ${leg.startName}.`,
++        `اركب ${name}${ln}${leg.lineNumber ? " (تأكد من رقم/لافتة الخط قبل الركوب)" : ""}.`,
++        `ادفع حوالي ${cost} جنيه عند الركوب أو حسب نظام الوسيلة.`,
++        `${stopText}، وراقب الاتجاه نحو ${leg.endName}.`,
++        `انزل عند ${leg.endName}. مستوى الزحام المتوقع: ${crowd}.`,
++      ]
++    : [
++        `Go to the boarding point: ${leg.startName}.`,
++        `Board ${name}${ln}${leg.lineNumber ? " (confirm the number/sign before boarding)" : ""}.`,
++        `Pay about ${cost} EGP when boarding or as the operator requests.`,
++        `${stopText}, watching for the direction toward ${leg.endName}.`,
++        `Get off at ${leg.endName}. Expected condition: ${crowd}.`,
++      ];
+ }
+ 
+ // Straight-line fallback for a connector whose snap failed: a few linearly
+ // interpolated points between the leg's OWN endpoints. Never routes through a
+ // fixed city centroid (which would warp cross-city legs across Cairo).
+ function interpolateLine(a: Coord, b: Coord, n = 5): number[][] {
+   const pts: number[][] = [];
+   for (let k = 0; k < n; k++) {
+     const t = n === 1 ? 0 : k / (n - 1);
+     pts.push([a.lng + (b.lng - a.lng) * t, a.lat + (b.lat - a.lat) * t]);
+   }
+   return pts;
+ }
+ 
+ // Snap connector legs to the street network; pin start/end after snapping so the
+ // polyline anchors exactly at the logical endpoints. On failure, fall back to a
+ // localized interpolated straight line (not the stored 2-point straight line).
+ async function onStreetGeometry(leg: PlanLeg): Promise<number[][]> {
+   if (leg.mode === "walk" || leg.mode === "taxi" || leg.mode === "tuktuk") {
+     const a: [number, number] = [leg.startCoord.lng, leg.startCoord.lat];
+     const b: [number, number] = [leg.endCoord.lng, leg.endCoord.lat];
+     try {
+       // Walk legs follow the pedestrian network (OSRM foot); taxi/tuktuk legs use
+       // the driving network (Mapbox). For walking, prefer OSRM foot and fall back
+       // to Mapbox walking so a transient OSRM failure still yields snapped geometry.
+@@ -423,109 +503,213 @@ function stitchSegmentGeometry(
+     const lastLeg = legs[legs.length - 1];
+     if (last?.length && STITCH_CONNECTOR_MODES.has(lastLeg.mode)) {
+       last[last.length - 1] = [lastLeg.endCoord.lng, lastLeg.endCoord.lat];
+     }
+   }
+   for (let i = 0; i < segments.length - 1; i++) {
+     const a = segments[i].route_geometry;
+     const b = segments[i + 1].route_geometry;
+     if (!a?.length || !b?.length) continue;
+     const aEnd = a[a.length - 1];
+     const bStart = b[0];
+     const aConn = STITCH_CONNECTOR_MODES.has(legs[i].mode);
+     const bConn = STITCH_CONNECTOR_MODES.has(legs[i + 1].mode);
+     // Move only the connector side(s). Transit↔transit (neither connector) is
+     // left untouched on purpose.
+     if (aConn && !bConn) {
+       a[a.length - 1] = [bStart[0], bStart[1]];
+     } else if (!aConn && bConn) {
+       b[0] = [aEnd[0], aEnd[1]];
+     } else if (aConn && bConn) {
+       b[0] = [aEnd[0], aEnd[1]];
+     }
+   }
+ }
+ 
++
++interface ApiAlternative {
++  transport_type_id: string;
++  transport_name: string;
++  cost_egp: number;
++  duration_minutes: number;
++  color: string;
++  icon: string;
++  line_id?: string | null;
++  line_number?: string | null;
++  info?: string;
++  instructions?: string[];
++  route_geometry?: number[][];
++}
++
++async function buildConnectorAlternative(
++  graph: TransitGraph,
++  leg: PlanLeg,
++  mode: ModeKey,
++  isArabic: boolean,
++): Promise<ApiAlternative | null> {
++  if (!isConnectorMode(mode) || mode === leg.mode) return null;
++  if (mode === "walk" && leg.distanceKm > WALK_MAX_KM) return null;
++  const label = connectorLabel(mode, graph, isArabic);
++  if (!label) return null;
++  const type = mode === "walk" ? null : pickType(graph, mode, mode === "taxi" ? /uber|careem|taxi/i : undefined);
++  const speed = mode === "walk" ? 4.5 : type?.speedKmh ?? 25;
++  const cost = mode === "walk" ? 0 : directFare(type!, leg.distanceKm);
++  const altLeg: PlanLeg = { ...leg, mode, typeId: type?.id ?? null, lineId: null, lineNumber: null, costEgp: cost, timeMin: (leg.distanceKm / speed) * 60 };
++  return {
++    transport_type_id: label.id,
++    transport_name: label.name,
++    cost_egp: Math.round(cost),
++    duration_minutes: Math.max(1, Math.round(altLeg.timeMin)),
++    color: label.color,
++    icon: label.icon,
++    line_id: null,
++    line_number: null,
++    info: `${Math.round(leg.distanceKm * 10) / 10} km`,
++    instructions: legInstructions(altLeg, type, isArabic),
++    route_geometry: await onStreetGeometry(altLeg),
++  };
++}
++
++async function buildAlternatives(graph: TransitGraph, leg: PlanLeg, planKey: PlanKey, isArabic: boolean): Promise<ApiAlternative[]> {
++  const alternatives: ApiAlternative[] = [];
++  const seen = new Set<string>([`${leg.mode}:${leg.lineId ?? leg.typeId ?? ""}`]);
++  const push = (alt: ApiAlternative | null) => {
++    if (!alt) return;
++    const key = `${alt.transport_type_id}:${alt.line_id ?? alt.line_number ?? alt.transport_name}`;
++    if (seen.has(key)) return;
++    seen.add(key);
++    alternatives.push(alt);
++  };
++
++  // Always expose flexible connector swaps when physically reasonable. This is the
++  // review-screen switcher: choosing one updates the stored trip and home-map drawing.
++  if (leg.distanceKm <= WALK_MAX_KM) push(await buildConnectorAlternative(graph, leg, "walk", isArabic));
++  if (planKey !== "economic" || leg.mode === "taxi") push(await buildConnectorAlternative(graph, leg, "taxi", isArabic));
++  if (planKey === "economic" && leg.distanceKm <= TUKTUK_CONNECT_KM) push(await buildConnectorAlternative(graph, leg, "tuktuk", isArabic));
++
++  // For transit legs, offer nearby real lines that serve the same corridor. Prefer
++  // non-suspect/high-resolution paths first (GTFS imports usually have dense, clean geometry).
++  if (!isConnectorMode(leg.mode)) {
++    const allowed = allowedModesForPlan(planKey);
++    const candidates = [...graph.lines.values()]
++      .filter((line) => line.id !== leg.lineId)
++      .filter((line) => {
++        const type = graph.types.get(line.transportTypeId);
++        return !!type && allowed.has(type.mode) && nearPath(line.path, leg.startCoord, 0.65) && nearPath(line.path, leg.endCoord, 0.65);
++      })
++      .sort((a, b) => Number(a.pathSuspect) - Number(b.pathSuspect) || (b.path?.length ?? 0) - (a.path?.length ?? 0))
++      .slice(0, 4);
++
++    for (const line of candidates) {
++      const type = graph.types.get(line.transportTypeId)!;
++      const geom = sliceLinePath(line, leg.startCoord, leg.endCoord);
++      const dist = Math.max(0.1, leg.distanceKm);
++      const altLeg: PlanLeg = {
++        ...leg,
++        mode: type.mode,
++        typeId: type.id,
++        lineId: line.id,
++        lineNumber: line.lineNumber,
++        timeMin: Math.max(1, (dist / Math.max(8, type.speedKmh)) * 60 + (line.frequencyMinutes ?? 12) / 2),
++        costEgp: directFare(type, dist),
++        geometry: geom as [number, number][],
++        stopsCount: undefined,
++      };
++      push({
++        transport_type_id: type.id,
++        transport_name: `${isArabic ? type.nameAr : type.nameEn}${line.lineNumber ? ` ${line.lineNumber}` : ""}`,
++        cost_egp: Math.round(altLeg.costEgp),
++        duration_minutes: Math.max(1, Math.round(altLeg.timeMin)),
++        color: type.color,
++        icon: UI_ICON[type.mode],
++        line_id: line.id,
++        line_number: line.lineNumber,
++        info: `${Math.round(dist * 10) / 10} km · ${line.pathSuspect ? "community route" : "high-confidence route"}`,
++        instructions: legInstructions(altLeg, type, isArabic),
++        route_geometry: geom,
++      });
++    }
++  }
++
++  return alternatives.slice(0, 6);
++}
++
+ export async function adaptPlanToApi(graph: TransitGraph, plan: EnginePlan, isArabic: boolean) {
+-  const taxiType = pickType(graph, "taxi", /uber|careem/i);
+   const segments = await Promise.all(plan.legs.map(async (leg) => {
+     const type = leg.typeId ? graph.types.get(leg.typeId) ?? null : null;
+     const name = type
+       ? `${isArabic ? type.nameAr : type.nameEn}${leg.lineNumber ? ` ${leg.lineNumber}` : ""}`
+       : isArabic ? "مشي" : "Walk";
+-    const taxiAlt = taxiType && leg.mode !== "taxi" && leg.distanceKm > 0
+-      ? [{
+-          transport_type_id: taxiType.id,
+-          transport_name: isArabic ? taxiType.nameAr : taxiType.nameEn,
+-          cost_egp: directFare(taxiType, leg.distanceKm),
+-          duration_minutes: Math.round((leg.distanceKm / taxiType.speedKmh) * 60),
+-          color: taxiType.color, icon: "car",
+-        }]
+-      : [];
++    const alternatives = await buildAlternatives(graph, leg, plan.plan, isArabic);
+     return {
+       transport_type_id: leg.typeId ?? leg.mode,
+       transport_name: name,
+       government_type: type?.governmentType ?? "private",
+       category: type?.category ?? "economic",
+       start_name: leg.startName, end_name: leg.endName,
+       cost_egp: Math.round(leg.costEgp), duration_minutes: Math.max(1, Math.round(leg.timeMin)),
+       color: type?.color ?? "#64748B", icon: UI_ICON[leg.mode],
+       line_id: leg.lineId, line_number: leg.lineNumber,
+       info: `${Math.round(leg.distanceKm * 10) / 10} km · ${leg.crowding} crowding`,
+       instructions: legInstructions(leg, type, isArabic),
+       route_geometry: await onStreetGeometry(leg),
+-      crowding: leg.crowding, alternatives: taxiAlt,
++      crowding: leg.crowding, alternatives,
+     };
+   }));
+ 
+   stitchSegmentGeometry(segments, plan.legs);
+ 
+   return {
+     segments, total_cost_egp: Math.round(plan.totalCostEgp),
+     total_duration_minutes: Math.max(1, Math.round(plan.totalTimeMin)),
+     budget_range: { min: Math.round(plan.totalCostEgp * 0.8), max: Math.round(plan.totalCostEgp * 1.6) },
+     distance_km: Math.round(plan.distanceKm * 10) / 10,
+     quality_score: plan.qualityScore, confidence: plan.confidence, transfers: plan.transfers,
+     total_walk_minutes: Math.round(plan.totalWalkMin), explanation: explainPlan(plan, isArabic),
+     plan: plan.plan, engine: "deterministic-graph",
+   };
+ }
+ 
+ // Main entry: ONE pooled Dijkstra over every mode. The search returns its
+ // best-weight Pareto candidates; we reconstruct + validate them in order and
+ // return the first that passes the hard plan gates (a real, verified route is
+ // still mandatory — invalid plans are never returned). When none validate the
+ // caller serves a verified door-to-door taxi fallback.
+ export async function computeEnginePlan(req: PlanRequest): Promise<EnginePlan | null> {
+   const graph = await buildGraph();
+   const overlay = buildOverlay(graph, req.origin, req.dest, req.planKey);
+   const profile = PROFILES[req.planKey];
+ 
+-  const candidates = findRoutes(graph, overlay, "origin", "dest", profile, ALL_MODES);
++  const allowedModes = allowedModesForPlan(req.planKey);
++  const candidates = findRoutes(graph, overlay, "origin", "dest", profile, allowedModes, 10);
+ 
+   let bestPlan: EnginePlan | null = null;
+   for (const res of candidates) {
+     const plan = reconstruct(graph, overlay, res, req.planKey, req.isArabic);
+     if (!plan || plan.legs.length === 0) continue;
+-    if (validatePlan(plan, graph).ok) {
++    const valid = validatePlan(plan, graph);
++    const directKm = haversineKm(req.origin, req.dest);
++    const isLoop = plan.distanceKm > Math.max(directKm * 2.2 + 2, directKm + 5);
++    const wholeTripTaxi = req.planKey !== "premium" && plan.legs.length === 1 && plan.legs[0]?.mode === "taxi";
++    if (valid.ok && !isLoop && !wholeTripTaxi) {
+       bestPlan = plan;
+       break;
+     }
+   }
+ 
+   if (!bestPlan) return null;
+ 
+   for (const leg of bestPlan.legs as (typeof bestPlan.legs[number] & { allowedSwaps?: string[] })[]) {
+     if (leg.mode === "walk" || leg.mode === "taxi" || leg.mode === "tuktuk") {
+       leg.allowedSwaps = ["walk", "taxi"];
+     }
+   }
+ 
+   return bestPlan;
+ }
+ 
+ export async function planTripApi(req: PlanRequest) {
+   const graph = await buildGraph();
+   const plan = await computeEnginePlan(req);
+   if (!plan) return null;
+   return adaptPlanToApi(graph, plan, req.isArabic);
+ }
+diff --git a/artifacts/api-server/src/routes/tripPlan.ts b/artifacts/api-server/src/routes/tripPlan.ts
+index 29ec55b01154df3156492db9d10f2f78e704f738..f24dc4a9b4b3c0338cee1eb95ffceee7ab77dfe6 100644
+--- a/artifacts/api-server/src/routes/tripPlan.ts
++++ b/artifacts/api-server/src/routes/tripPlan.ts
+@@ -1,33 +1,34 @@
+ import { Router } from "express";
+ import { db } from "@workspace/db";
+ import { transportTypesTable, transitLinesTable } from "@workspace/db";
+ import { eq } from "drizzle-orm";
+ import { requireAuth } from "../middlewares/requireAuth";
+ import { EGYPT_CITIES } from "../lib/intercitySearch.js";
+ import { runIntercitySearch } from "../lib/intercitySearch.js";
+ import { planTripApi } from "../engine/planner.js";
++import { snapConnector } from "../utils/routePathGenerator.js";
+ 
+ const router = Router();
+ 
+ function haversineKm(aLat: number, aLng: number, bLat: number, bLng: number) {
+   const R = 6371;
+   const dLat = (bLat - aLat) * Math.PI / 180;
+   const dLng = (bLng - aLng) * Math.PI / 180;
+   const a = Math.sin(dLat / 2) ** 2 + Math.cos(aLat * Math.PI / 180) * Math.cos(bLat * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+ }
+ 
+ // Cairo + Giza are one metro area — travel within them stays "city" mode.
+ const GREATER_CAIRO = new Set(["Cairo", "Giza"]);
+ 
+ function nearestCity(lat: number, lng: number) {
+   let best: (typeof EGYPT_CITIES)[number] | null = null;
+   let bestDist = Infinity;
+   for (const c of EGYPT_CITIES) {
+     if (c.lat == null || c.lng == null) continue;
+     const d = haversineKm(lat, lng, c.lat, c.lng);
+     if (d < bestDist) { bestDist = d; best = c; }
+   }
+   return best ? { city: best, dist: bestDist } : null;
+ }
+ 
+@@ -109,55 +110,58 @@ router.post("/", requireAuth, async (req, res) => {
+       );
+       if (intercityPlan) return res.json(intercityPlan);
+     } catch (err) {
+       console.error("Intercity plan error:", err);
+       // fall through to normal city planning
+     }
+   }
+ 
+   const isArabic = language === "ar";
+   const planKey: "economic" | "comfortable" | "premium" =
+     tripType === "economic" || tripType === "premium" ? tripType : "comfortable";
+ 
+   // Rough taxi estimate kept solely for the safety-net fallback below.
+   const taxiEst = Math.round(15 + distanceKm * 4);
+ 
+   try {
+     // Deterministic graph engine — NO AI, NEVER invents routes. It searches a
+     // graph built only from verified DB data (lines, stops, paths, fares).
+     const plan = await planTripApi({
+       origin: { lat: startLat, lng: startLng },
+       dest: { lat: endLat, lng: endLng },
+       planKey,
+       isArabic,
+     });
+     if (plan && plan.segments.length > 0) return res.json(plan);
+-    // Engine produced nothing verifiable — fall back to a real door-to-door ride.
+-    return res.json(generateFallbackPlan(startLat, startLng, endLat, endLng, distanceKm, taxiEst, isArabic));
++    // Engine produced nothing verifiable. Door-to-door Uber/Careem is allowed only
++    // for premium; non-premium users should not receive a full-trip taxi plan.
++    if (planKey === "premium") return res.json(await generateFallbackPlan(startLat, startLng, endLat, endLng, distanceKm, taxiEst, isArabic));
++    return res.status(409).json({ error: isArabic ? "لا يوجد مسار مواصلات موثّق بدون أوبر للرحلة كلها. جرّب الخطة المميزة أو غيّر نقطة البداية/النهاية." : "No verified non-premium transit route was found without taking Uber/Careem for the whole trip. Try Premium or adjust the start/end point." });
+   } catch (err: unknown) {
+     console.error("Engine trip plan error:", err);
+-    return res.json(generateFallbackPlan(startLat, startLng, endLat, endLng, distanceKm, taxiEst, isArabic));
++    if (planKey === "premium") return res.json(await generateFallbackPlan(startLat, startLng, endLat, endLng, distanceKm, taxiEst, isArabic));
++    return res.status(409).json({ error: isArabic ? "تعذر إنشاء مسار موثّق بدون جعل أوبر الرحلة كلها." : "Could not build a verified route without making Uber/Careem the whole trip." });
+   }
+ });
+ 
+ type IntercityCity = (typeof EGYPT_CITIES)[number];
+ 
+ async function buildIntercityPlan(
+   fromCity: IntercityCity,
+   toCity: IntercityCity,
+   distanceKm: number,
+   isArabic: boolean,
+ ) {
+   const tr = (en: string, ar: string) => (isArabic ? ar : en);
+   const fromName = isArabic ? fromCity.nameAr : fromCity.nameEn;
+   const toName = isArabic ? toCity.nameAr : toCity.nameEn;
+ 
+   const date = new Date().toISOString().slice(0, 10);
+   let trips: Awaited<ReturnType<typeof runIntercitySearch>>["trips"] = [];
+   try {
+     const result = await runIntercitySearch(fromCity.nameEn, toCity.nameEn, date);
+     trips = result.trips;
+   } catch (err) {
+     console.error("Intercity search failed inside plan:", err);
+   }
+ 
+   // Cheapest trip becomes the primary segment; others become alternatives.
+@@ -224,72 +228,73 @@ async function buildIntercityPlan(
+       `Intercity trip from ${fromName} to ${toName} (~${Math.round(distanceKm)} km).`,
+       `رحلة سفر من ${fromName} إلى ${toName} (~${Math.round(distanceKm)} كم).`,
+     ),
+     instructions,
+     route_geometry: null,
+     booking_url: primary?.bookingUrl ?? null,
+     alternatives,
+   };
+ 
+   return {
+     segments: [segment],
+     total_cost_egp: estPrice,
+     total_duration_minutes: estDuration,
+     budget_range: { min: Math.round(estPrice * 0.8), max: Math.round(estPrice * 1.4) },
+     distance_km: parseFloat(distanceKm.toFixed(1)),
+     intercity: true,
+     from_city: fromName,
+     to_city: toName,
+   };
+ }
+ 
+ // Last-resort fallback used ONLY when the deterministic graph engine cannot run
+ // at all (e.g. it threw). It NEVER invents a transit route: a door-to-door
+ // Uber/Careem ride is a real, computable option (origin → dest at a metered
+ // fare), not a fabricated metro/bus/serfis line with imaginary stations.
+-function generateFallbackPlan(
++async function generateFallbackPlan(
+   startLat: number,
+   startLng: number,
+   endLat: number,
+   endLng: number,
+   distanceKm: number,
+   taxiEst: number,
+   isArabic: boolean,
+ ) {
+   const tr = (en: string, ar: string) => (isArabic ? ar : en);
+   const duration = Math.max(5, Math.round(distanceKm * 2.5));
++  const routeGeometry = await snapConnector("driving", [startLng, startLat], [endLng, endLat]) ?? [
++    [startLng, startLat] as [number, number],
++    [endLng, endLat] as [number, number],
++  ];
+   const segment = {
+     transport_type_id: "car",
+     transport_name: tr("Uber / Careem", "أوبر / كريم"),
+     government_type: "private",
+     category: "premium",
+     start_name: tr("Your Location", "موقعك"),
+     end_name: tr("Destination", "الوجهة"),
+     cost_egp: taxiEst,
+     duration_minutes: duration,
+     color: "#06B6D4",
+     icon: "car",
+     line_id: null,
+     line_number: "",
+     info: tr("Door-to-door ride.", "رحلة من الباب للباب."),
+     instructions: [
+       tr("Open the Uber or Careem app.", "افتح تطبيق أوبر أو كريم."),
+       tr("Enter your destination and confirm pickup at your location.", "أدخل وجهتك وأكد مكان الالتقاء عند موقعك."),
+       tr(`Pay in-app or cash (~${taxiEst} EGP).`, `ادفع عبر التطبيق أو نقدًا (~${taxiEst} جنيه).`),
+     ],
+-    route_geometry: [
+-      [startLng, startLat],
+-      [endLng, endLat],
+-    ],
++    route_geometry: routeGeometry,
+     alternatives: [],
+   };
+   return {
+     segments: [segment],
+     total_cost_egp: taxiEst,
+     total_duration_minutes: duration,
+     budget_range: { min: Math.round(taxiEst * 0.8), max: Math.round(taxiEst * 1.3) },
+     distance_km: parseFloat(distanceKm.toFixed(1)),
+     engine: "taxi-fallback",
+   };
+ }
+ 
+ export default router;
+diff --git a/artifacts/api-server/src/utils/routePathGenerator.ts b/artifacts/api-server/src/utils/routePathGenerator.ts
+index 831abcf267cfd1364284bda2112c1169d7bb6a73..c660f713b16604ff282afac165dbbefbb9bd53c4 100644
+--- a/artifacts/api-server/src/utils/routePathGenerator.ts
++++ b/artifacts/api-server/src/utils/routePathGenerator.ts
+@@ -57,104 +57,110 @@ export async function geocodeStop(
+ // caller can fall back to Mapbox walking and then a straight interpolation.
+ // Cached by ~4-decimal coords to limit requests.
+ const OSRM_FOOT_BASE =
+   process.env.OSRM_FOOT_URL?.replace(/\/+$/, "")
+   || "https://routing.openstreetmap.de/routed-foot";
+ const footCache = new Map<string, [number, number][]>();
+ 
+ export async function snapFootOsrm(
+   a: [number, number],
+   b: [number, number],
+ ): Promise<[number, number][] | null> {
+   // Inputs are canonical [lng, lat]; bail if they fall outside valid ranges
+   // rather than guessing axis order (a relative lng>lat heuristic is wrong for
+   // places like Alexandria where lng < lat).
+   const [lngA, latA] = a;
+   const [lngB, latB] = b;
+   if (!validLngLat(lngA, latA) || !validLngLat(lngB, latB)) return null;
+ 
+   const key = `${latA.toFixed(4)},${lngA.toFixed(4)}|${latB.toFixed(4)},${lngB.toFixed(4)}`;
+   const cached = footCache.get(key);
+   if (cached) return cached.map((p) => [p[0], p[1]] as [number, number]);
+ 
+   const coordStr = `${lngA},${latA};${lngB},${latB}`;
+   const url =
+     `${OSRM_FOOT_BASE}/route/v1/foot/${coordStr}`
+-    + `?overview=full&geometries=geojson`;
++    + `?overview=full&geometries=geojson&alternatives=true`;
+   try {
+     // Short timeout: the public FOSSGIS instance is occasionally slow, and a
+     // slow snap must not stall the whole trip plan. On timeout we fall back to
+     // Mapbox walking and then a straight line (see onStreetGeometry).
+     const res = await fetch(url, { signal: AbortSignal.timeout(4_000) });
+     if (!res.ok) return null;
+     const data = await res.json() as {
+       code?: string;
+-      routes?: Array<{ geometry: { coordinates: [number, number][] } }>;
++      routes?: Array<{ distance?: number; geometry: { coordinates: [number, number][] } }>;
+     };
+     if (data.code !== "Ok") return null;
+-    const coords = data.routes?.[0]?.geometry?.coordinates;
++    const coords = data.routes
++      ?.filter((r) => r.geometry?.coordinates?.length >= 2)
++      .sort((a, b) => (a.distance ?? Infinity) - (b.distance ?? Infinity))[0]
++      ?.geometry.coordinates;
+     if (!coords || coords.length < 2) return null;
+     footCache.set(key, coords);
+     return coords;
+   } catch {
+     return null;
+   }
+ }
+ 
+ // Snap a single origin→dest connector onto the real network for one travel
+ // profile ("walking" or "driving"). Used to turn straight-line walk/taxi/tuktuk
+ // legs into on-street geometry. Cached by ~4-decimal coords to limit API calls.
+ const connectorCache = new Map<string, [number, number][]>();
+ 
+ export async function snapConnector(
+   profile: "walking" | "driving",
+   a: [number, number],
+   b: [number, number],
+ ): Promise<[number, number][] | null> {
+   const token = getToken();
+   if (!token) return null;
+ 
+   // Inputs are canonical [lng, lat]; bail if they fall outside valid ranges
+   // rather than guessing axis order (a relative lng>lat heuristic is wrong for
+   // places like Alexandria where lng < lat).
+   const [lngA, latA] = a;
+   const [lngB, latB] = b;
+   if (!validLngLat(lngA, latA) || !validLngLat(lngB, latB)) return null;
+ 
+   const key = `${profile}|${latA.toFixed(4)},${lngA.toFixed(4)}|${latB.toFixed(4)},${lngB.toFixed(4)}`;
+   const cached = connectorCache.get(key);
+   if (cached) return cached.map((p) => [p[0], p[1]] as [number, number]);
+ 
+   const coordStr = `${lngA},${latA};${lngB},${latB}`;
+   const url =
+     `https://api.mapbox.com/directions/v5/mapbox/${profile}/${coordStr}`
+-    + `?geometries=geojson&overview=full&access_token=${token}`;
++    + `?geometries=geojson&overview=full&alternatives=true&access_token=${token}`;
+   try {
+     const res = await fetch(url, { signal: AbortSignal.timeout(6_000) });
+     if (!res.ok) return null;
+-    const data = await res.json() as { routes?: Array<{ geometry: { coordinates: [number, number][] } }> };
+-    const coords = data.routes?.[0]?.geometry?.coordinates;
++    const data = await res.json() as { routes?: Array<{ distance?: number; geometry: { coordinates: [number, number][] } }> };
++    const coords = data.routes
++      ?.filter((r) => r.geometry?.coordinates?.length >= 2)
++      .sort((a, b) => (a.distance ?? Infinity) - (b.distance ?? Infinity))[0]
++      ?.geometry.coordinates;
+     if (!coords || coords.length < 2) return null;
+     connectorCache.set(key, coords);
+     return coords;
+   } catch {
+     return null;
+   }
+ }
+ 
+ export async function snapToRoads(points: [number, number][]): Promise<[number, number][]> {
+   const token = getToken();
+   if (!token || points.length < 2) return points;
+ 
+   const CHUNK = 24;
+   const allCoords: [number, number][] = [];
+ 
+   for (let i = 0; i < points.length - 1; i += CHUNK) {
+     const chunk = points.slice(i, Math.min(i + CHUNK + 1, points.length));
+     const coordStr = chunk.map(p => `${p[0]},${p[1]}`).join(";");
+     const url =
+       `https://api.mapbox.com/directions/v5/mapbox/driving/${coordStr}`
+       + `?geometries=geojson&overview=full&access_token=${token}`;
+     try {
+       const res = await fetch(url);
+       if (!res.ok) continue;
+       const data = await res.json() as { routes?: Array<{ geometry: { coordinates: [number, number][] } }> };
+diff --git a/artifacts/sikka/src/components/RouteLayers.tsx b/artifacts/sikka/src/components/RouteLayers.tsx
+index 17045f1d6d1c1ff734b74173628dc5551d310a06..25e35c1f9a138df0bdaaeded613cb88709a65c3f 100644
+--- a/artifacts/sikka/src/components/RouteLayers.tsx
++++ b/artifacts/sikka/src/components/RouteLayers.tsx
+@@ -52,49 +52,65 @@ export default function RouteLayers({ id, data }: RouteLayersProps) {
+             source: id,
+             paint: { 'line-color': ['get', 'color'], 'line-width': 5, 'line-opacity': 0.85 },
+           });
+         }
+         if (!map.getLayer(labelId)) {
+           map.addLayer({
+             id: labelId,
+             type: 'symbol',
+             source: id,
+             layout: {
+               'symbol-placement': 'line',
+               'symbol-spacing': 200,
+               'text-field': ['get', 'name'],
+               'text-size': 13,
+               'text-font': ['Noto Sans Bold'],
+             },
+             paint: { 'text-color': '#fff', 'text-halo-color': ['get', 'color'], 'text-halo-width': 3 },
+           });
+         }
+       } catch {
+         /* style mid-reload; the next styledata tick will retry */
+       }
+     };
+ 
+     if (map.isStyleLoaded()) ensure();
++    const retry = window.setTimeout(ensure, 150);
+     // Re-add after any style (re)load, e.g. light/dark toggle wipes custom layers.
++    map.on('load', ensure);
++    map.on('idle', ensure);
+     map.on('styledata', ensure);
+ 
+     return () => {
++      window.clearTimeout(retry);
++      map.off('load', ensure);
++      map.off('idle', ensure);
+       map.off('styledata', ensure);
+       try {
+         if (map.getLayer(labelId)) map.removeLayer(labelId);
+         if (map.getLayer(lineId)) map.removeLayer(lineId);
+         if (map.getSource(id)) map.removeSource(id);
+       } catch {
+         /* map already torn down */
+       }
+     };
+   }, [mapInstance, id]);
+ 
+   useEffect(() => {
+     const map = mapInstance?.getMap();
+     if (!map) return;
+     const src = map.getSource(id) as { setData?: (d: RouteFeatureCollection) => void } | undefined;
+-    if (src?.setData) src.setData(data);
++    if (src?.setData) {
++      src.setData(data);
++    } else {
++      // If React delivers data before MapLibre has finished loading the style,
++      // nudge the mount effect by emitting on the next idle/style tick instead of
++      // silently losing the route.
++      window.setTimeout(() => {
++        const late = map.getSource(id) as { setData?: (d: RouteFeatureCollection) => void } | undefined;
++        late?.setData?.(data);
++      }, 100);
++    }
+   }, [mapInstance, id, data]);
+ 
+   return null;
+ }
+diff --git a/artifacts/sikka/src/components/trip/TripGuideSheet.tsx b/artifacts/sikka/src/components/trip/TripGuideSheet.tsx
+index 3a53befcd8bed3d3a0a90ca8f90608f09a9f01b2..79562b86050a0c45910968cd7a2709a567d9106b 100644
+--- a/artifacts/sikka/src/components/trip/TripGuideSheet.tsx
++++ b/artifacts/sikka/src/components/trip/TripGuideSheet.tsx
+@@ -1,42 +1,42 @@
+ import { motion, AnimatePresence } from 'framer-motion';
+ import { Button } from '@/components/ui/button';
+ import { Progress } from '@/components/ui/progress';
+ import { Badge } from '@/components/ui/badge';
+ import { t } from '@/lib/i18n';
+ import type { Language } from '@/lib/i18n';
+ import {
+   ChevronUp, ChevronDown, X, Clock, Wallet, Check, MapPin, ArrowLeft, ArrowRight, Flag,
+ } from 'lucide-react';
+ 
+ const ICONS: Record<string, string> = {
+   bus: '🚌', train: '🚆', car: '🚕', bike: '🛺', ship: '🚢', plane: '✈️', metro: '🚇', monorail: '🚝', walk: '🚶',
+ };
+ 
+ export interface GuideAlternative {
+   transport_type_id: string; transport_name: string; cost_egp: number; duration_minutes: number;
+-  color: string; icon: string; line_number?: string;
++  color: string; icon: string; line_id?: string | null; line_number?: string | null; info?: string; instructions?: string[]; route_geometry?: [number, number][] | null;
+ }
+ export interface GuideSegment {
+   transport_type_id?: string; transport_name: string; start_name: string; end_name: string;
+   cost_egp: number; duration_minutes: number; color: string; icon: string;
+   line_number?: string; info?: string; instructions?: string[]; alternatives?: GuideAlternative[];
+ }
+ export interface GuidePlan {
+   segments: GuideSegment[]; total_cost_egp: number; total_duration_minutes: number; destination?: string;
+ }
+ 
+ interface TripGuideSheetProps {
+   plan: GuidePlan;
+   currentSegIdx: number;
+   progress: number;
+   remainingMinutes: number;
+   expanded: boolean;
+   onToggleExpand: () => void;
+   onNext: () => void;
+   onBack: () => void;
+   onDone: () => void;
+   onClose: () => void;
+   onSwap: (segIdx: number, alt: GuideAlternative) => void;
+   onReport?: () => void;
+   language: Language;
+ }
+@@ -55,51 +55,51 @@ function formatClock(minsFromNow: number, lang: Language): string {
+ }
+ 
+ export default function TripGuideSheet({
+   plan, currentSegIdx, progress, remainingMinutes, expanded, onToggleExpand,
+   onNext, onBack, onDone, onClose, onSwap, onReport, language,
+ }: TripGuideSheetProps) {
+   const seg = plan.segments[currentSegIdx];
+   if (!seg) return null;
+   const isLast = currentSegIdx >= plan.segments.length - 1;
+   const arrival = formatClock(remainingMinutes, language);
+ 
+   return (
+     <div className="absolute bottom-0 left-0 right-0 z-30 px-3 pb-3">
+       <motion.div
+         layout
+         initial={{ y: 140, opacity: 0 }}
+         animate={{ y: 0, opacity: 1 }}
+         transition={{ type: 'spring', damping: 26, stiffness: 280 }}
+         drag="y"
+         dragConstraints={{ top: 0, bottom: 0 }}
+         dragElastic={0.2}
+         onDragEnd={(_e, info) => {
+           if (info.offset.y < -60 && !expanded) onToggleExpand();
+           if (info.offset.y > 60 && expanded) onToggleExpand();
+         }}
+-        className="bg-card/98 backdrop-blur-md rounded-2xl shadow-2xl border overflow-hidden flex flex-col max-h-[calc(100vh-7rem)]"
++        className="bg-card/85 backdrop-blur-2xl rounded-[2rem] shadow-2xl border overflow-hidden flex flex-col max-h-[calc(100vh-7rem)]"
+       >
+         {/* drag handle / expand toggle */}
+         <button
+           onClick={onToggleExpand}
+           className="w-full flex flex-col items-center pt-2 pb-1 shrink-0"
+           aria-label="toggle"
+         >
+           <div className="h-1.5 w-10 rounded-full bg-muted-foreground/30" />
+         </button>
+ 
+         {/* ===== MINIMIZED BAR ===== */}
+         <div className="px-4 pb-3">
+           <div className="flex items-center gap-3">
+             <div
+               className="h-10 w-10 rounded-full flex items-center justify-center text-xl shrink-0"
+               style={{ backgroundColor: seg.color + '22' }}
+             >
+               {getIcon(seg.icon)}
+             </div>
+             <div className="flex-1 min-w-0">
+               <div className="flex items-center gap-1.5">
+                 {seg.line_number && (
+                   <Badge variant="outline" className="text-[10px] h-4 px-1" style={{ borderColor: seg.color, color: seg.color }}>
+                     {seg.line_number}
+                   </Badge>
+@@ -113,95 +113,119 @@ export default function TripGuideSheet({
+             <div className="flex items-center gap-1 shrink-0">
+               <span className="text-xs text-muted-foreground">{currentSegIdx + 1}/{plan.segments.length}</span>
+               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onToggleExpand}>
+                 {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+               </Button>
+               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose}>
+                 <X className="h-3.5 w-3.5" />
+               </Button>
+             </div>
+           </div>
+           <Progress value={progress} className="h-1.5 mt-2" />
+         </div>
+ 
+         {/* ===== EXPANDED CONTENT ===== */}
+         <AnimatePresence initial={false}>
+           {expanded && (
+             <motion.div
+               key="expanded"
+               initial={{ opacity: 0 }}
+               animate={{ opacity: 1 }}
+               exit={{ opacity: 0 }}
+               className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+             >
+               <div className="px-4 pb-4 space-y-4">
+                 {/* overall ETA + cost */}
+-                <div className="flex items-center justify-between rounded-xl bg-muted/50 px-3 py-2">
++                <div className="flex items-center justify-between rounded-2xl bg-muted/45 backdrop-blur px-3 py-2">
+                   <div className="flex items-center gap-1.5 text-sm">
+                     <Clock className="h-4 w-4 text-primary" />
+                     <span className="font-semibold">{t('arrivalAt', language)} {arrival}</span>
+                   </div>
+                   <div className="flex items-center gap-1.5 text-sm">
+                     <Wallet className="h-4 w-4 text-primary" />
+                     <span className="font-semibold">{Math.round(plan.total_cost_egp)} {t('egp', language)}</span>
+                   </div>
+                 </div>
+ 
+                 {/* current segment route + instructions */}
+-                <div className="rounded-xl border p-3" style={{ borderLeftWidth: 4, borderLeftColor: seg.color }}>
++                <div className="rounded-2xl border bg-background/35 backdrop-blur p-3" style={{ borderLeftWidth: 4, borderLeftColor: seg.color }}>
+                   <div className="flex items-center gap-2 text-sm mb-1">
+                     <MapPin className="h-3.5 w-3.5 text-primary" />
+                     <span className="font-medium text-foreground truncate">{seg.start_name}</span>
+                     <ArrowRight className="h-3 w-3 text-muted-foreground shrink-0" />
+                     <span className="text-muted-foreground truncate">{seg.end_name}</span>
+                   </div>
+                   <div className="flex items-center gap-3 text-xs text-muted-foreground mb-2">
+                     <span>{Math.round(seg.duration_minutes)} {t('minutes', language)}</span>
+                     <span>{Math.round(seg.cost_egp)} {t('egp', language)}</span>
+                   </div>
+ 
+                   {seg.instructions && seg.instructions.length > 0 && (
+                     <div>
+                       <p className="text-xs font-semibold text-foreground mb-1">{t('instructionsHeader', language)}</p>
+                       <ol className="space-y-1">
+                         {seg.instructions.map((ins, i) => (
+                           <li key={i} className="flex items-start gap-2 text-xs text-foreground/80">
+                             <span className="h-4 w-4 rounded-full bg-primary/15 text-primary text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">
+                               {i + 1}
+                             </span>
+                             <span className="leading-snug">{ins}</span>
+                           </li>
+                         ))}
+                       </ol>
+                     </div>
+                   )}
+ 
+                   {seg.info && !seg.instructions?.length && (
+                     <p className="text-xs text-muted-foreground leading-snug">{seg.info}</p>
+                   )}
+                 </div>
+ 
++                {seg.alternatives?.length ? (
++                  <div className="rounded-2xl border bg-background/40 backdrop-blur p-3 space-y-2">
++                    <p className="text-xs font-semibold text-foreground">Switch this leg</p>
++                    <div className="grid gap-2">
++                      {seg.alternatives.slice(0, 4).map((alt, idx) => (
++                        <button
++                          key={`${alt.transport_type_id}-${alt.line_number ?? idx}`}
++                          onClick={() => onSwap(currentSegIdx, alt)}
++                          className="flex items-center justify-between gap-3 rounded-2xl bg-card/70 hover:bg-primary/10 border px-3 py-2 text-left transition-colors"
++                        >
++                          <span className="flex items-center gap-2 min-w-0">
++                            <span className="text-base">{getIcon(alt.icon)}</span>
++                            <span className="min-w-0">
++                              <span className="block text-xs font-semibold truncate">{alt.line_number ? `${alt.line_number} · ` : ''}{alt.transport_name}</span>
++                              <span className="block text-[10px] text-muted-foreground truncate">{alt.info || `${Math.round(alt.duration_minutes)} ${t('minutes', language)}`}</span>
++                            </span>
++                          </span>
++                          <span className="text-[10px] text-muted-foreground shrink-0">{Math.round(alt.cost_egp)} {t('egp', language)}</span>
++                        </button>
++                      ))}
++                    </div>
++                  </div>
++                ) : null}
++
+                 {/* all segments overview */}
+                 <div className="space-y-1">
+                   <p className="text-xs font-semibold text-foreground">{t('allSteps', language)}</p>
+                   {plan.segments.map((s, i) => (
+                     <div
+                       key={i}
+                       className={`flex items-center gap-2 rounded-lg px-2 py-1.5 ${i === currentSegIdx ? 'bg-primary/10' : ''}`}
+                     >
+                       <span className="text-base">{getIcon(s.icon)}</span>
+                       <div className="flex-1 min-w-0">
+                         <p className="text-xs font-medium text-foreground truncate">
+                           {s.line_number ? `${s.line_number} · ` : ''}{s.transport_name}
+                         </p>
+                         <p className="text-[10px] text-muted-foreground truncate">{s.start_name} → {s.end_name}</p>
+                       </div>
+                       {i < currentSegIdx && <Check className="h-3.5 w-3.5 text-green-500 shrink-0" />}
+                     </div>
+                   ))}
+                 </div>
+ 
+                 {onReport && (
+                   <Button
+                     variant="ghost"
+                     size="sm"
+                     className="w-full gap-2 text-muted-foreground"
+diff --git a/artifacts/sikka/src/components/ui/button.tsx b/artifacts/sikka/src/components/ui/button.tsx
+index cdedd4f43da30732ce09e289a3c373a34c932078..1b3efd314a90fc7db8f92708fb98a151fa8477e4 100644
+--- a/artifacts/sikka/src/components/ui/button.tsx
++++ b/artifacts/sikka/src/components/ui/button.tsx
+@@ -1,47 +1,47 @@
+ import * as React from "react";
+ import { Slot } from "@radix-ui/react-slot";
+ import { cva, type VariantProps } from "class-variance-authority";
+ 
+ import { cn } from "@/lib/utils";
+ 
+ const buttonVariants = cva(
+-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
++  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-2xl text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+   {
+     variants: {
+       variant: {
+-        default: "bg-primary text-primary-foreground hover:bg-primary/90",
++        default: "bg-primary/95 backdrop-blur text-primary-foreground hover:bg-primary",
+         destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/90",
+-        outline: "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
+-        secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
++        outline: "border border-input bg-background/55 backdrop-blur hover:bg-accent/85 hover:text-accent-foreground",
++        secondary: "bg-secondary/80 backdrop-blur text-secondary-foreground hover:bg-secondary",
+         ghost: "hover:bg-accent hover:text-accent-foreground",
+         link: "text-primary underline-offset-4 hover:underline",
+       },
+       size: {
+         default: "h-10 px-4 py-2",
+-        sm: "h-9 rounded-md px-3",
+-        lg: "h-11 rounded-md px-8",
++        sm: "h-9 rounded-2xl px-3",
++        lg: "h-11 rounded-2xl px-8",
+         icon: "h-10 w-10",
+       },
+     },
+     defaultVariants: {
+       variant: "default",
+       size: "default",
+     },
+   },
+ );
+ 
+ export interface ButtonProps
+   extends React.ButtonHTMLAttributes<HTMLButtonElement>,
+     VariantProps<typeof buttonVariants> {
+   asChild?: boolean;
+ }
+ 
+ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
+   ({ className, variant, size, asChild = false, ...props }, ref) => {
+     const Comp = asChild ? Slot : "button";
+     return <Comp className={cn(buttonVariants({ variant, size, className }))} ref={ref} {...props} />;
+   },
+ );
+ Button.displayName = "Button";
+ 
+ export { Button, buttonVariants };
+diff --git a/artifacts/sikka/src/components/ui/card.tsx b/artifacts/sikka/src/components/ui/card.tsx
+index e28274800fdd298091b911ecadafcf544284df9d..3d5ad079f2fd9309d6d6aa8b264af3c25cfcad8b 100644
+--- a/artifacts/sikka/src/components/ui/card.tsx
++++ b/artifacts/sikka/src/components/ui/card.tsx
+@@ -1,31 +1,31 @@
+ import * as React from "react";
+ 
+ import { cn } from "@/lib/utils";
+ 
+ const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(({ className, ...props }, ref) => (
+-  <div ref={ref} className={cn("rounded-lg border bg-card text-card-foreground shadow-sm", className)} {...props} />
++  <div ref={ref} className={cn("rounded-2xl border bg-card/78 backdrop-blur-xl text-card-foreground shadow-sm", className)} {...props} />
+ ));
+ Card.displayName = "Card";
+ 
+ const CardHeader = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+   ({ className, ...props }, ref) => (
+     <div ref={ref} className={cn("flex flex-col space-y-1.5 p-6", className)} {...props} />
+   ),
+ );
+ CardHeader.displayName = "CardHeader";
+ 
+ const CardTitle = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLHeadingElement>>(
+   ({ className, ...props }, ref) => (
+     <h3 ref={ref} className={cn("text-2xl font-semibold leading-none tracking-tight", className)} {...props} />
+   ),
+ );
+ CardTitle.displayName = "CardTitle";
+ 
+ const CardDescription = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLParagraphElement>>(
+   ({ className, ...props }, ref) => (
+     <p ref={ref} className={cn("text-sm text-muted-foreground", className)} {...props} />
+   ),
+ );
+ CardDescription.displayName = "CardDescription";
+ 
+ const CardContent = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+diff --git a/artifacts/sikka/src/index.css b/artifacts/sikka/src/index.css
+index cf08265fdcc73a2238563866d6bb3407e1187929..333ed14c90ddd4d785f8bf56c8cebd581bcbf9c6 100644
+--- a/artifacts/sikka/src/index.css
++++ b/artifacts/sikka/src/index.css
+@@ -12,51 +12,51 @@
+     --card: 0 0% 100%;
+     --card-foreground: 220 20% 10%;
+ 
+     --popover: 0 0% 100%;
+     --popover-foreground: 220 20% 10%;
+ 
+     --primary: 217 91% 60%;
+     --primary-foreground: 0 0% 100%;
+ 
+     --secondary: 220 14% 96%;
+     --secondary-foreground: 220 20% 10%;
+ 
+     --muted: 220 14% 96%;
+     --muted-foreground: 220 10% 46%;
+ 
+     --accent: 142 71% 45%;
+     --accent-foreground: 0 0% 100%;
+ 
+     --destructive: 0 84% 60%;
+     --destructive-foreground: 0 0% 100%;
+ 
+     --border: 220 13% 91%;
+     --input: 220 13% 91%;
+     --ring: 217 91% 60%;
+ 
+-    --radius: 0.75rem;
++    --radius: 1.35rem;
+ 
+     --sidebar-background: 0 0% 98%;
+     --sidebar-foreground: 240 5.3% 26.1%;
+     --sidebar-primary: 217 91% 60%;
+     --sidebar-primary-foreground: 0 0% 100%;
+     --sidebar-accent: 220 14% 96%;
+     --sidebar-accent-foreground: 220 20% 10%;
+     --sidebar-border: 220 13% 91%;
+     --sidebar-ring: 217 91% 60%;
+ 
+     /* Transport colors */
+     --transport-taxi: 217 91% 60%;
+     --transport-metro: 0 84% 60%;
+     --transport-train: 142 71% 45%;
+     --transport-bus: 45 93% 47%;
+     --transport-airplane: 270 70% 60%;
+     --transport-microbus: 30 80% 50%;
+     --transport-tuktuk: 340 75% 55%;
+     --transport-monorail: 190 80% 45%;
+   }
+ 
+   .dark {
+     --background: 220 20% 7%;
+     --foreground: 210 20% 98%;
+ 
+@@ -104,25 +104,63 @@
+   body {
+     @apply bg-background text-foreground font-sans;
+     font-family: 'DM Sans', sans-serif;
+   }
+ 
+   /* RTL support */
+   [dir="rtl"] body {
+     font-family: 'Cairo', sans-serif;
+   }
+ }
+ 
+ /* Mapbox overrides */
+ .mapboxgl-ctrl-logo {
+   display: none !important;
+ }
+ 
+ .mapboxgl-ctrl-attrib,
+ .mapboxgl-ctrl-attrib-button {
+   display: none !important;
+ }
+ 
+ .mapboxgl-ctrl-bottom-left,
+ .mapboxgl-ctrl-bottom-right {
+   display: none !important;
+ }
++
++
++@layer components {
++  .glass-panel {
++    @apply bg-card/75 backdrop-blur-xl border border-white/20 shadow-xl;
++  }
++}
++
++@layer base {
++  button,
++  input,
++  textarea,
++  select,
++  [role="button"],
++  [role="dialog"],
++  [data-radix-popper-content-wrapper] > *,
++  .rounded-lg,
++  .rounded-xl,
++  .rounded-md {
++    border-radius: max(var(--radius), 1.15rem);
++  }
++
++  .bg-card,
++  [class*="bg-card/"],
++  .bg-popover,
++  [class*="bg-popover/"],
++  .bg-background\/50,
++  .bg-background\/70,
++  .bg-background\/80,
++  .bg-muted\/50 {
++    backdrop-filter: blur(18px) saturate(1.25);
++    -webkit-backdrop-filter: blur(18px) saturate(1.25);
++  }
++
++  .shadow-sm {
++    box-shadow: 0 10px 30px hsl(220 40% 2% / 0.08);
++  }
++}
+diff --git a/artifacts/sikka/src/pages/Index.tsx b/artifacts/sikka/src/pages/Index.tsx
+index 12292bd371c0e7c2ba33329400c19eff64031d80..ccfc12bb5d05005b542dc1161a928a229e1f9307 100644
+--- a/artifacts/sikka/src/pages/Index.tsx
++++ b/artifacts/sikka/src/pages/Index.tsx
+@@ -13,51 +13,51 @@ import { useIsDark, MAP_STYLE_LIGHT, MAP_STYLE_DARK } from '@/hooks/useIsDark';
+ import { useTripTracking } from '@/hooks/useTripTracking';
+ import TripGuideSheet, { type GuidePlan, type GuideSegment, type GuideAlternative } from '@/components/trip/TripGuideSheet';
+ import SegmentReviewDialog, { type ReviewSegment } from '@/components/trip/SegmentReviewDialog';
+ import BusUsedDialog from '@/components/trip/BusUsedDialog';
+ import IntercityChoiceDialog from '@/components/trip/IntercityChoiceDialog';
+ import ReportDialog from '@/components/ReportDialog';
+ import { api } from '@/lib/api';
+ import { toast } from 'sonner';
+ 
+ const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
+ const CAIRO_CENTER = { latitude: 30.0444, longitude: 31.2357 };
+ 
+ const reverseGeocode = async (lat: number, lng: number): Promise<string> => {
+   try {
+     const res = await fetch(
+       `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${MAPBOX_TOKEN}&language=en,ar&limit=1&types=address,neighborhood,locality,place`
+     );
+     const data = await res.json();
+     return data.features?.[0]?.place_name || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+   } catch {
+     return `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+   }
+ };
+ 
+ interface ActiveTripPlan extends GuidePlan {
+-  segments: (GuideSegment & { route_geometry?: [number, number][] | null })[];
++  segments: (GuideSegment & { route_geometry?: [number, number][] | null; line_id?: string | null })[];
+   startLat: number; startLng: number; destLat: number; destLng: number;
+   destination: string;
+ }
+ 
+ const Index = () => {
+   const { user, isLoading, language } = useAuth();
+   const navigate = useNavigate();
+   const isDark = useIsDark();
+   const mapRef = useRef<MapRef | null>(null);
+   const [viewState, setViewState] = useState({ ...CAIRO_CENTER, zoom: 14 });
+   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+   const [locationName, setLocationName] = useState('');
+   const [searchQuery, setSearchQuery] = useState('');
+ 
+   // Destination chosen by tapping the map (reverse-geocoded address shown for confirmation)
+   const [pickedDest, setPickedDest] = useState<{ lat: number; lng: number; name: string; loading: boolean } | null>(null);
+ 
+   const [activeTrip, setActiveTrip] = useState<ActiveTripPlan | null>(null);
+   const [currentSegIdx, setCurrentSegIdx] = useState(0);
+   const [expanded, setExpanded] = useState(true);
+   const [routeCoords, setRouteCoords] = useState<{ segIndex: number; coords: [number, number][] }[]>([]);
+ 
+   const [reviewSeg, setReviewSeg] = useState<ReviewSegment | null>(null);
+   const [reviewOpen, setReviewOpen] = useState(false);
+   const [tripReviewOpen, setTripReviewOpen] = useState(false);
+@@ -264,56 +264,59 @@ const Index = () => {
+   // Confirm the tapped destination — runs the exact same flow as a search selection.
+   const confirmPickedDest = () => {
+     if (!pickedDest) return;
+     const name = pickedDest.name || `${pickedDest.lat.toFixed(4)}, ${pickedDest.lng.toFixed(4)}`;
+     const dest = { place_name: name, center: [pickedDest.lng, pickedDest.lat] as [number, number] };
+     setPickedDest(null);
+     void handleDestinationSelect(dest);
+   };
+ 
+   const handleSegmentReviewDone = () => {
+     if (!activeTrip) return;
+     if (currentSegIdx >= activeTrip.segments.length - 1) {
+       setTripReviewOpen(true);
+     } else {
+       setCurrentSegIdx((i) => i + 1);
+     }
+   };
+ 
+   const handleSwap = (segIdx: number, alt: GuideAlternative) => {
+     if (!activeTrip) return;
+     const newSegments = [...activeTrip.segments];
+     const old = newSegments[segIdx];
+     newSegments[segIdx] = {
+       ...old, transport_type_id: alt.transport_type_id, transport_name: alt.transport_name,
+       cost_egp: alt.cost_egp, duration_minutes: alt.duration_minutes, color: alt.color,
+-      icon: alt.icon, line_number: alt.line_number || '',
++      icon: alt.icon, line_id: alt.line_id ?? null, line_number: alt.line_number || '',
++      info: alt.info ?? old.info, instructions: alt.instructions ?? old.instructions,
++      route_geometry: alt.route_geometry && alt.route_geometry.length >= 2 ? alt.route_geometry : old.route_geometry,
+     };
+     const newTotal = newSegments.reduce((s, sg) => s + sg.cost_egp, 0);
+     const newTime = newSegments.reduce((s, sg) => s + sg.duration_minutes, 0);
+     const updated = { ...activeTrip, segments: newSegments, total_cost_egp: newTotal, total_duration_minutes: newTime };
+     setActiveTrip(updated);
++    setRouteCoords((prev) => prev.map((r) => r.segIndex === segIdx && alt.route_geometry?.length ? { ...r, coords: alt.route_geometry! } : r));
+     sessionStorage.setItem('tripPlan', JSON.stringify(updated));
+     toast.success(t('planUpdated', language));
+   };
+ 
+   const routeGeoJSON = {
+     type: 'FeatureCollection' as const,
+     features: routeCoords.map(({ segIndex, coords }) => ({
+       type: 'Feature' as const,
+       properties: {
+         color: activeTrip?.segments[segIndex]?.color || '#3B82F6',
+         name: activeTrip?.segments[segIndex]?.line_number || activeTrip?.segments[segIndex]?.transport_name || '',
+       },
+       geometry: { type: 'LineString' as const, coordinates: coords },
+     })),
+   };
+ 
+   if (isLoading) {
+     return (
+       <div className="min-h-screen flex items-center justify-center bg-background">
+         <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1 }} className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full" />
+       </div>
+     );
+   }
+ 
+   return (
+diff --git a/artifacts/sikka/src/pages/TripResult.tsx b/artifacts/sikka/src/pages/TripResult.tsx
+index 76ac6317065bc53a95fd559305381984efebfb27..af9c0609ffc084d88ef253e3c4b8958e2a55e2c9 100644
+--- a/artifacts/sikka/src/pages/TripResult.tsx
++++ b/artifacts/sikka/src/pages/TripResult.tsx
+@@ -1,143 +1,173 @@
+ import { useState, useEffect, useCallback, useRef } from 'react';
+ import { useNavigate } from 'react-router-dom';
+ import { useAuth } from '@/contexts/AuthContext';
+ import { t } from '@/lib/i18n';
+ import { Button } from '@/components/ui/button';
+ import { Card, CardContent } from '@/components/ui/card';
+ import { Badge } from '@/components/ui/badge';
+ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+ import { motion, AnimatePresence } from 'framer-motion';
+ import { ArrowLeft, Clock, Wallet, MapPin, RefreshCw, Check, Navigation, X, Info, ChevronRight } from 'lucide-react';
+ import { toast } from 'sonner';
+-import Map, { Marker } from 'react-map-gl/maplibre';
++import Map, { Marker, type MapRef } from 'react-map-gl/maplibre';
+ import RouteLayers from '@/components/RouteLayers';
+ import 'maplibre-gl/dist/maplibre-gl.css';
+ import { useIsDark, MAP_STYLE_LIGHT, MAP_STYLE_DARK } from '@/hooks/useIsDark';
+ 
+ interface Segment {
+   transport_type_id: string; transport_name: string; start_name: string; end_name: string;
+   cost_egp: number; duration_minutes: number; color: string; icon: string;
+   alternatives: Alternative[];
+-  line_id?: string | null; line_number?: string; info?: string;
++  line_id?: string | null; line_number?: string | null; info?: string; instructions?: string[];
+   route_geometry?: [number, number][] | null;
+ }
+ interface Alternative {
+-  transport_type_id: string; transport_name: string; cost_egp: number; duration_minutes: number; color: string; icon: string; line_number?: string;
++  transport_type_id: string; transport_name: string; cost_egp: number; duration_minutes: number; color: string; icon: string; line_id?: string | null; line_number?: string | null; info?: string; instructions?: string[]; route_geometry?: [number, number][] | null;
+ }
+ interface TripPlanData {
+   segments: Segment[]; total_cost_egp: number; total_duration_minutes: number;
+   budget_range: { min: number; max: number }; distance_km: number; destination: string;
+   tripType: string; startLat: number; startLng: number; destLat: number; destLng: number;
+ }
+ 
+ const ICONS: Record<string, string> = {
+   bus: '🚌', train: '🚆', car: '🚕', bike: '🛺', ship: '🚢', plane: '✈️', metro: '🚇', monorail: '🚝', walk: '🚶',
+ };
+ 
+ const TripResult = () => {
+   const navigate = useNavigate();
+   const { language } = useAuth();
+   const [plan, setPlan] = useState<TripPlanData | null>(null);
+   const [swapIndex, setSwapIndex] = useState<number | null>(null);
+-  const [showMap, setShowMap] = useState(false);
++  const [showMap, setShowMap] = useState(true);
+   const [isTracking, setIsTracking] = useState(false);
+   const [userPos, setUserPos] = useState<{ lat: number; lng: number } | null>(null);
+   const [currentSegIndex, setCurrentSegIndex] = useState(0);
+   const [routeCoords, setRouteCoords] = useState<{ segIndex: number; coords: [number, number][] }[]>([]);
+   const [isLoadingRoutes, setIsLoadingRoutes] = useState(false);
+   const [popupSegIndex, setPopupSegIndex] = useState<number | null>(null);
+   const watchRef = useRef<number | null>(null);
++  const mapRef = useRef<MapRef | null>(null);
+   const isDark = useIsDark();
+ 
+   useEffect(() => {
+     const stored = sessionStorage.getItem('tripPlan');
+     if (stored) setPlan(JSON.parse(stored));
+     else navigate('/');
+   }, [navigate]);
+ 
+   // Render the route geometry supplied by the backend directly — no client-side
+   // road snapping. Segments without geometry fall back to a straight line.
+   const loadRoutes = useCallback(() => {
+     if (!plan) return;
+     setIsLoadingRoutes(true);
+     const results: { segIndex: number; coords: [number, number][] }[] = [];
+ 
+     const segCount = plan.segments.length;
+     for (let i = 0; i < segCount; i++) {
+       const seg = plan.segments[i];
+       // Use the backend-supplied geometry for this segment directly
+       if (seg.route_geometry && seg.route_geometry.length >= 2) {
+         results.push({ segIndex: i, coords: seg.route_geometry });
+         continue;
+       }
+       // Otherwise draw a straight line between approximated start/end positions
+       const startLng = plan.startLng + (plan.destLng - plan.startLng) * (i / segCount);
+       const startLat = plan.startLat + (plan.destLat - plan.startLat) * (i / segCount);
+       const endLng = plan.startLng + (plan.destLng - plan.startLng) * ((i + 1) / segCount);
+       const endLat = plan.startLat + (plan.destLat - plan.startLat) * ((i + 1) / segCount);
+       results.push({ segIndex: i, coords: [[startLng, startLat], [endLng, endLat]] });
+     }
+ 
+     setRouteCoords(results);
+     setIsLoadingRoutes(false);
+   }, [plan]);
+ 
+-  useEffect(() => { if (plan && showMap && routeCoords.length === 0) loadRoutes(); }, [plan, showMap, loadRoutes, routeCoords.length]);
++  useEffect(() => { if (plan) loadRoutes(); }, [plan, loadRoutes]);
+ 
+   const startTracking = useCallback(() => {
+     setIsTracking(true);
+     setShowMap(true);
+     setCurrentSegIndex(0);
+     if (navigator.geolocation) {
+       watchRef.current = navigator.geolocation.watchPosition(
+         pos => setUserPos({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+         () => toast.error('GPS unavailable'),
+         { enableHighAccuracy: true, maximumAge: 3000 }
+       );
+     }
+     toast.success(t('haveGreatTrip', language));
+   }, [language]);
+ 
+   useEffect(() => {
+     return () => { if (watchRef.current) navigator.geolocation.clearWatch(watchRef.current); };
+   }, []);
+ 
++  useEffect(() => {
++    if (!routeCoords.length || !mapRef.current) return;
++    let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
++    routeCoords.forEach(({ coords }) => coords.forEach(([lng, lat]) => {
++      minLng = Math.min(minLng, lng); maxLng = Math.max(maxLng, lng);
++      minLat = Math.min(minLat, lat); maxLat = Math.max(maxLat, lat);
++    }));
++    if (Number.isFinite(minLng)) {
++      try { mapRef.current.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 48, duration: 600 }); } catch {}
++    }
++  }, [routeCoords]);
++
+   const stopTracking = () => {
+     setIsTracking(false);
+     if (watchRef.current) navigator.geolocation.clearWatch(watchRef.current);
+   };
+ 
+   const handleSwap = (segIndex: number, alt: Alternative) => {
+     if (!plan) return;
+     const newSegments = [...plan.segments];
+     const oldSeg = newSegments[segIndex];
+-    newSegments[segIndex] = { ...oldSeg, transport_type_id: alt.transport_type_id, transport_name: alt.transport_name, cost_egp: alt.cost_egp, duration_minutes: alt.duration_minutes, color: alt.color, icon: alt.icon, line_number: alt.line_number || '' };
++    newSegments[segIndex] = {
++      ...oldSeg,
++      transport_type_id: alt.transport_type_id,
++      transport_name: alt.transport_name,
++      cost_egp: alt.cost_egp,
++      duration_minutes: alt.duration_minutes,
++      color: alt.color,
++      icon: alt.icon,
++      line_id: alt.line_id ?? null,
++      line_number: alt.line_number || '',
++      info: alt.info ?? oldSeg.info,
++      instructions: alt.instructions ?? oldSeg.instructions,
++      route_geometry: alt.route_geometry && alt.route_geometry.length >= 2 ? alt.route_geometry : oldSeg.route_geometry,
++    };
+     const newTotal = newSegments.reduce((s, seg) => s + seg.cost_egp, 0);
+     const newTime = newSegments.reduce((s, seg) => s + seg.duration_minutes, 0);
+-    setPlan({ ...plan, segments: newSegments, total_cost_egp: newTotal, total_duration_minutes: newTime });
++    const updated = { ...plan, segments: newSegments, total_cost_egp: newTotal, total_duration_minutes: newTime };
++    setPlan(updated);
++    sessionStorage.setItem('tripPlan', JSON.stringify(updated));
++    setRouteCoords((prev) => prev.map((r) => r.segIndex === segIndex && alt.route_geometry?.length ? { ...r, coords: alt.route_geometry! } : r));
+     setSwapIndex(null);
++    setPopupSegIndex(segIndex);
+     toast.success(t('planUpdated', language));
+   };
+ 
+   if (!plan) return null;
+ 
+   const getIcon = (icon: string) => ICONS[icon] || '🚌';
+ 
+   const routeGeoJSON = {
+     type: 'FeatureCollection' as const,
+     features: routeCoords.map(({ segIndex, coords }) => ({
+       type: 'Feature' as const,
+       properties: { color: plan.segments[segIndex]?.color || '#3B82F6', name: plan.segments[segIndex]?.line_number || plan.segments[segIndex]?.transport_name },
+       geometry: { type: 'LineString' as const, coordinates: coords },
+     })),
+   };
+ 
+   const midLat = (plan.startLat + plan.destLat) / 2;
+   const midLng = (plan.startLng + plan.destLng) / 2;
+ 
+   const currentSeg = plan.segments[currentSegIndex];
+   const nextSeg = plan.segments[currentSegIndex + 1];
+   const remainingTime = plan.segments.slice(currentSegIndex).reduce((s, seg) => s + seg.duration_minutes, 0);
+   const isLastSeg = currentSegIndex >= plan.segments.length - 1;
+ 
+   const popupSeg = popupSegIndex != null ? plan.segments[popupSegIndex] : null;
+@@ -179,102 +209,113 @@ const TripResult = () => {
+             <Button size="icon" variant="secondary" className="shrink-0 h-8 w-8" onClick={stopTracking}>
+               <X className="h-4 w-4" />
+             </Button>
+           </div>
+           <div className="flex gap-2">
+             {!isLastSeg ? (
+               <Button size="sm" variant="secondary" className="flex-1 gap-1 h-9"
+                 onClick={() => { setCurrentSegIndex(i => i + 1); toast.success('Moved to next segment'); }}>
+                 <ChevronRight className="h-4 w-4" /> Next segment
+               </Button>
+             ) : (
+               <Button size="sm" variant="secondary" className="flex-1 gap-1 h-9"
+                 onClick={() => { stopTracking(); toast.success('Trip complete! 🎉'); }}>
+                 <Check className="h-4 w-4" /> Mark trip complete
+               </Button>
+             )}
+           </div>
+         </div>
+       )}
+ 
+       {/* Map */}
+       <AnimatePresence>
+         {(showMap || isTracking) && (
+           <motion.div initial={{ height: 0 }} animate={{ height: isTracking ? 420 : 320 }} exit={{ height: 0 }} className="overflow-hidden">
+             <Map
++              ref={mapRef}
+               initialViewState={{ latitude: userPos?.lat || midLat, longitude: userPos?.lng || midLng, zoom: isTracking ? 14 : 11 }}
+               mapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
+               style={{ width: '100%', height: isTracking ? 420 : 320 }}
+               attributionControl={false}
+               onError={(e) => { const err = (e as { error?: Error })?.error; console.error('[trip-map] error:', err?.message || e, err?.stack); }}
+             >
+               {isLoadingRoutes && (
+                 <div className="absolute inset-0 flex items-center justify-center bg-background/50 z-10">
+                   <div className="h-6 w-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                 </div>
+               )}
+               <RouteLayers id="route" data={routeGeoJSON} />
+ 
+               {/* Segment icon markers — clickable to open popup */}
+               {routeCoords.map(({ segIndex, coords }) => {
+                 if (!coords.length) return null;
+                 const mid = coords[Math.floor(coords.length / 2)];
+                 const seg = plan.segments[segIndex];
+                 return (
+                   <Marker key={`seg-${segIndex}`} latitude={mid[1]} longitude={mid[0]} anchor="bottom">
+                     <button onClick={e => { e.stopPropagation(); setPopupSegIndex(segIndex); }}
+                       className="flex items-center gap-1 pl-0.5 pr-2 py-0.5 rounded-full shadow-lg border-2 border-white hover:scale-110 transition-transform"
+                       style={{ backgroundColor: seg?.color || '#3B82F6' }}>
+                       <div className="h-6 w-6 rounded-full flex items-center justify-center text-xs bg-black/20">{getIcon(seg?.icon || 'bus')}</div>
+                       {seg?.line_number && <span className="text-[11px] font-bold text-white whitespace-nowrap">{seg.line_number}</span>}
+                     </button>
+                   </Marker>
+                 );
+               })}
+ 
+               {/* Popup-like Marker for clicked segment */}
+               {popupSeg && popupMid && (
+                 <Marker latitude={popupMid[1]} longitude={popupMid[0]} anchor="bottom" offset={[0, -36]}>
+-                  <div className="bg-card border rounded-lg shadow-xl p-3 w-64 text-foreground relative">
++                  <div className="bg-card/90 backdrop-blur-xl border rounded-[1.75rem] shadow-2xl p-4 w-72 text-foreground relative">
+                     <button onClick={() => setPopupSegIndex(null)} className="absolute top-1 right-1 h-5 w-5 rounded-full hover:bg-accent flex items-center justify-center">
+                       <X className="h-3 w-3" />
+                     </button>
+                     <div className="flex items-center gap-2 pr-5">
+                       <div className="h-8 w-8 rounded-full flex items-center justify-center text-lg shrink-0" style={{ backgroundColor: popupSeg.color + '20', border: `2px solid ${popupSeg.color}` }}>{getIcon(popupSeg.icon)}</div>
+                       <div className="min-w-0">
+                         <div className="flex items-center gap-1 flex-wrap">
+                           {popupSeg.line_number && <Badge variant="outline" className="text-[10px] h-4 px-1" style={{ borderColor: popupSeg.color, color: popupSeg.color }}>{popupSeg.line_number}</Badge>}
+                           <p className="text-sm font-semibold truncate">{popupSeg.transport_name}</p>
+                         </div>
+                       </div>
+                     </div>
+                     <p className="text-xs text-muted-foreground mt-2">{popupSeg.start_name} → {popupSeg.end_name}</p>
+                     <div className="flex items-center gap-3 text-xs mt-1">
+                       <span>⏱ {Math.round(popupSeg.duration_minutes)} min</span>
+                       <span>💰 {Math.round(popupSeg.cost_egp)} EGP</span>
+                     </div>
+-                    {popupSeg.info && <p className="text-[11px] text-muted-foreground border-t pt-1 mt-2">{popupSeg.info}</p>}
++                    {popupSeg.info && <p className="text-[11px] text-muted-foreground border-t pt-2 mt-2">{popupSeg.info}</p>}
++                    {popupSeg.instructions?.length ? (
++                      <ol className="mt-2 space-y-1.5 border-t pt-2">
++                        {popupSeg.instructions.slice(0, 4).map((ins, idx) => (
++                          <li key={idx} className="flex gap-2 text-[11px] leading-snug">
++                            <span className="h-4 w-4 rounded-full bg-primary/15 text-primary text-[10px] font-bold flex items-center justify-center shrink-0">{idx + 1}</span>
++                            <span>{ins}</span>
++                          </li>
++                        ))}
++                      </ol>
++                    ) : null}
+                   </div>
+                 </Marker>
+               )}
+ 
+               <Marker latitude={plan.startLat} longitude={plan.startLng}>
+                 <div className="h-4 w-4 rounded-full bg-primary border-2 border-primary-foreground shadow" />
+               </Marker>
+               <Marker latitude={plan.destLat} longitude={plan.destLng}>
+                 <div className="h-4 w-4 rounded-full bg-destructive border-2 border-primary-foreground shadow" />
+               </Marker>
+               {userPos && isTracking && (
+                 <Marker latitude={userPos.lat} longitude={userPos.lng}>
+                   <div className="relative">
+                     <div className="h-5 w-5 rounded-full bg-blue-500 border-2 border-white shadow-lg" />
+                     <div className="absolute inset-0 h-5 w-5 rounded-full bg-blue-500 animate-ping opacity-30" />
+                   </div>
+                 </Marker>
+               )}
+             </Map>
+           </motion.div>
+         )}
+       </AnimatePresence>
+ 
+       {/* Summary */}
+       <div className="p-4 grid grid-cols-3 gap-3">
+@@ -289,111 +330,111 @@ const TripResult = () => {
+           <p className="text-xs text-muted-foreground">{t('minutes', language)}</p>
+         </CardContent></Card>
+         <Card><CardContent className="p-3 text-center">
+           <MapPin className="h-4 w-4 mx-auto text-primary mb-1" />
+           <p className="text-lg font-bold text-foreground">{plan.distance_km?.toFixed(1)}</p>
+           <p className="text-xs text-muted-foreground">km</p>
+         </CardContent></Card>
+       </div>
+ 
+       {/* Segments list — show line number + i info popover */}
+       <div className="px-4 pb-6 space-y-1">
+         {plan.segments.map((seg, i) => (
+           <motion.div key={`${seg.transport_type_id}-${i}`}
+             initial={{ x: -20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} transition={{ delay: i * 0.1 }}>
+             <div className="flex items-center gap-3 py-2">
+               <div className="w-8 flex justify-center">
+                 <div className="h-3 w-3 rounded-full border-2" style={{ borderColor: seg.color }} />
+               </div>
+               <p className="text-sm text-muted-foreground">{seg.start_name}</p>
+             </div>
+             <div className="flex gap-3">
+               <div className="w-8 flex justify-center">
+                 <div className="w-0.5 h-full" style={{ backgroundColor: seg.color }} />
+               </div>
+               <div className="flex-1">
+-                <Card className="border-l-4" style={{ borderLeftColor: seg.color }}>
++                <Card className="border-l-4 bg-card/80 backdrop-blur-xl" style={{ borderLeftColor: seg.color }}>
+                   <CardContent className="p-3">
+                     <div className="flex items-center justify-between gap-2">
+                       <div className="flex items-center gap-2 min-w-0">
+                         <div className="h-8 w-8 rounded-full flex items-center justify-center text-lg shrink-0"
+                           style={{ backgroundColor: seg.color + '20' }}>
+                           {getIcon(seg.icon)}
+                         </div>
+                         <div className="min-w-0">
+                           <div className="flex items-center gap-1.5 flex-wrap">
+                             {seg.line_number && <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4" style={{ borderColor: seg.color, color: seg.color }}>{seg.line_number}</Badge>}
+                             <p className="text-sm font-medium text-foreground truncate">{seg.transport_name}</p>
+                             {seg.info && (
+                               <Popover>
+                                 <PopoverTrigger asChild>
+                                   <button className="h-5 w-5 rounded-full bg-muted hover:bg-accent flex items-center justify-center shrink-0">
+                                     <Info className="h-3 w-3 text-muted-foreground" />
+                                   </button>
+                                 </PopoverTrigger>
+                                 <PopoverContent className="w-64 text-xs">
+                                   <p className="font-semibold mb-1">{seg.transport_name}</p>
+                                   <p className="text-muted-foreground">{seg.info}</p>
+                                 </PopoverContent>
+                               </Popover>
+                             )}
+                           </div>
+                           <p className="text-xs text-muted-foreground">
+                             {Math.round(seg.duration_minutes)} {t('minutes', language)} · {Math.round(seg.cost_egp)} {t('egp', language)}
+                           </p>
+                         </div>
+                       </div>
+                       {seg.alternatives?.length > 0 && (
+                         <Button variant="ghost" size="sm" onClick={() => setSwapIndex(swapIndex === i ? null : i)} className="gap-1 text-xs shrink-0">
+                           <RefreshCw className="h-3 w-3" /> {t('swap', language)}
+                         </Button>
+                       )}
+                     </div>
+                     <AnimatePresence>
+                       {swapIndex === i && (
+                         <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+                           <div className="mt-3 pt-3 border-t space-y-2">
+                             <p className="text-xs text-muted-foreground font-medium">{t('alternativeOptions', language)}:</p>
+                             {seg.alternatives.map((alt, j) => (
+                               <button key={j} onClick={() => handleSwap(i, alt)}
+-                                className="w-full flex items-center justify-between p-2 rounded-lg hover:bg-accent/50 transition-colors">
++                                className="w-full flex items-center justify-between gap-3 p-3 rounded-2xl bg-background/45 hover:bg-accent/20 backdrop-blur transition-colors">
+                                 <div className="flex items-center gap-2">
+                                   <span className="text-lg">{getIcon(alt.icon)}</span>
+                                   {alt.line_number && <Badge variant="outline" className="text-[10px] h-4 px-1">{alt.line_number}</Badge>}
+                                   <span className="text-sm">{alt.transport_name}</span>
+                                 </div>
+                                 <span className="text-xs text-muted-foreground">
+                                   {Math.round(alt.duration_minutes)} {t('minutes', language)} · {Math.round(alt.cost_egp)} {t('egp', language)}
+                                 </span>
+                               </button>
+                             ))}
+                           </div>
+                         </motion.div>
+                       )}
+                     </AnimatePresence>
+                   </CardContent>
+                 </Card>
+               </div>
+             </div>
+             {i === plan.segments.length - 1 && (
+               <div className="flex items-center gap-3 py-2">
+                 <div className="w-8 flex justify-center"><div className="h-3 w-3 rounded-full bg-destructive" /></div>
+                 <p className="text-sm font-medium text-foreground">{seg.end_name}</p>
+               </div>
+             )}
+           </motion.div>
+         ))}
+       </div>
+ 
+       {!isTracking && (
+         <div className="sticky bottom-0 p-4 bg-card/95 backdrop-blur-sm border-t">
+-          <Button className="w-full h-14 text-base rounded-xl gap-2" onClick={() => navigate('/')}>
++          <Button className="w-full h-14 text-base rounded-2xl gap-2" onClick={() => navigate('/')}>
+             <Navigation className="h-5 w-5" />
+             {t('startGuide', language)}
+           </Button>
+         </div>
+       )}
+     </div>
+   );
+ };
+ 
+ export default TripResult;
+ 
+EOF
+)

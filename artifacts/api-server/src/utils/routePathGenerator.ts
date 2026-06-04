@@ -79,7 +79,7 @@ export async function snapFootOsrm(
   const coordStr = `${lngA},${latA};${lngB},${latB}`;
   const url =
     `${OSRM_FOOT_BASE}/route/v1/foot/${coordStr}`
-    + `?overview=full&geometries=geojson`;
+    + `?overview=full&geometries=geojson&alternatives=true`;
   try {
     // Short timeout: the public FOSSGIS instance is occasionally slow, and a
     // slow snap must not stall the whole trip plan. On timeout we fall back to
@@ -88,10 +88,13 @@ export async function snapFootOsrm(
     if (!res.ok) return null;
     const data = await res.json() as {
       code?: string;
-      routes?: Array<{ geometry: { coordinates: [number, number][] } }>;
+      routes?: Array<{ distance?: number; geometry: { coordinates: [number, number][] } }>;
     };
     if (data.code !== "Ok") return null;
-    const coords = data.routes?.[0]?.geometry?.coordinates;
+    const coords = data.routes
+      ?.filter((r) => r.geometry?.coordinates?.length >= 2)
+      .sort((a, b) => (a.distance ?? Infinity) - (b.distance ?? Infinity))[0]
+      ?.geometry.coordinates;
     if (!coords || coords.length < 2) return null;
     footCache.set(key, coords);
     return coords;
@@ -127,12 +130,15 @@ export async function snapConnector(
   const coordStr = `${lngA},${latA};${lngB},${latB}`;
   const url =
     `https://api.mapbox.com/directions/v5/mapbox/${profile}/${coordStr}`
-    + `?geometries=geojson&overview=full&access_token=${token}`;
+    + `?geometries=geojson&overview=full&alternatives=true&access_token=${token}`;
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(6_000) });
     if (!res.ok) return null;
-    const data = await res.json() as { routes?: Array<{ geometry: { coordinates: [number, number][] } }> };
-    const coords = data.routes?.[0]?.geometry?.coordinates;
+    const data = await res.json() as { routes?: Array<{ distance?: number; geometry: { coordinates: [number, number][] } }> };
+    const coords = data.routes
+      ?.filter((r) => r.geometry?.coordinates?.length >= 2)
+      .sort((a, b) => (a.distance ?? Infinity) - (b.distance ?? Infinity))[0]
+      ?.geometry.coordinates;
     if (!coords || coords.length < 2) return null;
     connectorCache.set(key, coords);
     return coords;

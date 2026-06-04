@@ -74,10 +74,16 @@ export default function RouteLayers({ id, data }: RouteLayersProps) {
     };
 
     if (map.isStyleLoaded()) ensure();
+    const retry = window.setTimeout(ensure, 150);
     // Re-add after any style (re)load, e.g. light/dark toggle wipes custom layers.
+    map.on('load', ensure);
+    map.on('idle', ensure);
     map.on('styledata', ensure);
 
     return () => {
+      window.clearTimeout(retry);
+      map.off('load', ensure);
+      map.off('idle', ensure);
       map.off('styledata', ensure);
       try {
         if (map.getLayer(labelId)) map.removeLayer(labelId);
@@ -93,7 +99,17 @@ export default function RouteLayers({ id, data }: RouteLayersProps) {
     const map = mapInstance?.getMap();
     if (!map) return;
     const src = map.getSource(id) as { setData?: (d: RouteFeatureCollection) => void } | undefined;
-    if (src?.setData) src.setData(data);
+    if (src?.setData) {
+      src.setData(data);
+    } else {
+      // If React delivers data before MapLibre has finished loading the style,
+      // nudge the mount effect by emitting on the next idle/style tick instead of
+      // silently losing the route.
+      window.setTimeout(() => {
+        const late = map.getSource(id) as { setData?: (d: RouteFeatureCollection) => void } | undefined;
+        late?.setData?.(data);
+      }, 100);
+    }
   }, [mapInstance, id, data]);
 
   return null;

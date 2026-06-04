@@ -6,6 +6,7 @@ import { requireAuth } from "../middlewares/requireAuth";
 import { EGYPT_CITIES } from "../lib/intercitySearch.js";
 import { runIntercitySearch } from "../lib/intercitySearch.js";
 import { planTripApi } from "../engine/planner.js";
+import { snapConnector } from "../utils/routePathGenerator.js";
 
 const router = Router();
 
@@ -131,11 +132,14 @@ router.post("/", requireAuth, async (req, res) => {
       isArabic,
     });
     if (plan && plan.segments.length > 0) return res.json(plan);
-    // Engine produced nothing verifiable — fall back to a real door-to-door ride.
-    return res.json(generateFallbackPlan(startLat, startLng, endLat, endLng, distanceKm, taxiEst, isArabic));
+    // Engine produced nothing verifiable. Door-to-door Uber/Careem is allowed only
+    // for premium; non-premium users should not receive a full-trip taxi plan.
+    if (planKey === "premium") return res.json(await generateFallbackPlan(startLat, startLng, endLat, endLng, distanceKm, taxiEst, isArabic));
+    return res.status(409).json({ error: isArabic ? "لا يوجد مسار مواصلات موثّق بدون أوبر للرحلة كلها. جرّب الخطة المميزة أو غيّر نقطة البداية/النهاية." : "No verified non-premium transit route was found without taking Uber/Careem for the whole trip. Try Premium or adjust the start/end point." });
   } catch (err: unknown) {
     console.error("Engine trip plan error:", err);
-    return res.json(generateFallbackPlan(startLat, startLng, endLat, endLng, distanceKm, taxiEst, isArabic));
+    if (planKey === "premium") return res.json(await generateFallbackPlan(startLat, startLng, endLat, endLng, distanceKm, taxiEst, isArabic));
+    return res.status(409).json({ error: isArabic ? "تعذر إنشاء مسار موثّق بدون جعل أوبر الرحلة كلها." : "Could not build a verified route without making Uber/Careem the whole trip." });
   }
 });
 
@@ -246,7 +250,7 @@ async function buildIntercityPlan(
 // at all (e.g. it threw). It NEVER invents a transit route: a door-to-door
 // Uber/Careem ride is a real, computable option (origin → dest at a metered
 // fare), not a fabricated metro/bus/serfis line with imaginary stations.
-function generateFallbackPlan(
+async function generateFallbackPlan(
   startLat: number,
   startLng: number,
   endLat: number,
@@ -257,6 +261,10 @@ function generateFallbackPlan(
 ) {
   const tr = (en: string, ar: string) => (isArabic ? ar : en);
   const duration = Math.max(5, Math.round(distanceKm * 2.5));
+  const routeGeometry = await snapConnector("driving", [startLng, startLat], [endLng, endLat]) ?? [
+    [startLng, startLat] as [number, number],
+    [endLng, endLat] as [number, number],
+  ];
   const segment = {
     transport_type_id: "car",
     transport_name: tr("Uber / Careem", "أوبر / كريم"),
@@ -276,10 +284,7 @@ function generateFallbackPlan(
       tr("Enter your destination and confirm pickup at your location.", "أدخل وجهتك وأكد مكان الالتقاء عند موقعك."),
       tr(`Pay in-app or cash (~${taxiEst} EGP).`, `ادفع عبر التطبيق أو نقدًا (~${taxiEst} جنيه).`),
     ],
-    route_geometry: [
-      [startLng, startLat],
-      [endLng, endLat],
-    ],
+    route_geometry: routeGeometry,
     alternatives: [],
   };
   return {

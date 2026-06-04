@@ -35,7 +35,7 @@ const reverseGeocode = async (lat: number, lng: number): Promise<string> => {
 };
 
 interface ActiveTripPlan extends GuidePlan {
-  segments: (GuideSegment & { route_geometry?: [number, number][] | null })[];
+  segments: (GuideSegment & { route_geometry?: [number, number][] | null; line_id?: string | null })[];
   startLat: number; startLng: number; destLat: number; destLng: number;
   destination: string;
 }
@@ -286,12 +286,15 @@ const Index = () => {
     newSegments[segIdx] = {
       ...old, transport_type_id: alt.transport_type_id, transport_name: alt.transport_name,
       cost_egp: alt.cost_egp, duration_minutes: alt.duration_minutes, color: alt.color,
-      icon: alt.icon, line_number: alt.line_number || '',
+      icon: alt.icon, line_id: alt.line_id ?? null, line_number: alt.line_number || '',
+      info: alt.info ?? old.info, instructions: alt.instructions ?? old.instructions,
+      route_geometry: alt.route_geometry && alt.route_geometry.length >= 2 ? alt.route_geometry : old.route_geometry,
     };
     const newTotal = newSegments.reduce((s, sg) => s + sg.cost_egp, 0);
     const newTime = newSegments.reduce((s, sg) => s + sg.duration_minutes, 0);
     const updated = { ...activeTrip, segments: newSegments, total_cost_egp: newTotal, total_duration_minutes: newTime };
     setActiveTrip(updated);
+    setRouteCoords((prev) => prev.map((r) => r.segIndex === segIdx && alt.route_geometry?.length ? { ...r, coords: alt.route_geometry! } : r));
     sessionStorage.setItem('tripPlan', JSON.stringify(updated));
     toast.success(t('planUpdated', language));
   };

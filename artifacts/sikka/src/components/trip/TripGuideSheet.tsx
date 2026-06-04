@@ -14,7 +14,7 @@ const ICONS: Record<string, string> = {
 
 export interface GuideAlternative {
   transport_type_id: string; transport_name: string; cost_egp: number; duration_minutes: number;
-  color: string; icon: string; line_number?: string;
+  color: string; icon: string; line_id?: string | null; line_number?: string | null; info?: string; instructions?: string[]; route_geometry?: [number, number][] | null;
 }
 export interface GuideSegment {
   transport_type_id?: string; transport_name: string; start_name: string; end_name: string;
@@ -77,7 +77,7 @@ export default function TripGuideSheet({
           if (info.offset.y < -60 && !expanded) onToggleExpand();
           if (info.offset.y > 60 && expanded) onToggleExpand();
         }}
-        className="bg-card/98 backdrop-blur-md rounded-2xl shadow-2xl border overflow-hidden flex flex-col max-h-[calc(100vh-7rem)]"
+        className="bg-card/85 backdrop-blur-2xl rounded-[2rem] shadow-2xl border overflow-hidden flex flex-col max-h-[calc(100vh-7rem)]"
       >
         {/* drag handle / expand toggle */}
         <button
@@ -135,7 +135,7 @@ export default function TripGuideSheet({
             >
               <div className="px-4 pb-4 space-y-4">
                 {/* overall ETA + cost */}
-                <div className="flex items-center justify-between rounded-xl bg-muted/50 px-3 py-2">
+                <div className="flex items-center justify-between rounded-2xl bg-muted/45 backdrop-blur px-3 py-2">
                   <div className="flex items-center gap-1.5 text-sm">
                     <Clock className="h-4 w-4 text-primary" />
                     <span className="font-semibold">{t('arrivalAt', language)} {arrival}</span>
@@ -147,7 +147,7 @@ export default function TripGuideSheet({
                 </div>
 
                 {/* current segment route + instructions */}
-                <div className="rounded-xl border p-3" style={{ borderLeftWidth: 4, borderLeftColor: seg.color }}>
+                <div className="rounded-2xl border bg-background/35 backdrop-blur p-3" style={{ borderLeftWidth: 4, borderLeftColor: seg.color }}>
                   <div className="flex items-center gap-2 text-sm mb-1">
                     <MapPin className="h-3.5 w-3.5 text-primary" />
                     <span className="font-medium text-foreground truncate">{seg.start_name}</span>
@@ -179,6 +179,30 @@ export default function TripGuideSheet({
                     <p className="text-xs text-muted-foreground leading-snug">{seg.info}</p>
                   )}
                 </div>
+
+                {seg.alternatives?.length ? (
+                  <div className="rounded-2xl border bg-background/40 backdrop-blur p-3 space-y-2">
+                    <p className="text-xs font-semibold text-foreground">Switch this leg</p>
+                    <div className="grid gap-2">
+                      {seg.alternatives.slice(0, 4).map((alt, idx) => (
+                        <button
+                          key={`${alt.transport_type_id}-${alt.line_number ?? idx}`}
+                          onClick={() => onSwap(currentSegIdx, alt)}
+                          className="flex items-center justify-between gap-3 rounded-2xl bg-card/70 hover:bg-primary/10 border px-3 py-2 text-left transition-colors"
+                        >
+                          <span className="flex items-center gap-2 min-w-0">
+                            <span className="text-base">{getIcon(alt.icon)}</span>
+                            <span className="min-w-0">
+                              <span className="block text-xs font-semibold truncate">{alt.line_number ? `${alt.line_number} · ` : ''}{alt.transport_name}</span>
+                              <span className="block text-[10px] text-muted-foreground truncate">{alt.info || `${Math.round(alt.duration_minutes)} ${t('minutes', language)}`}</span>
+                            </span>
+                          </span>
+                          <span className="text-[10px] text-muted-foreground shrink-0">{Math.round(alt.cost_egp)} {t('egp', language)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
 
                 {/* all segments overview */}
                 <div className="space-y-1">

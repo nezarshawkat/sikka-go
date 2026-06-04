@@ -34,7 +34,7 @@
     --input: 220 13% 91%;
     --ring: 217 91% 60%;
 
-    --radius: 0.75rem;
+    --radius: 1.35rem;
 
     --sidebar-background: 0 0% 98%;
     --sidebar-foreground: 240 5.3% 26.1%;
@@ -125,4 +125,42 @@
 .mapboxgl-ctrl-bottom-left,
 .mapboxgl-ctrl-bottom-right {
   display: none !important;
+}
+
+
+@layer components {
+  .glass-panel {
+    @apply bg-card/75 backdrop-blur-xl border border-white/20 shadow-xl;
+  }
+}
+
+@layer base {
+  button,
+  input,
+  textarea,
+  select,
+  [role="button"],
+  [role="dialog"],
+  [data-radix-popper-content-wrapper] > *,
+  .rounded-lg,
+  .rounded-xl,
+  .rounded-md {
+    border-radius: max(var(--radius), 1.15rem);
+  }
+
+  .bg-card,
+  [class*="bg-card/"],
+  .bg-popover,
+  [class*="bg-popover/"],
+  .bg-background\/50,
+  .bg-background\/70,
+  .bg-background\/80,
+  .bg-muted\/50 {
+    backdrop-filter: blur(18px) saturate(1.25);
+    -webkit-backdrop-filter: blur(18px) saturate(1.25);
+  }
+
+  .shadow-sm {
+    box-shadow: 0 10px 30px hsl(220 40% 2% / 0.08);
+  }
 }
