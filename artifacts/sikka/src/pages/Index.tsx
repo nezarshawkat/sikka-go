@@ -389,7 +389,7 @@ const Index = () => {
           <Button
             variant="outline"
             size="icon"
-            className="h-14 w-14 rounded-full bg-card/82 backdrop-blur-2xl shadow-xl border border-white/20 shrink-0 glass-panel"
+            className="h-14 w-14 rounded-full shadow-xl border border-white/20 shrink-0 glass-panel"
             onClick={() => navigate('/profile')}
           >
             <User className="h-5 w-5" />
@@ -422,7 +422,7 @@ const Index = () => {
                 initial={{ y: 20, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
                 exit={{ y: 20, opacity: 0 }}
-                className="bg-card/82 backdrop-blur-2xl rounded-[2rem] shadow-2xl border border-white/20 p-4 space-y-3 glass-panel"
+                className="rounded-[2rem] shadow-2xl border border-white/20 p-4 space-y-3 glass-panel"
               >
                 <div className="flex items-start gap-3">
                   <div className="h-10 w-10 rounded-full bg-destructive/10 flex items-center justify-center shrink-0">
@@ -456,7 +456,7 @@ const Index = () => {
                 className="space-y-2"
               >
                 {userLocation && (
-                  <div className="bg-card/82 backdrop-blur-2xl rounded-[2rem] shadow-2xl border border-white/20 p-4 flex items-center gap-3 glass-panel">
+                  <div className="rounded-[2rem] shadow-2xl border border-white/20 p-4 flex items-center gap-3 glass-panel">
                     <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
                       <Navigation className="h-5 w-5 text-primary" />
                     </div>

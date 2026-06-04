@@ -319,7 +319,7 @@ export async function buildGraph(force = false): Promise<TransitGraph> {
       });
     });
 
-    const gtfsQualityBias = line.pathSuspect ? 1.25 : (line.path?.length ?? 0) >= 50 ? 0.9 : 1;
+    const gtfsQualityBias = line.pathSuspect ? 1.4 : (line.path?.length ?? 0) >= 50 ? 0.7 : 1;
     for (let i = 0; i < line.stops.length - 1; i++) {
       const a = line.stops[i];
       const b = line.stops[i + 1];

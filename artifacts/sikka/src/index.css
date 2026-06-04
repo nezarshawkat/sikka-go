@@ -130,7 +130,7 @@
 
 @layer components {
   .glass-panel {
-    @apply bg-card/75 backdrop-blur-xl border border-white/20 shadow-xl;
+    @apply bg-card/[0.92] backdrop-blur-xl border border-white/20 shadow-xl;
   }
 }
 
@@ -167,13 +167,13 @@
 
 @layer components {
   .glass-panel {
-    @apply bg-card/75 backdrop-blur-2xl border border-white/20 shadow-xl;
-    background-image: linear-gradient(135deg, hsl(var(--card) / 0.82), hsl(var(--card) / 0.56));
+    @apply bg-card/[0.92] backdrop-blur-2xl border border-white/20 shadow-xl;
+    background-image: linear-gradient(135deg, hsl(var(--card) / 0.96), hsl(var(--card) / 0.86));
     box-shadow: 0 18px 60px hsl(220 40% 2% / 0.16), inset 0 1px 0 hsl(0 0% 100% / 0.28);
   }
 
   .dark .glass-panel {
-    background-image: linear-gradient(135deg, hsl(var(--card) / 0.74), hsl(var(--card) / 0.44));
+    background-image: linear-gradient(135deg, hsl(var(--card) / 0.92), hsl(var(--card) / 0.80));
     border-color: hsl(0 0% 100% / 0.12);
     box-shadow: 0 20px 70px hsl(220 60% 1% / 0.35), inset 0 1px 0 hsl(0 0% 100% / 0.08);
   }
@@ -197,3 +197,4 @@
     font-family: 'Cairo', 'Noto Naskh Arabic', 'Noto Sans Arabic', sans-serif;
   }
 }
+

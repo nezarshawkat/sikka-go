@@ -82,7 +82,7 @@ const Profile = () => {
                     <button
                       key={key}
                       onClick={() => setMapMode(key)}
-                      className={`rounded-[1.5rem] border p-2 text-left transition-all ${mapMode === key ? 'border-primary bg-primary/10' : 'border-white/20 bg-background/30'}`}
+                      className={`rounded-[1.5rem] border p-2 text-left transition-all glass-panel ${mapMode === key ? 'border-primary bg-primary/15' : 'border-white/20'}`}
                     >
                       <div className="h-16 rounded-[1.15rem] border border-white/30 shadow-inner mb-2" style={{ background: item.preview }} />
                       <p className="text-sm font-semibold text-foreground">{language === 'ar' ? item.labelAr : item.labelEn}</p>

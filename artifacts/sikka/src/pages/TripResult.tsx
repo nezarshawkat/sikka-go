@@ -176,7 +176,7 @@ const TripResult = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="sticky top-0 bg-card/95 backdrop-blur-sm border-b z-30 p-4 flex items-center gap-3">
+      <div className="sticky top-0 glass-panel border-b z-30 p-4 flex items-center gap-3">
         <Button variant="ghost" size="icon" onClick={() => navigate('/plan?' + new URLSearchParams({
           destination: plan.destination, destLat: String(plan.destLat), destLng: String(plan.destLng),
           lat: String(plan.startLat), lng: String(plan.startLng),
@@ -265,7 +265,7 @@ const TripResult = () => {
               {/* Popup-like Marker for clicked segment */}
               {popupSeg && popupMid && (
                 <Marker latitude={popupMid[1]} longitude={popupMid[0]} anchor="bottom" offset={[0, -36]}>
-                  <div className="bg-card/90 backdrop-blur-xl border rounded-[1.75rem] shadow-2xl p-4 w-72 text-foreground relative">
+                  <div className="glass-panel rounded-[1.75rem] p-4 w-72 text-foreground relative">
                     <button onClick={() => setPopupSegIndex(null)} className="absolute top-1 right-1 h-5 w-5 rounded-full hover:bg-accent flex items-center justify-center">
                       <X className="h-3 w-3" />
                     </button>
@@ -319,17 +319,17 @@ const TripResult = () => {
 
       {/* Summary */}
       <div className="p-4 grid grid-cols-3 gap-3">
-        <Card><CardContent className="p-3 text-center">
+        <Card className="glass-panel"><CardContent className="p-3 text-center">
           <Wallet className="h-4 w-4 mx-auto text-primary mb-1" />
           <p className="text-lg font-bold text-foreground">{Math.round(plan.total_cost_egp)}</p>
           <p className="text-xs text-muted-foreground">{t('egp', language)}</p>
         </CardContent></Card>
-        <Card><CardContent className="p-3 text-center">
+        <Card className="glass-panel"><CardContent className="p-3 text-center">
           <Clock className="h-4 w-4 mx-auto text-primary mb-1" />
           <p className="text-lg font-bold text-foreground">{Math.round(plan.total_duration_minutes)}</p>
           <p className="text-xs text-muted-foreground">{t('minutes', language)}</p>
         </CardContent></Card>
-        <Card><CardContent className="p-3 text-center">
+        <Card className="glass-panel"><CardContent className="p-3 text-center">
           <MapPin className="h-4 w-4 mx-auto text-primary mb-1" />
           <p className="text-lg font-bold text-foreground">{plan.distance_km?.toFixed(1)}</p>
           <p className="text-xs text-muted-foreground">km</p>
@@ -352,7 +352,7 @@ const TripResult = () => {
                 <div className="w-0.5 h-full" style={{ backgroundColor: seg.color }} />
               </div>
               <div className="flex-1">
-                <Card className="border-l-4 bg-card/80 backdrop-blur-xl" style={{ borderLeftColor: seg.color }}>
+                <Card className="border-l-4 glass-panel" style={{ borderLeftColor: seg.color }}>
                   <CardContent className="p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2 min-w-0">
@@ -426,7 +426,7 @@ const TripResult = () => {
       </div>
 
       {!isTracking && (
-        <div className="sticky bottom-0 p-4 bg-card/95 backdrop-blur-sm border-t">
+        <div className="sticky bottom-0 p-4 glass-panel border-t">
           <Button className="w-full h-14 text-base rounded-2xl gap-2" onClick={() => navigate('/')}>
             <Navigation className="h-5 w-5" />
             {t('startGuide', language)}

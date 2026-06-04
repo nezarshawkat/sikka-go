@@ -4,6 +4,7 @@
 - [Sikka bus route_path AI enrichment](sikka-bus-path-enrichment.md) — LLM-breadcrumb + driving-traffic pipeline forces buses onto main roads; route_path is display-only; run bulk job as a workflow w/ timeouts, not a detached bg process
 - [Sikka stop dictionary & route_path corruption](sikka-stop-dictionary.md) — route_path geometry is partly corrupt (failed geocodes → one downtown fallback); rail coords are curated in railStations.ts, never derived
 - [Sikka routing engine](sikka-routing-engine.md) — city trip planner is deterministic graph+Dijkstra over verified DB data ONLY, never invents routes; Pareto-label walk-budget search; taxi-only fallback; intercity flow is out of scope
+- [Sikka glass-panel styling](sikka-glass-panel.md) — @apply needs bg-card/[0.92] (JIT literal trap); a bg-card/<N> utility on a glass-panel element overrides it — strip the utility. No GTFS provenance column; engine GTFS bias is a geometry-quality proxy
 - [Sikka maplibre route lines vanish](sikka-maplibre-cartographer.md) — cartographer injects data-* on react-map-gl <Source>/<Layer> → maplibre rejects source → no line; add layers imperatively via useMap() instead
 - [Applying external patches](applying-external-patches.md) — pasted git patches fail on CRLF (tr -d '\r'); --3way blocked for main agent; api-server has NO hot-reload (restart workflow after api edits)
 - [GTFS Cairo import](gtfs-cairo-import.md) — authoritative Transport-for-Cairo feed vendored as compact JSON; metro=full replace, buses=insert+keep+geometry-based dual-number merge; appears on map via route_path

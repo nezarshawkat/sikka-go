@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { ArrowLeft, Compass, Loader2, Route, Sparkles } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
+import { ArrowLeft, Compass, Route } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { useAuth } from '@/contexts/AuthContext';
@@ -104,8 +104,8 @@ export default function PlanSetup() {
     return () => { cancelled = true; };
   }, [language, navigate, request]);
 
-  const activeStep = Math.min(loadingSteps.length - 1, Math.floor(elapsed / 2) % loadingSteps.length);
-  const tooLong = elapsed >= 10;
+  const activeStep = Math.floor(elapsed / 2) % loadingSteps.length;
+  const tooLong = elapsed >= 7;
 
   if (isNoRoute) {
     const discoverParams = new URLSearchParams({
@@ -150,24 +150,26 @@ export default function PlanSetup() {
       </Button>
       <motion.div initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} className="max-w-md w-full">
         <Card className="glass-panel rounded-[2rem] overflow-hidden">
-          <CardContent className="p-6 space-y-6 text-center">
+          <CardContent className="p-8 space-y-8 text-center">
             <div className="relative mx-auto h-24 w-24">
               <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1.4, ease: 'linear' }} className="absolute inset-0 rounded-full border-4 border-primary/15 border-t-primary" />
               <div className="absolute inset-3 rounded-full bg-primary/10 flex items-center justify-center">
                 <Route className="h-9 w-9 text-primary" />
               </div>
             </div>
-            <div className="space-y-2">
-              <h1 className="text-2xl font-bold text-foreground">{t('settingUpPlanTitle', language)}</h1>
-              <p className="text-sm text-muted-foreground">{t('settingUpPlanBody', language)}</p>
-            </div>
-            <div className="space-y-2 text-left">
-              {loadingSteps.map((step, index) => (
-                <div key={step} className={`flex items-center gap-3 rounded-2xl px-3 py-2 ${index === activeStep ? 'bg-primary/10' : 'bg-background/30'}`}>
-                  {index === activeStep ? <Loader2 className="h-4 w-4 animate-spin text-primary" /> : <Sparkles className="h-4 w-4 text-muted-foreground" />}
-                  <span className="text-sm text-foreground">{t(step, language)}</span>
-                </div>
-              ))}
+            <div className="min-h-[3.5rem] flex items-center justify-center">
+              <AnimatePresence mode="wait">
+                <motion.p
+                  key={activeStep}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  transition={{ duration: 0.4 }}
+                  className="text-lg font-semibold text-foreground"
+                >
+                  {t(loadingSteps[activeStep], language)}
+                </motion.p>
+              </AnimatePresence>
             </div>
             {tooLong && (
               <p className="rounded-2xl bg-amber-500/10 border border-amber-500/20 p-3 text-xs text-muted-foreground leading-relaxed">

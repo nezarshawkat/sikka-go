@@ -77,7 +77,7 @@ export default function TripGuideSheet({
           if (info.offset.y < -60 && !expanded) onToggleExpand();
           if (info.offset.y > 60 && expanded) onToggleExpand();
         }}
-        className="glass-panel bg-card/82 backdrop-blur-2xl rounded-[2rem] shadow-2xl border border-white/20 overflow-hidden flex flex-col max-h-[calc(100vh-7rem)]"
+        className="glass-panel rounded-[2rem] shadow-2xl border border-white/20 overflow-hidden flex flex-col max-h-[calc(100vh-7rem)]"
       >
         {/* drag handle / expand toggle */}
         <button
@@ -176,30 +176,6 @@ export default function TripGuideSheet({
                     <p className="text-xs text-muted-foreground leading-snug">{seg.info}</p>
                   )}
                 </div>
-
-                {seg.alternatives?.length ? (
-                  <div className="rounded-2xl border bg-background/40 backdrop-blur p-3 space-y-2">
-                    <p className="text-xs font-semibold text-foreground">Switch this leg</p>
-                    <div className="grid gap-2">
-                      {seg.alternatives.slice(0, 4).map((alt, idx) => (
-                        <button
-                          key={`${alt.transport_type_id}-${alt.line_number ?? idx}`}
-                          onClick={() => onSwap(currentSegIdx, alt)}
-                          className="flex items-center justify-between gap-3 rounded-2xl bg-card/70 hover:bg-primary/10 border px-3 py-2 text-left transition-colors"
-                        >
-                          <span className="flex items-center gap-2 min-w-0">
-                            <span className="text-base">{getIcon(alt.icon)}</span>
-                            <span className="min-w-0">
-                              <span className="block text-xs font-semibold truncate">{alt.line_number ? `${alt.line_number} · ` : ''}{alt.transport_name}</span>
-                              <span className="block text-[10px] text-muted-foreground truncate">{alt.info || `${Math.round(alt.duration_minutes)} ${t('minutes', language)}`}</span>
-                            </span>
-                          </span>
-                          <span className="text-[10px] text-muted-foreground shrink-0">{Math.round(alt.cost_egp)} {t('egp', language)}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
 
                 {/* all segments overview */}
                 <div className="space-y-1">

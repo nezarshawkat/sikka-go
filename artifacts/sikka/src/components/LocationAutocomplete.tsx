@@ -80,6 +80,10 @@ const LocationAutocomplete = ({ value, onChange, onSelect, placeholder, classNam
     }, 300);
   }, [value, readOnlyDisplay]);
 
+  const displayValue = readOnlyDisplay
+    ? (readOnlyDisplay.length > 34 ? readOnlyDisplay.slice(0, 34).trimEnd() + '…' : readOnlyDisplay)
+    : value;
+
   return (
     <div ref={containerRef} className={cn("relative", className)}>
       <div className="relative">
@@ -89,19 +93,25 @@ const LocationAutocomplete = ({ value, onChange, onSelect, placeholder, classNam
           <button
             type="button"
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); onTrailingAction?.(); }}
-            className="absolute right-2 top-1/2 -translate-y-1/2 h-9 w-9 rounded-full bg-background/45 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors flex items-center justify-center"
+            className={cn(
+              "absolute right-2 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full border shadow-sm transition-colors flex items-center justify-center",
+              trailingAction === 'cancelTrip'
+                ? "bg-destructive/15 hover:bg-destructive/25 text-destructive border-destructive/30"
+                : "bg-muted/70 hover:bg-muted text-muted-foreground border-border",
+            )}
             aria-label={trailingAction === 'cancelTrip' ? 'Cancel current trip' : 'Clear search'}
           >
-            <X className="h-4 w-4" />
+            <X className="h-5 w-5" strokeWidth={2.5} />
           </button>
         )}
         <Input
           placeholder={placeholder}
-          value={readOnlyDisplay ?? value}
+          value={displayValue}
           readOnly={!!readOnlyDisplay}
+          title={readOnlyDisplay ?? undefined}
           onChange={(e) => onChange(e.target.value)}
           onFocus={() => !readOnlyDisplay && suggestions.length > 0 && setIsOpen(true)}
-          className={cn("pl-11 bg-card/82 backdrop-blur-2xl shadow-xl border border-white/20 h-14 text-base rounded-[2rem] glass-panel", trailingAction ? "pr-12" : "")}
+          className={cn("pl-11 shadow-xl border border-white/20 h-14 text-base rounded-[2rem] glass-panel truncate", trailingAction ? "pr-14" : "")}
         />
       </div>
 
