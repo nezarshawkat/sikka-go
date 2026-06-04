@@ -81,7 +81,10 @@ export async function snapFootOsrm(
     `${OSRM_FOOT_BASE}/route/v1/foot/${coordStr}`
     + `?overview=full&geometries=geojson`;
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+    // Short timeout: the public FOSSGIS instance is occasionally slow, and a
+    // slow snap must not stall the whole trip plan. On timeout we fall back to
+    // Mapbox walking and then a straight line (see onStreetGeometry).
+    const res = await fetch(url, { signal: AbortSignal.timeout(4_000) });
     if (!res.ok) return null;
     const data = await res.json() as {
       code?: string;
@@ -126,7 +129,7 @@ export async function snapConnector(
     `https://api.mapbox.com/directions/v5/mapbox/${profile}/${coordStr}`
     + `?geometries=geojson&overview=full&access_token=${token}`;
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+    const res = await fetch(url, { signal: AbortSignal.timeout(6_000) });
     if (!res.ok) return null;
     const data = await res.json() as { routes?: Array<{ geometry: { coordinates: [number, number][] } }> };
     const coords = data.routes?.[0]?.geometry?.coordinates;

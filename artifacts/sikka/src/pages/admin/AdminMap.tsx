@@ -27,6 +27,7 @@ interface TransportType {
 interface TransitLine {
   id: string; transportTypeId: string; lineNumber: string | null; nameEn: string; nameAr: string;
   fromArea: string; toArea: string; viaStops: string[]; routePath: GeoJSONLineString | null;
+  stops: { name: string; lat: number; lng: number }[] | null;
   priceEgp: number; frequencyMinutes: number | null; hasFixedStops: boolean; isActive: boolean;
   governorate: string;
 }
@@ -585,6 +586,13 @@ const AdminMap = () => {
               </Marker>
             );
           })}
+
+          {/* Stops of the selected line — rendered as small ordered markers */}
+          {selectedLine?.stops?.map((s, i) => (
+            <Marker key={`stop-${selectedLine.id}-${i}`} latitude={s.lat} longitude={s.lng}>
+              <div title={s.name} className="h-2.5 w-2.5 rounded-full bg-background border-2 shadow" style={{ borderColor: getRouteColor(selectedLine, 0) }} />
+            </Marker>
+          ))}
         </Map>
 
         {isDrawing && (
@@ -612,7 +620,21 @@ const AdminMap = () => {
                 <div className="space-y-3 text-sm">
                   <div className="flex justify-between gap-4"><span className="text-muted-foreground">From</span><span className="text-right">{detailLine.fromArea}</span></div>
                   <div className="flex justify-between gap-4"><span className="text-muted-foreground">To</span><span className="text-right">{detailLine.toArea}</span></div>
-                  {detailLine.viaStops.length > 0 && <div><span className="text-muted-foreground">Via: </span><span>{detailLine.viaStops.join(' → ')}</span></div>}
+                  {detailLine.stops && detailLine.stops.length > 0 ? (
+                    <div>
+                      <div className="flex items-center justify-between mb-1"><span className="text-muted-foreground">Stops ({detailLine.stops.length})</span></div>
+                      <ol className="max-h-48 overflow-y-auto rounded-md border divide-y bg-muted/30">
+                        {detailLine.stops.map((s, i) => (
+                          <li key={i} className="flex items-center gap-2 px-2 py-1 text-xs">
+                            <span className="h-4 w-4 shrink-0 rounded-full bg-background border flex items-center justify-center text-[9px] text-muted-foreground">{i + 1}</span>
+                            <span className="truncate">{s.name}</span>
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                  ) : detailLine.viaStops.length > 0 ? (
+                    <div><span className="text-muted-foreground">Via: </span><span>{detailLine.viaStops.join(' → ')}</span></div>
+                  ) : null}
                   <div className="flex justify-between"><span className="text-muted-foreground">Price</span><span>{detailLine.priceEgp} EGP</span></div>
                   {detailLine.frequencyMinutes && <div className="flex justify-between"><span className="text-muted-foreground">Frequency</span><span>Every {detailLine.frequencyMinutes} min</span></div>}
                   <div className="flex justify-between"><span className="text-muted-foreground">Stops</span><span>{detailLine.hasFixedStops ? 'Fixed stops' : 'Stop anywhere'}</span></div>
