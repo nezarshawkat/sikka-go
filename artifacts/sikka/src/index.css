@@ -164,3 +164,36 @@
     box-shadow: 0 10px 30px hsl(220 40% 2% / 0.08);
   }
 }
+
+@layer components {
+  .glass-panel {
+    @apply bg-card/75 backdrop-blur-2xl border border-white/20 shadow-xl;
+    background-image: linear-gradient(135deg, hsl(var(--card) / 0.82), hsl(var(--card) / 0.56));
+    box-shadow: 0 18px 60px hsl(220 40% 2% / 0.16), inset 0 1px 0 hsl(0 0% 100% / 0.28);
+  }
+
+  .dark .glass-panel {
+    background-image: linear-gradient(135deg, hsl(var(--card) / 0.74), hsl(var(--card) / 0.44));
+    border-color: hsl(0 0% 100% / 0.12);
+    box-shadow: 0 20px 70px hsl(220 60% 1% / 0.35), inset 0 1px 0 hsl(0 0% 100% / 0.08);
+  }
+}
+
+@layer base {
+  .bg-card,
+  [class*="bg-card/"],
+  .bg-popover,
+  [class*="bg-popover/"],
+  .bg-background,
+  [class*="bg-background/"],
+  .bg-muted,
+  [class*="bg-muted/"] {
+    backdrop-filter: blur(18px) saturate(1.25);
+    -webkit-backdrop-filter: blur(18px) saturate(1.25);
+  }
+
+  [dir="rtl"] .maplibregl-canvas,
+  [dir="rtl"] .mapboxgl-canvas {
+    font-family: 'Cairo', 'Noto Naskh Arabic', 'Noto Sans Arabic', sans-serif;
+  }
+}

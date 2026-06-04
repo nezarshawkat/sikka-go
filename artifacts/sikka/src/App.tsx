@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import maplibregl from "maplibre-gl";
 import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { ClerkProvider, useClerk } from "@clerk/react";
@@ -13,6 +14,8 @@ import SignInPage from "./pages/SignIn";
 import SignUpPage from "./pages/SignUp";
 import Profile from "./pages/Profile";
 import TripPlan from "./pages/TripPlan";
+import PlanSetup from "./pages/PlanSetup";
+import DiscoverTrip from "./pages/DiscoverTrip";
 import TripResult from "./pages/TripResult";
 import Intercity from "./pages/Intercity";
 import AdminDashboard from "./pages/admin/AdminDashboard";
@@ -66,6 +69,29 @@ function ClerkQueryClientCacheInvalidator() {
   return null;
 }
 
+
+function MapLibreRtlPluginLoader() {
+  useEffect(() => {
+    try {
+      const maybeMapLibre = maplibregl as typeof maplibregl & {
+        getRTLTextPluginStatus?: () => string;
+        setRTLTextPlugin?: (url: string, callback: ((error?: Error) => void) | null, lazy?: boolean) => void;
+      };
+      const status = maybeMapLibre.getRTLTextPluginStatus?.();
+      if (status === 'unavailable' || status === undefined) {
+        maybeMapLibre.setRTLTextPlugin?.(
+          'https://unpkg.com/@mapbox/mapbox-gl-rtl-text@0.3.0/dist/mapbox-gl-rtl-text.js',
+          null,
+          true,
+        );
+      }
+    } catch (err) {
+      console.warn('Unable to load RTL map text plugin', err);
+    }
+  }, []);
+  return null;
+}
+
 function AppRoutes() {
   const navigate = useNavigate();
 
@@ -80,6 +106,7 @@ function AppRoutes() {
     >
       <ClerkQueryClientCacheInvalidator />
       <AuthProvider>
+        <MapLibreRtlPluginLoader />
         <Toaster />
         <Sonner />
         <Routes>
@@ -90,6 +117,8 @@ function AppRoutes() {
           <Route path="/sign-up/*" element={<SignUpPage />} />
           <Route path="/profile" element={<Profile />} />
           <Route path="/plan" element={<TripPlan />} />
+          <Route path="/plan/setup" element={<PlanSetup />} />
+          <Route path="/discover-trip" element={<DiscoverTrip />} />
           <Route path="/trip-result" element={<TripResult />} />
           <Route path="/intercity" element={<Intercity />} />
           <Route path="/admin" element={<AdminDashboard />}>

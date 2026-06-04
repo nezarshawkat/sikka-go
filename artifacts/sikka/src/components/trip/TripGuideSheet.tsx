@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { t } from '@/lib/i18n';
 import type { Language } from '@/lib/i18n';
 import {
-  ChevronUp, ChevronDown, X, Clock, Wallet, Check, MapPin, ArrowLeft, ArrowRight, Flag,
+  ChevronUp, ChevronDown, Clock, Wallet, Check, MapPin, ArrowLeft, ArrowRight, Flag,
 } from 'lucide-react';
 
 const ICONS: Record<string, string> = {
@@ -35,7 +35,7 @@ interface TripGuideSheetProps {
   onNext: () => void;
   onBack: () => void;
   onDone: () => void;
-  onClose: () => void;
+  onClose?: () => void;
   onSwap: (segIdx: number, alt: GuideAlternative) => void;
   onReport?: () => void;
   language: Language;
@@ -77,7 +77,7 @@ export default function TripGuideSheet({
           if (info.offset.y < -60 && !expanded) onToggleExpand();
           if (info.offset.y > 60 && expanded) onToggleExpand();
         }}
-        className="bg-card/85 backdrop-blur-2xl rounded-[2rem] shadow-2xl border overflow-hidden flex flex-col max-h-[calc(100vh-7rem)]"
+        className="glass-panel bg-card/82 backdrop-blur-2xl rounded-[2rem] shadow-2xl border border-white/20 overflow-hidden flex flex-col max-h-[calc(100vh-7rem)]"
       >
         {/* drag handle / expand toggle */}
         <button
@@ -114,9 +114,6 @@ export default function TripGuideSheet({
               <span className="text-xs text-muted-foreground">{currentSegIdx + 1}/{plan.segments.length}</span>
               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onToggleExpand}>
                 {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
-              </Button>
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose}>
-                <X className="h-3.5 w-3.5" />
               </Button>
             </div>
           </div>

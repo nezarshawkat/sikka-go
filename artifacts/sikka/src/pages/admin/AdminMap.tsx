@@ -563,9 +563,12 @@ const AdminMap = () => {
 
           {mawaqef.map(station => (
             <Marker key={station.id} latitude={station.latitude} longitude={station.longitude}>
-              <button onClick={e => { e.stopPropagation(); setViewState(v => ({ ...v, latitude: station.latitude, longitude: station.longitude, zoom: 13 })); }} className="h-7 w-7 rounded-full bg-card/90 border border-primary shadow-lg flex items-center justify-center">
-                <MapPin className="h-3.5 w-3.5 text-primary" />
-              </button>
+              <button
+                onClick={e => { e.stopPropagation(); setViewState(v => ({ ...v, latitude: station.latitude, longitude: station.longitude, zoom: 13 })); }}
+                className="h-2.5 w-2.5 rounded-full bg-primary border-2 border-background shadow"
+                title={station.nameEn || station.nameAr || 'Station'}
+                aria-label={station.nameEn || station.nameAr || 'Station'}
+              />
             </Marker>
           ))}
 
@@ -578,8 +581,7 @@ const AdminMap = () => {
             return (
               <Marker key={`icon-${line.id}`} latitude={mid[1]} longitude={mid[0]}>
                 <button onClick={e => { e.stopPropagation(); setDetailLine(line); setSelectedLine(line); }} className="group">
-                  <div className="flex items-center gap-1 pl-0.5 pr-2 py-0.5 rounded-full shadow-lg border-2 border-background group-hover:scale-110 transition-transform" style={{ backgroundColor: color }}>
-                    <div className="h-6 w-6 rounded-full flex items-center justify-center text-xs bg-background/20">{ICONS[tt?.icon || 'bus']}</div>
+                  <div className="flex items-center px-2 py-1 rounded-full shadow-lg border-2 border-background group-hover:scale-110 transition-transform" style={{ backgroundColor: color }}>
                     <span className="text-[11px] font-bold text-white whitespace-nowrap">{line.lineNumber || tt?.nameEn?.slice(0, 6)}</span>
                   </div>
                 </button>

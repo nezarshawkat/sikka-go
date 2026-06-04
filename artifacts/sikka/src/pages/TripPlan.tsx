@@ -2,29 +2,13 @@ import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { t } from '@/lib/i18n';
-import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Wallet, Clock, MapPin, ChevronRight, Loader2 } from 'lucide-react';
-import { toast } from 'sonner';
+import { ArrowLeft, Wallet, Clock, MapPin, ChevronRight } from 'lucide-react';
 
 type TripType = 'economic' | 'comfortable' | 'premium';
-
-const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
-
-async function reverseGeocode(lat: number, lng: number): Promise<string> {
-  try {
-    const res = await fetch(
-      `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${MAPBOX_TOKEN}&language=en,ar&limit=1&types=address,neighborhood,locality,place`
-    );
-    const data = await res.json();
-    return data.features?.[0]?.place_name || '';
-  } catch {
-    return '';
-  }
-}
 
 const TripPlan = () => {
   const [searchParams] = useSearchParams();
@@ -40,7 +24,6 @@ const TripPlan = () => {
 
   const [tripType, setTripType] = useState<TripType>('economic');
   const [budget, setBudget] = useState('');
-  const [isPlanning, setIsPlanning] = useState(false);
 
   const distanceKm = useMemo(() => {
     const R = 6371;
@@ -72,51 +55,23 @@ const TripPlan = () => {
     { value: 'premium', icon: '✨', color: 'border-yellow-400' },
   ];
 
-  const handlePlanTrip = async () => {
-    setIsPlanning(true);
-    try {
-      const data = await api.post<{ segments?: Array<Record<string, unknown>>; [k: string]: unknown }>('/trips/plan', {
-        startLat, startLng,
-        endLat: destLat, endLng: destLng,
-        tripType,
-        budget: budget ? parseFloat(budget) : null,
-        language,
-        mode,
-      });
-
-      if (!data) throw new Error('No plan returned');
-
-      // Replace generic boundary labels ("Your Location" / "Near Destination")
-      // with real place names: actual origin (reverse-geocoded) and destination.
-      if (Array.isArray(data.segments) && data.segments.length > 0) {
-        const originName = await reverseGeocode(startLat, startLng);
-        const segs = [...data.segments];
-        if (originName) segs[0] = { ...segs[0], start_name: originName };
-        if (destination) {
-          const last = segs.length - 1;
-          segs[last] = { ...segs[last], end_name: destination };
-        }
-        data.segments = segs;
-      }
-
-      sessionStorage.setItem('tripPlan', JSON.stringify({
-        ...data,
-        destination,
-        tripType,
-        startLat, startLng, destLat, destLng,
-      }));
-      navigate('/trip-result');
-    } catch (err: unknown) {
-      console.error('Plan error:', err);
-      toast.error(err instanceof Error ? err.message : 'Failed to plan trip');
-    } finally {
-      setIsPlanning(false);
-    }
+  const handlePlanTrip = () => {
+    const params = new URLSearchParams({
+      destination,
+      destLat: String(destLat),
+      destLng: String(destLng),
+      lat: String(startLat),
+      lng: String(startLng),
+      tripType,
+      budget: budget || '',
+    });
+    if (mode) params.set('mode', mode);
+    navigate(`/plan/setup?${params.toString()}`);
   };
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="sticky top-0 bg-card/95 backdrop-blur-sm border-b z-10 p-4 flex items-center gap-3">
+      <div className="sticky top-0 bg-card/82 backdrop-blur-2xl border-b z-10 p-4 flex items-center gap-3">
         <Button variant="ghost" size="icon" onClick={() => navigate('/')}>
           <ArrowLeft className="h-5 w-5" />
         </Button>
@@ -183,18 +138,9 @@ const TripPlan = () => {
         </motion.div>
 
         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.3 }}>
-          <Button onClick={handlePlanTrip} disabled={isPlanning} className="w-full h-14 text-base rounded-xl gap-2">
-            {isPlanning ? (
-              <>
-                <Loader2 className="h-5 w-5 animate-spin" />
-                {t('settingUp', language)}
-              </>
-            ) : (
-              <>
-                {t('planTrip', language)}
-                <ChevronRight className="h-5 w-5" />
-              </>
-            )}
+          <Button onClick={handlePlanTrip} className="w-full h-14 text-base rounded-xl gap-2">
+            {t('planTrip', language)}
+            <ChevronRight className="h-5 w-5" />
           </Button>
         </motion.div>
       </div>

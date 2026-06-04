@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Input } from '@/components/ui/input';
-import { Search, MapPin, Loader2 } from 'lucide-react';
+import { Search, MapPin, Loader2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
@@ -18,9 +18,12 @@ interface LocationAutocompleteProps {
   onSelect: (suggestion: Suggestion) => void;
   placeholder?: string;
   className?: string;
+  trailingAction?: 'clear' | 'cancelTrip';
+  onTrailingAction?: () => void;
+  readOnlyDisplay?: string;
 }
 
-const LocationAutocomplete = ({ value, onChange, onSelect, placeholder, className }: LocationAutocompleteProps) => {
+const LocationAutocomplete = ({ value, onChange, onSelect, placeholder, className, trailingAction, onTrailingAction, readOnlyDisplay }: LocationAutocompleteProps) => {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -40,7 +43,7 @@ const LocationAutocomplete = ({ value, onChange, onSelect, placeholder, classNam
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
 
-    if (value.trim().length < 2) {
+    if (readOnlyDisplay || value.trim().length < 2) {
       setSuggestions([]);
       setIsOpen(false);
       return;
@@ -75,24 +78,35 @@ const LocationAutocomplete = ({ value, onChange, onSelect, placeholder, classNam
         setIsLoading(false);
       }
     }, 300);
-  }, [value]);
+  }, [value, readOnlyDisplay]);
 
   return (
     <div ref={containerRef} className={cn("relative", className)}>
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        {isLoading && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground animate-spin" />}
+        {isLoading && !trailingAction && <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground animate-spin" />}
+        {trailingAction && (
+          <button
+            type="button"
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onTrailingAction?.(); }}
+            className="absolute right-2 top-1/2 -translate-y-1/2 h-9 w-9 rounded-full bg-background/45 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors flex items-center justify-center"
+            aria-label={trailingAction === 'cancelTrip' ? 'Cancel current trip' : 'Clear search'}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
         <Input
           placeholder={placeholder}
-          value={value}
+          value={readOnlyDisplay ?? value}
+          readOnly={!!readOnlyDisplay}
           onChange={(e) => onChange(e.target.value)}
-          onFocus={() => suggestions.length > 0 && setIsOpen(true)}
-          className="pl-10 bg-card/95 backdrop-blur-sm shadow-lg border-0 h-12 text-base rounded-xl"
+          onFocus={() => !readOnlyDisplay && suggestions.length > 0 && setIsOpen(true)}
+          className={cn("pl-11 bg-card/82 backdrop-blur-2xl shadow-xl border border-white/20 h-14 text-base rounded-[2rem] glass-panel", trailingAction ? "pr-12" : "")}
         />
       </div>
 
       {isOpen && suggestions.length > 0 && (
-        <div className="absolute top-full left-0 right-0 mt-1 bg-card rounded-xl shadow-xl border z-50 overflow-hidden max-h-[300px] overflow-y-auto">
+        <div className="absolute top-full left-0 right-0 mt-2 bg-card/86 backdrop-blur-2xl rounded-[1.75rem] shadow-2xl border border-white/20 z-50 overflow-hidden max-h-[300px] overflow-y-auto">
           {suggestions.map((s) => (
             <button
               key={s.id}

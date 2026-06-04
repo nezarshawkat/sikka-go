@@ -1,0 +1,2184 @@
+ (cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'EOF' 
+diff --git a/artifacts/api-server/src/routes/transportReports.ts b/artifacts/api-server/src/routes/transportReports.ts
+index 4fa4e6147e313377bb9b46139ac0b2a2c3ac7359..183eb9ca8255f661361ac83cd6e69c3a9093c171 100644
+--- a/artifacts/api-server/src/routes/transportReports.ts
++++ b/artifacts/api-server/src/routes/transportReports.ts
+@@ -1,50 +1,53 @@
+ import { Router } from "express";
+ import { db } from "@workspace/db";
+ import { transportReportsTable } from "@workspace/db";
+ import { eq, desc, and, sql, type SQL } from "drizzle-orm";
+ import { requireAuth } from "../middlewares/requireAuth";
+ import { requireAdmin } from "../middlewares/requireAdmin";
+ 
+ const router = Router();
+ 
+ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+ 
+ const STATUSES = ["pending", "approved", "rejected"];
+ 
+ router.get("/", requireAdmin, async (req, res) => {
+   const { discovery, status } = req.query as { discovery?: string; status?: string };
+ 
+   if (discovery === "true") {
+     const rows = await db
+       .select({
+         transportName: transportReportsTable.transportName,
+         transportNumber: transportReportsTable.transportNumber,
+         reportCount: sql<number>`cast(count(*) as int)`,
+         sampleFromArea: sql<string | null>`max(${transportReportsTable.fromArea})`,
+         sampleToArea: sql<string | null>`max(${transportReportsTable.toArea})`,
+         avgPrice: sql<number | null>`avg(${transportReportsTable.priceEgp})`,
++        gpsTraceCount: sql<number>`cast(sum(case when ${transportReportsTable.gpsTrace} is not null then 1 else 0 end) as int)`,
++        avgGpsPoints: sql<number | null>`avg(jsonb_array_length(coalesce(${transportReportsTable.gpsTrace}, '[]'::jsonb)))`,
++        confidenceScore: sql<number>`least(5, greatest(1, round((1 + least(count(*), 12) / 3.0 + least(avg(jsonb_array_length(coalesce(${transportReportsTable.gpsTrace}, '[]'::jsonb)), 120) / 60.0)::numeric, 1)))`,
+       })
+       .from(transportReportsTable)
+       .groupBy(
+         sql`lower(${transportReportsTable.transportName})`,
+         sql`coalesce(${transportReportsTable.transportNumber}, '')`,
+         transportReportsTable.transportName,
+         transportReportsTable.transportNumber,
+       )
+       .orderBy(desc(sql`count(*)`));
+     return res.json(rows);
+   }
+ 
+   const filters: SQL[] = [];
+   if (status && STATUSES.includes(status)) {
+     filters.push(eq(transportReportsTable.status, status));
+   }
+   const rows = await db
+     .select()
+     .from(transportReportsTable)
+     .where(filters.length ? and(...filters) : undefined)
+     .orderBy(desc(transportReportsTable.createdAt));
+   return res.json(rows);
+ });
+ 
+ router.post("/", requireAuth, async (req, res) => {
+diff --git a/artifacts/sikka/src/App.tsx b/artifacts/sikka/src/App.tsx
+index ddd7f28f79dc8d72d37103579e8be14aaf456e40..00be42c98e196d094eee549f1dfee439bd34cab6 100644
+--- a/artifacts/sikka/src/App.tsx
++++ b/artifacts/sikka/src/App.tsx
+@@ -1,40 +1,43 @@
+ import { useEffect, useRef } from "react";
++import maplibregl from "maplibre-gl";
+ import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
+ import { BrowserRouter, Route, Routes, useNavigate } from "react-router-dom";
+ import { ClerkProvider, useClerk } from "@clerk/react";
+ import { Toaster as Sonner } from "@/components/ui/sonner";
+ import { Toaster } from "@/components/ui/toaster";
+ import { TooltipProvider } from "@/components/ui/tooltip";
+ import { AuthProvider } from "@/contexts/AuthContext";
+ import Index from "./pages/Index";
+ import Splash from "./pages/Splash";
+ import Auth from "./pages/Auth";
+ import SignInPage from "./pages/SignIn";
+ import SignUpPage from "./pages/SignUp";
+ import Profile from "./pages/Profile";
+ import TripPlan from "./pages/TripPlan";
++import PlanSetup from "./pages/PlanSetup";
++import DiscoverTrip from "./pages/DiscoverTrip";
+ import TripResult from "./pages/TripResult";
+ import Intercity from "./pages/Intercity";
+ import AdminDashboard from "./pages/admin/AdminDashboard";
+ import AdminTransport from "./pages/admin/AdminTransport";
+ import AdminLocations from "./pages/admin/AdminLocations";
+ import AdminRoutes from "./pages/admin/AdminRoutes";
+ import AdminReviews from "./pages/admin/AdminReviews";
+ import AdminReports from "./pages/admin/AdminReports";
+ import AdminDiscovery from "./pages/admin/AdminDiscovery";
+ import AdminAnalytics from "./pages/admin/AdminAnalytics";
+ import AdminMap from "./pages/admin/AdminMap";
+ import NotFound from "./pages/NotFound";
+ 
+ const queryClient = new QueryClient();
+ const basename = import.meta.env.BASE_URL.replace(/\/$/, "");
+ 
+ // Use the publishable key directly — publishableKeyFromHost is for production
+ // custom domains only and produces wrong URLs in Replit dev environment.
+ const clerkPubKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string;
+ 
+ if (!clerkPubKey) {
+   throw new Error("Missing VITE_CLERK_PUBLISHABLE_KEY");
+ }
+ 
+ // proxyUrl is only set in production by the platform — leave undefined in dev
+@@ -44,74 +47,100 @@ const clerkProxyUrl = import.meta.env.VITE_CLERK_PROXY_URL || undefined;
+ function stripBase(path: string): string {
+   return basename && path.startsWith(basename)
+     ? path.slice(basename.length) || "/"
+     : path;
+ }
+ 
+ function ClerkQueryClientCacheInvalidator() {
+   const { addListener } = useClerk();
+   const qc = useQueryClient();
+   const prevUserIdRef = useRef<string | null | undefined>(undefined);
+ 
+   useEffect(() => {
+     const unsubscribe = addListener(({ user }) => {
+       const userId = user?.id ?? null;
+       if (prevUserIdRef.current !== undefined && prevUserIdRef.current !== userId) {
+         qc.clear();
+       }
+       prevUserIdRef.current = userId;
+     });
+     return unsubscribe;
+   }, [addListener, qc]);
+ 
+   return null;
+ }
+ 
++
++function MapLibreRtlPluginLoader() {
++  useEffect(() => {
++    try {
++      const maybeMapLibre = maplibregl as typeof maplibregl & {
++        getRTLTextPluginStatus?: () => string;
++        setRTLTextPlugin?: (url: string, callback: ((error?: Error) => void) | null, lazy?: boolean) => void;
++      };
++      const status = maybeMapLibre.getRTLTextPluginStatus?.();
++      if (status === 'unavailable' || status === undefined) {
++        maybeMapLibre.setRTLTextPlugin?.(
++          'https://unpkg.com/@mapbox/mapbox-gl-rtl-text@0.3.0/dist/mapbox-gl-rtl-text.js',
++          null,
++          true,
++        );
++      }
++    } catch (err) {
++      console.warn('Unable to load RTL map text plugin', err);
++    }
++  }, []);
++  return null;
++}
++
+ function AppRoutes() {
+   const navigate = useNavigate();
+ 
+   return (
+     <ClerkProvider
+       publishableKey={clerkPubKey}
+       proxyUrl={clerkProxyUrl}
+       signInUrl={`${basename}/sign-in`}
+       signUpUrl={`${basename}/sign-up`}
+       routerPush={(to) => navigate(stripBase(to))}
+       routerReplace={(to) => navigate(stripBase(to), { replace: true })}
+     >
+       <ClerkQueryClientCacheInvalidator />
+       <AuthProvider>
++        <MapLibreRtlPluginLoader />
+         <Toaster />
+         <Sonner />
+         <Routes>
+           <Route path="/" element={<Index />} />
+           <Route path="/splash" element={<Splash />} />
+           <Route path="/auth" element={<Auth />} />
+           <Route path="/sign-in/*" element={<SignInPage />} />
+           <Route path="/sign-up/*" element={<SignUpPage />} />
+           <Route path="/profile" element={<Profile />} />
+           <Route path="/plan" element={<TripPlan />} />
++          <Route path="/plan/setup" element={<PlanSetup />} />
++          <Route path="/discover-trip" element={<DiscoverTrip />} />
+           <Route path="/trip-result" element={<TripResult />} />
+           <Route path="/intercity" element={<Intercity />} />
+           <Route path="/admin" element={<AdminDashboard />}>
+             <Route index element={<AdminMap />} />
+             <Route path="map" element={<AdminMap />} />
+             <Route path="transport" element={<AdminTransport />} />
+             <Route path="locations" element={<AdminLocations />} />
+             <Route path="routes" element={<AdminRoutes />} />
+             <Route path="reviews" element={<AdminReviews />} />
+             <Route path="reports" element={<AdminReports />} />
+             <Route path="discovery" element={<AdminDiscovery />} />
+             <Route path="analytics" element={<AdminAnalytics />} />
+           </Route>
+           <Route path="*" element={<NotFound />} />
+         </Routes>
+       </AuthProvider>
+     </ClerkProvider>
+   );
+ }
+ 
+ const App = () => (
+   <QueryClientProvider client={queryClient}>
+     <TooltipProvider>
+       <BrowserRouter basename={basename}>
+         <AppRoutes />
+diff --git a/artifacts/sikka/src/components/LocationAutocomplete.tsx b/artifacts/sikka/src/components/LocationAutocomplete.tsx
+index 9fbd2784068e2d587ddbe1cc09cec6cade5ae5d9..8b1413fc8b5624c6ecf700982621eb621e387ffc 100644
+--- a/artifacts/sikka/src/components/LocationAutocomplete.tsx
++++ b/artifacts/sikka/src/components/LocationAutocomplete.tsx
+@@ -1,119 +1,133 @@
+ import { useState, useEffect, useRef } from 'react';
+ import { Input } from '@/components/ui/input';
+-import { Search, MapPin, Loader2 } from 'lucide-react';
++import { Search, MapPin, Loader2, X } from 'lucide-react';
+ import { cn } from '@/lib/utils';
+ 
+ const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
+ 
+ interface Suggestion {
+   id: string;
+   place_name: string;
+   center: [number, number];
+   text: string;
+ }
+ 
+ interface LocationAutocompleteProps {
+   value: string;
+   onChange: (value: string) => void;
+   onSelect: (suggestion: Suggestion) => void;
+   placeholder?: string;
+   className?: string;
++  trailingAction?: 'clear' | 'cancelTrip';
++  onTrailingAction?: () => void;
++  readOnlyDisplay?: string;
+ }
+ 
+-const LocationAutocomplete = ({ value, onChange, onSelect, placeholder, className }: LocationAutocompleteProps) => {
++const LocationAutocomplete = ({ value, onChange, onSelect, placeholder, className, trailingAction, onTrailingAction, readOnlyDisplay }: LocationAutocompleteProps) => {
+   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+   const [isOpen, setIsOpen] = useState(false);
+   const [isLoading, setIsLoading] = useState(false);
+   const debounceRef = useRef<NodeJS.Timeout | null>(null);
+   const containerRef = useRef<HTMLDivElement>(null);
+ 
+   useEffect(() => {
+     const handleClickOutside = (e: MouseEvent) => {
+       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+         setIsOpen(false);
+       }
+     };
+     document.addEventListener('mousedown', handleClickOutside);
+     return () => document.removeEventListener('mousedown', handleClickOutside);
+   }, []);
+ 
+   useEffect(() => {
+     if (debounceRef.current) clearTimeout(debounceRef.current);
+ 
+-    if (value.trim().length < 2) {
++    if (readOnlyDisplay || value.trim().length < 2) {
+       setSuggestions([]);
+       setIsOpen(false);
+       return;
+     }
+ 
+     debounceRef.current = setTimeout(async () => {
+       setIsLoading(true);
+       try {
+         const res = await fetch(
+           `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(value)}.json?access_token=${MAPBOX_TOKEN}&country=eg&language=en,ar&limit=7&types=country,region,place,district,locality,neighborhood,address,poi`
+         );
+         interface MapboxFeature {
+           id: string;
+           place_name: string;
+           center: [number, number];
+           text: string;
+         }
+         interface MapboxResponse { features?: MapboxFeature[] }
+         const data = await res.json() as MapboxResponse;
+         if (data.features) {
+           setSuggestions(data.features.map((f) => ({
+             id: f.id,
+             place_name: f.place_name,
+             center: f.center,
+             text: f.text,
+           })));
+           setIsOpen(true);
+         }
+       } catch (err) {
+         console.error('Geocoding error:', err);
+       } finally {
+         setIsLoading(false);
+       }
+     }, 300);
+-  }, [value]);
++  }, [value, readOnlyDisplay]);
+ 
+   return (
+     <div ref={containerRef} className={cn("relative", className)}>
+       <div className="relative">
+         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+-        {isLoading && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground animate-spin" />}
++        {isLoading && !trailingAction && <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground animate-spin" />}
++        {trailingAction && (
++          <button
++            type="button"
++            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onTrailingAction?.(); }}
++            className="absolute right-2 top-1/2 -translate-y-1/2 h-9 w-9 rounded-full bg-background/45 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors flex items-center justify-center"
++            aria-label={trailingAction === 'cancelTrip' ? 'Cancel current trip' : 'Clear search'}
++          >
++            <X className="h-4 w-4" />
++          </button>
++        )}
+         <Input
+           placeholder={placeholder}
+-          value={value}
++          value={readOnlyDisplay ?? value}
++          readOnly={!!readOnlyDisplay}
+           onChange={(e) => onChange(e.target.value)}
+-          onFocus={() => suggestions.length > 0 && setIsOpen(true)}
+-          className="pl-10 bg-card/95 backdrop-blur-sm shadow-lg border-0 h-12 text-base rounded-xl"
++          onFocus={() => !readOnlyDisplay && suggestions.length > 0 && setIsOpen(true)}
++          className={cn("pl-11 bg-card/82 backdrop-blur-2xl shadow-xl border border-white/20 h-14 text-base rounded-[2rem] glass-panel", trailingAction ? "pr-12" : "")}
+         />
+       </div>
+ 
+       {isOpen && suggestions.length > 0 && (
+-        <div className="absolute top-full left-0 right-0 mt-1 bg-card rounded-xl shadow-xl border z-50 overflow-hidden max-h-[300px] overflow-y-auto">
++        <div className="absolute top-full left-0 right-0 mt-2 bg-card/86 backdrop-blur-2xl rounded-[1.75rem] shadow-2xl border border-white/20 z-50 overflow-hidden max-h-[300px] overflow-y-auto">
+           {suggestions.map((s) => (
+             <button
+               key={s.id}
+               onClick={() => {
+                 onSelect(s);
+                 onChange(s.place_name);
+                 setIsOpen(false);
+               }}
+               className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-accent/50 transition-colors border-b last:border-b-0"
+             >
+               <MapPin className="h-4 w-4 text-destructive shrink-0" />
+               <div className="min-w-0">
+                 <p className="text-sm font-medium text-foreground truncate">{s.text}</p>
+                 <p className="text-xs text-muted-foreground truncate">{s.place_name}</p>
+               </div>
+             </button>
+           ))}
+         </div>
+       )}
+     </div>
+   );
+ };
+ 
+ export default LocationAutocomplete;
+diff --git a/artifacts/sikka/src/components/trip/TripGuideSheet.tsx b/artifacts/sikka/src/components/trip/TripGuideSheet.tsx
+index 79562b86050a0c45910968cd7a2709a567d9106b..68cc8821459434af2013ec02c8fc6332322cf15d 100644
+--- a/artifacts/sikka/src/components/trip/TripGuideSheet.tsx
++++ b/artifacts/sikka/src/components/trip/TripGuideSheet.tsx
+@@ -1,145 +1,142 @@
+ import { motion, AnimatePresence } from 'framer-motion';
+ import { Button } from '@/components/ui/button';
+ import { Progress } from '@/components/ui/progress';
+ import { Badge } from '@/components/ui/badge';
+ import { t } from '@/lib/i18n';
+ import type { Language } from '@/lib/i18n';
+ import {
+-  ChevronUp, ChevronDown, X, Clock, Wallet, Check, MapPin, ArrowLeft, ArrowRight, Flag,
++  ChevronUp, ChevronDown, Clock, Wallet, Check, MapPin, ArrowLeft, ArrowRight, Flag,
+ } from 'lucide-react';
+ 
+ const ICONS: Record<string, string> = {
+   bus: '🚌', train: '🚆', car: '🚕', bike: '🛺', ship: '🚢', plane: '✈️', metro: '🚇', monorail: '🚝', walk: '🚶',
+ };
+ 
+ export interface GuideAlternative {
+   transport_type_id: string; transport_name: string; cost_egp: number; duration_minutes: number;
+   color: string; icon: string; line_id?: string | null; line_number?: string | null; info?: string; instructions?: string[]; route_geometry?: [number, number][] | null;
+ }
+ export interface GuideSegment {
+   transport_type_id?: string; transport_name: string; start_name: string; end_name: string;
+   cost_egp: number; duration_minutes: number; color: string; icon: string;
+   line_number?: string; info?: string; instructions?: string[]; alternatives?: GuideAlternative[];
+ }
+ export interface GuidePlan {
+   segments: GuideSegment[]; total_cost_egp: number; total_duration_minutes: number; destination?: string;
+ }
+ 
+ interface TripGuideSheetProps {
+   plan: GuidePlan;
+   currentSegIdx: number;
+   progress: number;
+   remainingMinutes: number;
+   expanded: boolean;
+   onToggleExpand: () => void;
+   onNext: () => void;
+   onBack: () => void;
+   onDone: () => void;
+-  onClose: () => void;
++  onClose?: () => void;
+   onSwap: (segIdx: number, alt: GuideAlternative) => void;
+   onReport?: () => void;
+   language: Language;
+ }
+ 
+ function getIcon(icon: string) {
+   return ICONS[icon] || '🚌';
+ }
+ 
+ function formatClock(minsFromNow: number, lang: Language): string {
+   const d = new Date(Date.now() + minsFromNow * 60000);
+   const hh = d.getHours();
+   const mm = d.getMinutes().toString().padStart(2, '0');
+   return new Intl.DateTimeFormat(lang === 'ar' ? 'ar-EG' : 'en-GB', {
+     hour: '2-digit', minute: '2-digit', hour12: false,
+   }).format(d) || `${hh}:${mm}`;
+ }
+ 
+ export default function TripGuideSheet({
+   plan, currentSegIdx, progress, remainingMinutes, expanded, onToggleExpand,
+   onNext, onBack, onDone, onClose, onSwap, onReport, language,
+ }: TripGuideSheetProps) {
+   const seg = plan.segments[currentSegIdx];
+   if (!seg) return null;
+   const isLast = currentSegIdx >= plan.segments.length - 1;
+   const arrival = formatClock(remainingMinutes, language);
+ 
+   return (
+     <div className="absolute bottom-0 left-0 right-0 z-30 px-3 pb-3">
+       <motion.div
+         layout
+         initial={{ y: 140, opacity: 0 }}
+         animate={{ y: 0, opacity: 1 }}
+         transition={{ type: 'spring', damping: 26, stiffness: 280 }}
+         drag="y"
+         dragConstraints={{ top: 0, bottom: 0 }}
+         dragElastic={0.2}
+         onDragEnd={(_e, info) => {
+           if (info.offset.y < -60 && !expanded) onToggleExpand();
+           if (info.offset.y > 60 && expanded) onToggleExpand();
+         }}
+-        className="bg-card/85 backdrop-blur-2xl rounded-[2rem] shadow-2xl border overflow-hidden flex flex-col max-h-[calc(100vh-7rem)]"
++        className="glass-panel bg-card/82 backdrop-blur-2xl rounded-[2rem] shadow-2xl border border-white/20 overflow-hidden flex flex-col max-h-[calc(100vh-7rem)]"
+       >
+         {/* drag handle / expand toggle */}
+         <button
+           onClick={onToggleExpand}
+           className="w-full flex flex-col items-center pt-2 pb-1 shrink-0"
+           aria-label="toggle"
+         >
+           <div className="h-1.5 w-10 rounded-full bg-muted-foreground/30" />
+         </button>
+ 
+         {/* ===== MINIMIZED BAR ===== */}
+         <div className="px-4 pb-3">
+           <div className="flex items-center gap-3">
+             <div
+               className="h-10 w-10 rounded-full flex items-center justify-center text-xl shrink-0"
+               style={{ backgroundColor: seg.color + '22' }}
+             >
+               {getIcon(seg.icon)}
+             </div>
+             <div className="flex-1 min-w-0">
+               <div className="flex items-center gap-1.5">
+                 {seg.line_number && (
+                   <Badge variant="outline" className="text-[10px] h-4 px-1" style={{ borderColor: seg.color, color: seg.color }}>
+                     {seg.line_number}
+                   </Badge>
+                 )}
+                 <p className="text-sm font-semibold text-foreground truncate">{seg.transport_name}</p>
+               </div>
+               <p className="text-xs text-muted-foreground truncate">
+                 {Math.round(remainingMinutes)} {t('minLeft', language)} · {t('arrivalAt', language)} {arrival}
+               </p>
+             </div>
+             <div className="flex items-center gap-1 shrink-0">
+               <span className="text-xs text-muted-foreground">{currentSegIdx + 1}/{plan.segments.length}</span>
+               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onToggleExpand}>
+                 {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+               </Button>
+-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose}>
+-                <X className="h-3.5 w-3.5" />
+-              </Button>
+             </div>
+           </div>
+           <Progress value={progress} className="h-1.5 mt-2" />
+         </div>
+ 
+         {/* ===== EXPANDED CONTENT ===== */}
+         <AnimatePresence initial={false}>
+           {expanded && (
+             <motion.div
+               key="expanded"
+               initial={{ opacity: 0 }}
+               animate={{ opacity: 1 }}
+               exit={{ opacity: 0 }}
+               className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+             >
+               <div className="px-4 pb-4 space-y-4">
+                 {/* overall ETA + cost */}
+                 <div className="flex items-center justify-between rounded-2xl bg-muted/45 backdrop-blur px-3 py-2">
+                   <div className="flex items-center gap-1.5 text-sm">
+                     <Clock className="h-4 w-4 text-primary" />
+                     <span className="font-semibold">{t('arrivalAt', language)} {arrival}</span>
+                   </div>
+                   <div className="flex items-center gap-1.5 text-sm">
+                     <Wallet className="h-4 w-4 text-primary" />
+                     <span className="font-semibold">{Math.round(plan.total_cost_egp)} {t('egp', language)}</span>
+diff --git a/artifacts/sikka/src/hooks/useIsDark.ts b/artifacts/sikka/src/hooks/useIsDark.ts
+index 5b9e384eacf3781390e4b1c6d568fba14eb5019e..64a457cf078636a064c7bc72c0bf7da31035a9ef 100644
+--- a/artifacts/sikka/src/hooks/useIsDark.ts
++++ b/artifacts/sikka/src/hooks/useIsDark.ts
+@@ -1,26 +1,25 @@
+ import { useEffect, useState } from 'react';
+ 
+ /**
+  * Tracks whether the app is currently in dark mode by observing the
+  * `dark` class on <html>. Stays in sync with ThemeToggle.
+  */
+ export function useIsDark(): boolean {
+   const [isDark, setIsDark] = useState(
+     () => typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
+   );
+ 
+   useEffect(() => {
+     const el = document.documentElement;
+     const update = () => setIsDark(el.classList.contains('dark'));
+     update();
+     const observer = new MutationObserver(update);
+     observer.observe(el, { attributes: true, attributeFilter: ['class'] });
+     return () => observer.disconnect();
+   }, []);
+ 
+   return isDark;
+ }
+ 
+-// OpenFreeMap vector styles — fully free, no API key required.
+ export const MAP_STYLE_LIGHT = 'https://tiles.openfreemap.org/styles/liberty';
+ export const MAP_STYLE_DARK = 'https://tiles.openfreemap.org/styles/dark';
+diff --git a/artifacts/sikka/src/hooks/useMapStyle.ts b/artifacts/sikka/src/hooks/useMapStyle.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..4763471b7ddbed8d9712c2a83aef21f2bc43c837
+--- /dev/null
++++ b/artifacts/sikka/src/hooks/useMapStyle.ts
+@@ -0,0 +1,86 @@
++import { useCallback, useEffect, useMemo, useState } from 'react';
++import { useIsDark } from '@/hooks/useIsDark';
++
++export type MapMode = 'standard' | 'bright' | 'minimal' | 'dark';
++
++export const MAP_MODES: Record<MapMode, { labelEn: string; labelAr: string; descriptionEn: string; descriptionAr: string; preview: string }> = {
++  standard: {
++    labelEn: 'Standard',
++    labelAr: 'قياسي',
++    descriptionEn: 'Balanced roads, stations, and neighborhoods.',
++    descriptionAr: 'توازن بين الطرق والمحطات والأحياء.',
++    preview: 'linear-gradient(135deg, #dbeafe 0%, #eff6ff 42%, #bbf7d0 43%, #86efac 100%)',
++  },
++  bright: {
++    labelEn: 'Bright',
++    labelAr: 'فاتح',
++    descriptionEn: 'High-contrast daytime view.',
++    descriptionAr: 'عرض نهاري واضح وعالي التباين.',
++    preview: 'linear-gradient(135deg, #fef3c7 0%, #fff7ed 50%, #bfdbfe 51%, #93c5fd 100%)',
++  },
++  minimal: {
++    labelEn: 'Minimal',
++    labelAr: 'بسيط',
++    descriptionEn: 'Cleaner map so route lines stand out.',
++    descriptionAr: 'خريطة أهدأ لتظهر خطوط الرحلة بوضوح.',
++    preview: 'linear-gradient(135deg, #f8fafc 0%, #e2e8f0 55%, #cbd5e1 56%, #f1f5f9 100%)',
++  },
++  dark: {
++    labelEn: 'Dark',
++    labelAr: 'داكن',
++    descriptionEn: 'Low-light navigation with bright route colors.',
++    descriptionAr: 'مناسب للإضاءة الضعيفة مع ألوان مسارات واضحة.',
++    preview: 'linear-gradient(135deg, #020617 0%, #1e293b 55%, #0f766e 56%, #0f172a 100%)',
++  },
++};
++
++const MAP_STYLE_URLS: Record<MapMode, string> = {
++  standard: 'https://tiles.openfreemap.org/styles/liberty',
++  bright: 'https://tiles.openfreemap.org/styles/positron',
++  minimal: 'https://tiles.openfreemap.org/styles/positron',
++  dark: 'https://tiles.openfreemap.org/styles/dark',
++};
++
++const STORAGE_KEY = 'sikka_map_mode';
++
++export function getStoredMapMode(): MapMode | null {
++  if (typeof localStorage === 'undefined') return null;
++  const value = localStorage.getItem(STORAGE_KEY);
++  return value === 'standard' || value === 'bright' || value === 'minimal' || value === 'dark' ? value : null;
++}
++
++export function setStoredMapMode(mode: MapMode) {
++  localStorage.setItem(STORAGE_KEY, mode);
++  window.dispatchEvent(new CustomEvent('sikka-map-mode-change', { detail: mode }));
++}
++
++export function useMapStyle() {
++  const isDark = useIsDark();
++  const [mode, setModeState] = useState<MapMode>(() => getStoredMapMode() ?? (isDark ? 'dark' : 'standard'));
++
++  useEffect(() => {
++    if (getStoredMapMode()) return;
++    setModeState(isDark ? 'dark' : 'standard');
++  }, [isDark]);
++
++  useEffect(() => {
++    const handler = () => setModeState(getStoredMapMode() ?? (isDark ? 'dark' : 'standard'));
++    window.addEventListener('sikka-map-mode-change', handler);
++    window.addEventListener('storage', handler);
++    return () => {
++      window.removeEventListener('sikka-map-mode-change', handler);
++      window.removeEventListener('storage', handler);
++    };
++  }, [isDark]);
++
++  const setMode = useCallback((next: MapMode) => {
++    setStoredMapMode(next);
++    setModeState(next);
++  }, []);
++
++  const style = useMemo(() => MAP_STYLE_URLS[mode] ?? MAP_STYLE_URLS.standard, [mode]);
++  return { mode, setMode, style, modes: MAP_MODES };
++}
++
++export const MAP_STYLE_LIGHT = MAP_STYLE_URLS.standard;
++export const MAP_STYLE_DARK = MAP_STYLE_URLS.dark;
+diff --git a/artifacts/sikka/src/index.css b/artifacts/sikka/src/index.css
+index 333ed14c90ddd4d785f8bf56c8cebd581bcbf9c6..02c5878e9d5eb93c8e33ec9fa01c59b5ae5a40fe 100644
+--- a/artifacts/sikka/src/index.css
++++ b/artifacts/sikka/src/index.css
+@@ -142,25 +142,58 @@
+   [role="button"],
+   [role="dialog"],
+   [data-radix-popper-content-wrapper] > *,
+   .rounded-lg,
+   .rounded-xl,
+   .rounded-md {
+     border-radius: max(var(--radius), 1.15rem);
+   }
+ 
+   .bg-card,
+   [class*="bg-card/"],
+   .bg-popover,
+   [class*="bg-popover/"],
+   .bg-background\/50,
+   .bg-background\/70,
+   .bg-background\/80,
+   .bg-muted\/50 {
+     backdrop-filter: blur(18px) saturate(1.25);
+     -webkit-backdrop-filter: blur(18px) saturate(1.25);
+   }
+ 
+   .shadow-sm {
+     box-shadow: 0 10px 30px hsl(220 40% 2% / 0.08);
+   }
+ }
++
++@layer components {
++  .glass-panel {
++    @apply bg-card/75 backdrop-blur-2xl border border-white/20 shadow-xl;
++    background-image: linear-gradient(135deg, hsl(var(--card) / 0.82), hsl(var(--card) / 0.56));
++    box-shadow: 0 18px 60px hsl(220 40% 2% / 0.16), inset 0 1px 0 hsl(0 0% 100% / 0.28);
++  }
++
++  .dark .glass-panel {
++    background-image: linear-gradient(135deg, hsl(var(--card) / 0.74), hsl(var(--card) / 0.44));
++    border-color: hsl(0 0% 100% / 0.12);
++    box-shadow: 0 20px 70px hsl(220 60% 1% / 0.35), inset 0 1px 0 hsl(0 0% 100% / 0.08);
++  }
++}
++
++@layer base {
++  .bg-card,
++  [class*="bg-card/"],
++  .bg-popover,
++  [class*="bg-popover/"],
++  .bg-background,
++  [class*="bg-background/"],
++  .bg-muted,
++  [class*="bg-muted/"] {
++    backdrop-filter: blur(18px) saturate(1.25);
++    -webkit-backdrop-filter: blur(18px) saturate(1.25);
++  }
++
++  [dir="rtl"] .maplibregl-canvas,
++  [dir="rtl"] .mapboxgl-canvas {
++    font-family: 'Cairo', 'Noto Naskh Arabic', 'Noto Sans Arabic', sans-serif;
++  }
++}
+diff --git a/artifacts/sikka/src/lib/i18n.ts b/artifacts/sikka/src/lib/i18n.ts
+index 1e0a4ea75a207d17ffd7fb2d2a9e24d611fed73a..bcfb7425c4b7b03e6a03c04b1e469e7444836446 100644
+--- a/artifacts/sikka/src/lib/i18n.ts
++++ b/artifacts/sikka/src/lib/i18n.ts
+@@ -159,50 +159,71 @@ const translations: Record<Language, Record<string, string>> = {
+     gpsPointsCaptured: 'points captured',
+     contributeSubmitted: 'Thanks for contributing!',
+     contributeFailed: 'Failed to submit',
+     transportNameRequired: 'Please enter a transport name',
+     reports: 'Reports',
+     routeDiscovery: 'Discovery',
+     status: 'Status',
+     open: 'Open',
+     resolved: 'Resolved',
+     rejected: 'Rejected',
+     pending: 'Pending',
+     approved: 'Approved',
+     resolve: 'Resolve',
+     reject: 'Reject',
+     approve: 'Approve',
+     filterByStatus: 'Filter by status',
+     allStatuses: 'All',
+     noReports: 'No reports.',
+     noDiscovery: 'No discovered transports yet.',
+     usersReported: 'users reported this',
+     avgPrice: 'Avg price',
+     mostReviewed: 'Most reviewed transports',
+     avgRating: 'Avg rating',
+     reportsByType: 'Reports by type',
+     routeAnalytics: 'Route analytics',
++    cancelTripTitle: 'Cancel this trip?',
++    cancelTripDescription: 'Your current guide will stop and the route will be removed from the map. You can plan it again whenever you want.',
++    keepTrip: 'Keep trip',
++    cancelTrip: 'Cancel trip',
++    settingUpPlanTitle: 'Setting Up Your Plan',
++    settingUpPlanBody: 'We are checking real routes, fares, transfer points, and GPS geometry so your guide is reliable before it opens.',
++    setupStepGraph: 'Matching your start and destination to the transit graph',
++    setupStepRoutes: 'Checking GTFS-style route shapes and transfer points',
++    setupStepPrice: 'Estimating fare, time, and comfort tradeoffs',
++    setupStepGuide: 'Preparing turn-by-turn guidance for your trip',
++    setupTakingLong: 'This is taking a little longer than usual. We are still searching verified lines instead of inventing a route, so the answer stays trustworthy.',
++    noRouteTitle: 'We could not find a verified route yet',
++    noRouteBody: 'Sikka only shows routes we can trust. This journey may still exist on the street, but we need a real GPS discovery before recommending it to other riders.',
++    helpJourneyTitle: 'Help us through your journey',
++    helpJourneyBody: 'If you are making this trip now, you can record each leg safely. We store each bus, microbus, metro, tuk-tuk, taxi, or walking segment separately, then score it as more riders confirm it.',
++    registerJourney: 'Register for the trip',
++    discoverJourneyTitle: 'Journey Discovery',
++    discoverJourneyIntroTitle: 'Record one transport leg at a time',
++    discoverJourneyIntroBody: 'Choose the transport you are using now. GPS traces become GTFS-style shapes for fixed routes, and repeated reports increase confidence until the route is ready for everyone.',
++    mapSettings: 'Map settings',
++    mapSettingsDesc: 'Choose the map look you prefer. The preview shows the style before you apply it.',
+   },
+   ar: {
+     welcome: 'مرحباً بك في سكة',
+     tagline: 'رفيقك الذكي للتنقل في مصر',
+     phone: 'رقم الهاتف',
+     enterPhone: 'أدخل رقم هاتفك',
+     sendOtp: 'إرسال رمز التحقق',
+     enterOtp: 'أدخل رمز التحقق',
+     verifyOtp: 'تحقق',
+     selectLanguage: 'اختر اللغة',
+     selectNationality: 'اختر الجنسية',
+     egyptian: 'مصري',
+     foreigner: 'أجنبي',
+     admin: 'مسؤول',
+     adminLogin: 'دخول المسؤول',
+     email: 'البريد الإلكتروني',
+     password: 'كلمة المرور',
+     username: 'اسم المستخدم',
+     login: 'تسجيل الدخول',
+     country: 'الدولة',
+     searchCountry: 'ابحث عن دولة...',
+     logout: 'تسجيل الخروج',
+     back: 'رجوع',
+     searchDestination: 'إلى أين تريد الذهاب؟',
+     myLocation: 'موقعي',
+@@ -330,50 +351,71 @@ const translations: Record<Language, Record<string, string>> = {
+     gpsPointsCaptured: 'نقطة مسجلة',
+     contributeSubmitted: 'شكراً لمساهمتك!',
+     contributeFailed: 'فشل الإرسال',
+     transportNameRequired: 'من فضلك أدخل اسم المواصلة',
+     reports: 'البلاغات',
+     routeDiscovery: 'الاكتشاف',
+     status: 'الحالة',
+     open: 'مفتوح',
+     resolved: 'تم الحل',
+     rejected: 'مرفوض',
+     pending: 'قيد الانتظار',
+     approved: 'مقبول',
+     resolve: 'حل',
+     reject: 'رفض',
+     approve: 'قبول',
+     filterByStatus: 'تصفية حسب الحالة',
+     allStatuses: 'الكل',
+     noReports: 'لا توجد بلاغات.',
+     noDiscovery: 'لا توجد مواصلات مكتشفة بعد.',
+     usersReported: 'مستخدم أبلغ عن هذا',
+     avgPrice: 'متوسط السعر',
+     mostReviewed: 'الأكثر تقييماً',
+     avgRating: 'متوسط التقييم',
+     reportsByType: 'البلاغات حسب النوع',
+     routeAnalytics: 'تحليلات المسارات',
++    cancelTripTitle: 'هل تريد إلغاء هذه الرحلة؟',
++    cancelTripDescription: 'سيتم إيقاف الدليل الحالي وإزالة المسار من الخريطة. يمكنك تخطيط الرحلة مرة أخرى في أي وقت.',
++    keepTrip: 'إبقاء الرحلة',
++    cancelTrip: 'إلغاء الرحلة',
++    settingUpPlanTitle: 'جاري إعداد خطتك',
++    settingUpPlanBody: 'نراجع المسارات الحقيقية والأسعار ونقاط التبديل وشكل الطريق على GPS قبل فتح الدليل.',
++    setupStepGraph: 'مطابقة البداية والوجهة مع شبكة المواصلات',
++    setupStepRoutes: 'فحص أشكال المسارات ونقاط التبديل بطريقة GTFS',
++    setupStepPrice: 'حساب السعر والوقت ومستوى الراحة',
++    setupStepGuide: 'تجهيز إرشادات الرحلة خطوة بخطوة',
++    setupTakingLong: 'الأمر يستغرق وقتاً أطول من المعتاد. ما زلنا نبحث في الخطوط الموثقة بدلاً من اختراع مسار، حتى تبقى النتيجة موثوقة.',
++    noRouteTitle: 'لم نجد مساراً موثقاً بعد',
++    noRouteBody: 'سكة يعرض فقط المسارات التي نستطيع الوثوق بها. قد تكون هذه الرحلة موجودة فعلاً، لكننا نحتاج اكتشاف GPS حقيقي قبل اقتراحها للركاب.',
++    helpJourneyTitle: 'ساعدنا خلال رحلتك',
++    helpJourneyBody: 'إذا كنت تقوم بهذه الرحلة الآن، يمكنك تسجيل كل مرحلة بأمان. نحفظ كل أتوبيس أو ميكروباص أو مترو أو توك توك أو تاكسي أو مشي كمسار منفصل، ثم نرفع ثقته مع تكرار تأكيد الركاب.',
++    registerJourney: 'تسجيل للرحلة',
++    discoverJourneyTitle: 'اكتشاف الرحلة',
++    discoverJourneyIntroTitle: 'سجّل كل مرحلة مواصلات وحدها',
++    discoverJourneyIntroBody: 'اختر وسيلة المواصلات التي تستخدمها الآن. تتحول آثار GPS إلى أشكال مسارات بطريقة GTFS للخطوط الثابتة، وترفع البلاغات المتكررة الثقة حتى يصبح المسار جاهزاً للجميع.',
++    mapSettings: 'إعدادات الخريطة',
++    mapSettingsDesc: 'اختر شكل الخريطة المناسب لك. المعاينة توضح الشكل قبل تطبيقه.',
+   },
+   fr: {
+     welcome: 'Bienvenue sur Sikka',
+     tagline: 'Votre compagnon de transport intelligent en Égypte',
+     phone: 'Numéro de téléphone',
+     enterPhone: 'Entrez votre numéro',
+     sendOtp: 'Envoyer le code',
+     enterOtp: 'Entrez le code',
+     verifyOtp: 'Vérifier',
+     selectLanguage: 'Choisir la langue',
+     selectNationality: 'Choisir la nationalité',
+     egyptian: 'Égyptien',
+     foreigner: 'Étranger',
+     admin: 'Admin',
+     adminLogin: 'Connexion admin',
+     email: 'Email',
+     password: 'Mot de passe',
+     username: "Nom d'utilisateur",
+     login: 'Connexion',
+     country: 'Pays',
+     searchCountry: 'Rechercher un pays...',
+     logout: 'Déconnexion',
+     back: 'Retour',
+     searchDestination: 'Où allez-vous ?',
+     myLocation: 'Ma position',
+diff --git a/artifacts/sikka/src/pages/DiscoverTrip.tsx b/artifacts/sikka/src/pages/DiscoverTrip.tsx
+new file mode 100644
+index 0000000000000000000000000000000000000000..4370648fa20c53cb2922408efdbb513104e409e1
+--- /dev/null
++++ b/artifacts/sikka/src/pages/DiscoverTrip.tsx
+@@ -0,0 +1,189 @@
++import { useEffect, useRef, useState, type ComponentType } from 'react';
++import { useNavigate, useSearchParams } from 'react-router-dom';
++import { ArrowLeft, Bus, Car, Footprints, MapPin, Send, Square, TrainFront, TramFront } from 'lucide-react';
++import { Button } from '@/components/ui/button';
++import { Card, CardContent } from '@/components/ui/card';
++import { Input } from '@/components/ui/input';
++import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
++import { useAuth } from '@/contexts/AuthContext';
++import { t } from '@/lib/i18n';
++import { api } from '@/lib/api';
++import { toast } from 'sonner';
++
++type ModeKey = 'walk' | 'taxi' | 'microbus' | 'bus' | 'metro' | 'tuktuk';
++
++type TransportType = { id: string; nameEn: string; nameAr?: string; icon?: string };
++
++const modeMeta: Record<ModeKey, { icon: ComponentType<{ className?: string }>; nameEn: string; nameAr: string; hintEn: string; hintAr: string }> = {
++  walk: { icon: Footprints, nameEn: 'Walking', nameAr: 'المشي', hintEn: 'Always available. Use it for connectors between rides.', hintAr: 'متاح دائماً للتنقل بين مراحل الرحلة.' },
++  taxi: { icon: Car, nameEn: 'Taxi', nameAr: 'تاكسي', hintEn: 'Door-to-door fallback with optional GPS trace.', hintAr: 'اختيار مباشر مع إمكانية تسجيل GPS.' },
++  microbus: { icon: Bus, nameEn: 'Microbus', nameAr: 'ميكروباص', hintEn: 'Record the actual shared route you ride.', hintAr: 'سجّل خط الميكروباص الحقيقي أثناء الركوب.' },
++  bus: { icon: Bus, nameEn: 'Bus', nameAr: 'أتوبيس', hintEn: 'We will ask CTA/NTA and bus number, then learn the path from GPS.', hintAr: 'سنطلب الجهة ورقم الأتوبيس ونتعلم المسار من GPS.' },
++  metro: { icon: TrainFront, nameEn: 'Metro', nameAr: 'مترو', hintEn: 'Shown when a rail-like option is around your area.', hintAr: 'يظهر عند وجود خيار مترو قريب.' },
++  tuktuk: { icon: TramFront, nameEn: 'Tuk-tuk', nameAr: 'توك توك', hintEn: 'For zones where short tuk-tuk rides are available.', hintAr: 'للمناطق التي يتوفر بها التوك توك.' },
++};
++
++function getTypeId(types: TransportType[], mode: ModeKey, operator: string) {
++  const names = mode === 'bus'
++    ? [operator === 'cta' ? 'CTA Bus' : 'NTA Bus', 'Bus']
++    : [modeMeta[mode].nameEn, mode === 'walk' ? 'Walking' : mode];
++  return types.find((tt) => names.some((name) => tt.nameEn?.toLowerCase().includes(name.toLowerCase())))?.id ?? null;
++}
++
++export default function DiscoverTrip() {
++  const { language } = useAuth();
++  const navigate = useNavigate();
++  const [params] = useSearchParams();
++  const [mode, setMode] = useState<ModeKey>('bus');
++  const [operator, setOperator] = useState<'nta' | 'cta'>('nta');
++  const [lineNumber, setLineNumber] = useState('');
++  const [price, setPrice] = useState('');
++  const [trace, setTrace] = useState<[number, number][]>([]);
++  const [recording, setRecording] = useState(false);
++  const [types, setTypes] = useState<TransportType[]>([]);
++  const [submitting, setSubmitting] = useState(false);
++  const watchRef = useRef<number | null>(null);
++
++  const destination = params.get('destination') || '';
++  const startLabel = t('myLocation', language);
++
++  useEffect(() => {
++    api.get<TransportType[]>('/transport-types').then((data) => setTypes(data ?? [])).catch(() => {});
++  }, []);
++
++  useEffect(() => () => stopRecording(), []);
++
++  const stopRecording = () => {
++    if (watchRef.current != null && navigator.geolocation) {
++      navigator.geolocation.clearWatch(watchRef.current);
++      watchRef.current = null;
++    }
++    setRecording(false);
++  };
++
++  const toggleRecording = () => {
++    if (recording) return stopRecording();
++    if (!navigator.geolocation) {
++      toast.error('GPS is not available on this device');
++      return;
++    }
++    setRecording(true);
++    watchRef.current = navigator.geolocation.watchPosition(
++      (pos) => setTrace((prev) => [...prev, [pos.coords.longitude, pos.coords.latitude]]),
++      () => toast.error(t('contributeFailed', language)),
++      { enableHighAccuracy: true, maximumAge: 0 },
++    );
++  };
++
++  const submit = async () => {
++    if (mode === 'bus' && !lineNumber.trim()) {
++      toast.error(t('busNumberRequired', language));
++      return;
++    }
++    setSubmitting(true);
++    try {
++      stopRecording();
++      const priceNum = Number(price);
++      await api.post('/transport-reports', {
++        transportName: mode === 'bus' ? (operator === 'cta' ? 'CTA Bus' : 'NTA Bus') : modeMeta[mode].nameEn,
++        transportNumber: lineNumber || null,
++        transportTypeId: getTypeId(types, mode, operator),
++        fromArea: startLabel,
++        toArea: destination || null,
++        priceEgp: Number.isFinite(priceNum) && price !== '' ? priceNum : null,
++        gpsTrace: trace.length ? trace : null,
++        stopsVisited: [],
++      });
++      toast.success(t('contributeSubmitted', language));
++      navigate('/', { replace: true });
++    } catch (err) {
++      toast.error(err instanceof Error ? err.message : t('contributeFailed', language));
++    } finally {
++      setSubmitting(false);
++    }
++  };
++
++  const availableModes: ModeKey[] = ['walk', 'taxi', 'microbus', 'bus', 'metro', 'tuktuk'];
++
++  return (
++    <div className="min-h-screen bg-background">
++      <div className="sticky top-0 bg-card/82 backdrop-blur-2xl border-b z-10 p-4 flex items-center gap-3">
++        <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
++          <ArrowLeft className="h-5 w-5" />
++        </Button>
++        <div>
++          <h1 className="font-semibold text-lg">{t('discoverJourneyTitle', language)}</h1>
++          <p className="text-xs text-muted-foreground truncate max-w-[280px]">{destination}</p>
++        </div>
++      </div>
++
++      <div className="p-4 space-y-4 max-w-2xl mx-auto">
++        <Card className="glass-panel rounded-[2rem]">
++          <CardContent className="p-4 space-y-2">
++            <p className="text-sm font-semibold text-foreground">{t('discoverJourneyIntroTitle', language)}</p>
++            <p className="text-xs text-muted-foreground leading-relaxed">{t('discoverJourneyIntroBody', language)}</p>
++          </CardContent>
++        </Card>
++
++        <div className="grid grid-cols-2 gap-3">
++          {availableModes.map((key) => {
++            const Icon = modeMeta[key].icon;
++            return (
++              <button
++                key={key}
++                onClick={() => setMode(key)}
++                className={`glass-panel rounded-[1.75rem] p-4 text-left border transition-all ${mode === key ? 'border-primary bg-primary/10' : 'border-white/20 bg-card/70'}`}
++              >
++                <Icon className="h-5 w-5 text-primary mb-2" />
++                <p className="text-sm font-semibold text-foreground">{language === 'ar' ? modeMeta[key].nameAr : modeMeta[key].nameEn}</p>
++                <p className="text-[11px] text-muted-foreground leading-snug mt-1">{language === 'ar' ? modeMeta[key].hintAr : modeMeta[key].hintEn}</p>
++              </button>
++            );
++          })}
++        </div>
++
++        <Card className="glass-panel rounded-[2rem]">
++          <CardContent className="p-4 space-y-4">
++            {mode === 'bus' && (
++              <>
++                <div>
++                  <label className="text-xs text-muted-foreground">{t('operatorLabel', language)}</label>
++                  <Select value={operator} onValueChange={(v) => setOperator(v as 'nta' | 'cta')}>
++                    <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
++                    <SelectContent>
++                      <SelectItem value="nta">{t('operatorNta', language)}</SelectItem>
++                      <SelectItem value="cta">{t('operatorCta', language)}</SelectItem>
++                    </SelectContent>
++                  </Select>
++                </div>
++                <div>
++                  <label className="text-xs text-muted-foreground">{t('busNumber', language)}</label>
++                  <Input value={lineNumber} onChange={(e) => setLineNumber(e.target.value)} placeholder={t('busNumberPlaceholder', language)} className="mt-1" />
++                </div>
++              </>
++            )}
++            {mode !== 'walk' && mode !== 'taxi' && mode !== 'bus' && (
++              <div>
++                <label className="text-xs text-muted-foreground">{t('transportNumber', language)}</label>
++                <Input value={lineNumber} onChange={(e) => setLineNumber(e.target.value)} className="mt-1" />
++              </div>
++            )}
++            <div>
++              <label className="text-xs text-muted-foreground">{t('priceLabel', language)}</label>
++              <Input type="number" value={price} onChange={(e) => setPrice(e.target.value)} className="mt-1" />
++            </div>
++            <Button type="button" variant={recording ? 'destructive' : 'outline'} className="w-full gap-2 rounded-2xl" onClick={toggleRecording}>
++              {recording ? <Square className="h-4 w-4" /> : <MapPin className="h-4 w-4" />}
++              {recording ? t('stopRecording', language) : t('recordGps', language)}
++            </Button>
++            <p className="text-center text-xs text-muted-foreground">{trace.length} {t('gpsPointsCaptured', language)}</p>
++            <Button className="w-full h-12 rounded-2xl gap-2" onClick={submit} disabled={submitting}>
++              <Send className="h-4 w-4" />
++              {t('submit', language)}
++            </Button>
++          </CardContent>
++        </Card>
++      </div>
++    </div>
++  );
++}
+diff --git a/artifacts/sikka/src/pages/Index.tsx b/artifacts/sikka/src/pages/Index.tsx
+index ccfc12bb5d05005b542dc1161a928a229e1f9307..907d6974a0e7db0dd12341f251972d6f31183aa0 100644
+--- a/artifacts/sikka/src/pages/Index.tsx
++++ b/artifacts/sikka/src/pages/Index.tsx
+@@ -1,89 +1,94 @@
+ import { useState, useEffect, useCallback, useRef } from 'react';
+ import { useNavigate } from 'react-router-dom';
+ import { useAuth } from '@/contexts/AuthContext';
+ import { t } from '@/lib/i18n';
+ import { Button } from '@/components/ui/button';
+ import { User, MapPin, Navigation } from 'lucide-react';
+ import { motion, AnimatePresence } from 'framer-motion';
+ import Map, { Marker, type MapRef } from 'react-map-gl/maplibre';
+ import RouteLayers from '@/components/RouteLayers';
+ import 'maplibre-gl/dist/maplibre-gl.css';
+ import LocationAutocomplete from '@/components/LocationAutocomplete';
+-import { useIsDark, MAP_STYLE_LIGHT, MAP_STYLE_DARK } from '@/hooks/useIsDark';
++import { useMapStyle } from '@/hooks/useMapStyle';
+ import { useTripTracking } from '@/hooks/useTripTracking';
+ import TripGuideSheet, { type GuidePlan, type GuideSegment, type GuideAlternative } from '@/components/trip/TripGuideSheet';
+ import SegmentReviewDialog, { type ReviewSegment } from '@/components/trip/SegmentReviewDialog';
+ import BusUsedDialog from '@/components/trip/BusUsedDialog';
+ import IntercityChoiceDialog from '@/components/trip/IntercityChoiceDialog';
+ import ReportDialog from '@/components/ReportDialog';
+ import { api } from '@/lib/api';
+ import { toast } from 'sonner';
++import {
++  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
++  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
++} from '@/components/ui/alert-dialog';
+ 
+ const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
+ const CAIRO_CENTER = { latitude: 30.0444, longitude: 31.2357 };
+ 
+ const reverseGeocode = async (lat: number, lng: number): Promise<string> => {
+   try {
+     const res = await fetch(
+       `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${MAPBOX_TOKEN}&language=en,ar&limit=1&types=address,neighborhood,locality,place`
+     );
+     const data = await res.json();
+     return data.features?.[0]?.place_name || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+   } catch {
+     return `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+   }
+ };
+ 
+ interface ActiveTripPlan extends GuidePlan {
+   segments: (GuideSegment & { route_geometry?: [number, number][] | null; line_id?: string | null })[];
+   startLat: number; startLng: number; destLat: number; destLng: number;
+   destination: string;
+ }
+ 
+ const Index = () => {
+   const { user, isLoading, language } = useAuth();
+   const navigate = useNavigate();
+-  const isDark = useIsDark();
++  const { style: mapStyle } = useMapStyle();
+   const mapRef = useRef<MapRef | null>(null);
+   const [viewState, setViewState] = useState({ ...CAIRO_CENTER, zoom: 14 });
+   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+   const [locationName, setLocationName] = useState('');
+   const [searchQuery, setSearchQuery] = useState('');
+ 
+   // Destination chosen by tapping the map (reverse-geocoded address shown for confirmation)
+   const [pickedDest, setPickedDest] = useState<{ lat: number; lng: number; name: string; loading: boolean } | null>(null);
+ 
+   const [activeTrip, setActiveTrip] = useState<ActiveTripPlan | null>(null);
+   const [currentSegIdx, setCurrentSegIdx] = useState(0);
+   const [expanded, setExpanded] = useState(true);
+   const [routeCoords, setRouteCoords] = useState<{ segIndex: number; coords: [number, number][] }[]>([]);
+ 
+   const [reviewSeg, setReviewSeg] = useState<ReviewSegment | null>(null);
+   const [reviewOpen, setReviewOpen] = useState(false);
+   const [tripReviewOpen, setTripReviewOpen] = useState(false);
+   const [reportOpen, setReportOpen] = useState(false);
++  const [cancelTripOpen, setCancelTripOpen] = useState(false);
+ 
+   // #6 — ask which bus the user took after finishing a bus segment
+   const [busUsedOpen, setBusUsedOpen] = useState(false);
+   const [busUsedName, setBusUsedName] = useState<string | undefined>(undefined);
+ 
+   // #7 — intercity vs serfis choice when crossing governorates
+   const [choiceOpen, setChoiceOpen] = useState(false);
+   const [pendingTrip, setPendingTrip] = useState<{
+     planUrl: string;
+     intercityUrl: string;
+     fromName: string;
+     toName: string;
+   } | null>(null);
+ 
+   useEffect(() => {
+     if (!isLoading && !user) {
+       if (!sessionStorage.getItem('splashShown')) {
+         navigate('/splash');
+       } else {
+         navigate('/auth');
+       }
+     }
+   }, [user, isLoading, navigate]);
+ 
+   useEffect(() => {
+@@ -306,179 +311,184 @@ const Index = () => {
+       properties: {
+         color: activeTrip?.segments[segIndex]?.color || '#3B82F6',
+         name: activeTrip?.segments[segIndex]?.line_number || activeTrip?.segments[segIndex]?.transport_name || '',
+       },
+       geometry: { type: 'LineString' as const, coordinates: coords },
+     })),
+   };
+ 
+   if (isLoading) {
+     return (
+       <div className="min-h-screen flex items-center justify-center bg-background">
+         <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1 }} className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full" />
+       </div>
+     );
+   }
+ 
+   return (
+     <div className="h-screen w-screen relative overflow-hidden">
+         <Map
+           ref={mapRef}
+           {...viewState}
+           onMove={(evt) => setViewState(evt.viewState)}
+           onClick={(evt) => { void handleMapClick(evt); }}
+           onError={(e) => { const err = (e as { error?: Error })?.error; console.error('[home-map] error:', err?.message || e, err?.stack); }}
+           cursor={activeTrip ? undefined : 'crosshair'}
+-          mapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
++          mapStyle={mapStyle}
+           style={{ width: '100%', height: '100%' }}
+           attributionControl={false}
+         >
+           {activeTrip && routeCoords.length > 0 && (
+             <RouteLayers id="home-route" data={routeGeoJSON} />
+           )}
+ 
+           {activeTrip && (
+             <>
+               <Marker latitude={activeTrip.startLat} longitude={activeTrip.startLng}>
+                 <div className="h-4 w-4 rounded-full bg-primary border-2 border-white shadow" />
+               </Marker>
+               <Marker latitude={activeTrip.destLat} longitude={activeTrip.destLng}>
+                 <div className="h-4 w-4 rounded-full bg-destructive border-2 border-white shadow" />
+               </Marker>
+             </>
+           )}
+ 
+           {!activeTrip && pickedDest && (
+             <Marker latitude={pickedDest.lat} longitude={pickedDest.lng} anchor="bottom">
+               <MapPin className="h-8 w-8 text-destructive drop-shadow-lg" fill="currentColor" strokeWidth={1.5} />
+             </Marker>
+           )}
+ 
+           {(userPos || userLocation) && (
+             <Marker latitude={(userPos ?? userLocation)!.lat} longitude={(userPos ?? userLocation)!.lng}>
+               <div className="relative">
+                 <div className="h-4 w-4 rounded-full bg-blue-500 border-2 border-white shadow-lg" />
+                 <div className="absolute inset-0 h-4 w-4 rounded-full bg-blue-500 animate-ping opacity-30" />
+               </div>
+             </Marker>
+           )}
+         </Map>
+ 
+       {/* Search bar overlay */}
+       <div className="absolute top-0 left-0 right-0 p-4 safe-area-top z-20">
+         <motion.div initial={{ y: -20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="flex items-center gap-2">
+           <LocationAutocomplete
+             value={searchQuery}
+             onChange={setSearchQuery}
+             onSelect={(suggestion) => {
+               void handleDestinationSelect(suggestion);
+             }}
+             placeholder={t('searchDestination', language)}
+             className="flex-1"
++            readOnlyDisplay={activeTrip?.destination || undefined}
++            trailingAction={activeTrip ? 'cancelTrip' : searchQuery ? 'clear' : undefined}
++            onTrailingAction={() => {
++              if (activeTrip) setCancelTripOpen(true);
++              else setSearchQuery('');
++            }}
+           />
+           <Button
+             variant="outline"
+             size="icon"
+-            className="h-12 w-12 rounded-xl bg-card/95 backdrop-blur-sm shadow-lg border-0 shrink-0"
++            className="h-14 w-14 rounded-full bg-card/82 backdrop-blur-2xl shadow-xl border border-white/20 shrink-0 glass-panel"
+             onClick={() => navigate('/profile')}
+           >
+             <User className="h-5 w-5" />
+           </Button>
+         </motion.div>
+       </div>
+ 
+       {/* Active trip guide sheet OR location info */}
+       {activeTrip ? (
+         <TripGuideSheet
+           plan={activeTrip}
+           currentSegIdx={currentSegIdx}
+           progress={progress}
+           remainingMinutes={remainingMinutes || activeTrip.total_duration_minutes}
+           expanded={expanded}
+           onToggleExpand={() => setExpanded((e) => !e)}
+           onNext={handleNext}
+           onBack={handleBack}
+           onDone={handleDone}
+-          onClose={clearTrip}
+           onSwap={handleSwap}
+           onReport={() => setReportOpen(true)}
+           language={language}
+         />
+       ) : (
+         <div className="absolute bottom-6 left-4 right-4">
+           <AnimatePresence mode="wait">
+             {pickedDest ? (
+               <motion.div
+                 key="picked"
+                 initial={{ y: 20, opacity: 0 }}
+                 animate={{ y: 0, opacity: 1 }}
+                 exit={{ y: 20, opacity: 0 }}
+-                className="bg-card/95 backdrop-blur-sm rounded-xl shadow-lg p-4 space-y-3"
++                className="bg-card/82 backdrop-blur-2xl rounded-[2rem] shadow-2xl border border-white/20 p-4 space-y-3 glass-panel"
+               >
+                 <div className="flex items-start gap-3">
+                   <div className="h-10 w-10 rounded-full bg-destructive/10 flex items-center justify-center shrink-0">
+                     <MapPin className="h-5 w-5 text-destructive" />
+                   </div>
+                   <div className="flex-1 min-w-0">
+                     <p className="text-sm font-medium text-foreground">{t('chosenDestination', language)}</p>
+                     <p className="text-xs text-muted-foreground line-clamp-2">
+                       {pickedDest.loading
+                         ? t('locating', language)
+                         : pickedDest.name || `${pickedDest.lat.toFixed(4)}, ${pickedDest.lng.toFixed(4)}`}
+                     </p>
+                   </div>
+                 </div>
+                 <div className="flex items-center gap-2">
+                   <Button variant="outline" className="flex-1 rounded-xl" onClick={() => setPickedDest(null)}>
+                     {t('cancel', language)}
+                   </Button>
+                   <Button className="flex-1 rounded-xl" onClick={confirmPickedDest} disabled={pickedDest.loading}>
+                     {t('planTripHere', language)}
+                   </Button>
+                 </div>
+               </motion.div>
+             ) : (
+               <motion.div
+                 key="location"
+                 initial={{ y: 20, opacity: 0 }}
+                 animate={{ y: 0, opacity: 1 }}
+                 exit={{ y: 20, opacity: 0 }}
+                 transition={{ delay: 0.3 }}
+                 className="space-y-2"
+               >
+                 {userLocation && (
+-                  <div className="bg-card/95 backdrop-blur-sm rounded-xl shadow-lg p-4 flex items-center gap-3">
++                  <div className="bg-card/82 backdrop-blur-2xl rounded-[2rem] shadow-2xl border border-white/20 p-4 flex items-center gap-3 glass-panel">
+                     <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                       <Navigation className="h-5 w-5 text-primary" />
+                     </div>
+                     <div className="flex-1 min-w-0">
+                       <p className="text-sm font-medium text-foreground">{t('myLocation', language)}</p>
+                       <p className="text-xs text-muted-foreground truncate">{locationName || `${userLocation.lat.toFixed(4)}, ${userLocation.lng.toFixed(4)}`}</p>
+                     </div>
+                   </div>
+                 )}
+-                <p className="text-center text-xs text-muted-foreground/90 bg-card/70 backdrop-blur-sm rounded-lg py-1.5 px-3 inline-block mx-auto w-full">
++                <p className="text-center text-xs text-muted-foreground/90 bg-card/70 backdrop-blur-xl rounded-[1.25rem] py-1.5 px-3 inline-block mx-auto w-full border border-white/10">
+                   {t('chooseOnMapHint', language)}
+                 </p>
+               </motion.div>
+             )}
+           </AnimatePresence>
+         </div>
+       )}
+ 
+       {/* Per-segment review */}
+       <SegmentReviewDialog
+         open={reviewOpen}
+         onClose={() => setReviewOpen(false)}
+         onSubmitted={handleSegmentReviewDone}
+         segment={reviewSeg}
+         language={language}
+       />
+ 
+       {/* End-of-trip review */}
+       <SegmentReviewDialog
+         open={tripReviewOpen}
+         onClose={() => setTripReviewOpen(false)}
+         onSubmitted={() => { setTripReviewOpen(false); clearTrip(); toast.success(t('tripComplete', language)); }}
+         segment={null}
+         tripLevel
+         language={language}
+@@ -493,30 +503,50 @@ const Index = () => {
+       />
+ 
+       {/* #6 — which bus did you take? */}
+       <BusUsedDialog
+         open={busUsedOpen}
+         onClose={() => setBusUsedOpen(false)}
+         onDone={openSegmentReview}
+         transportName={busUsedName}
+         language={language}
+       />
+ 
+       {/* #7 — Serfis vs Intercity choice */}
+       <IntercityChoiceDialog
+         open={choiceOpen}
+         onClose={() => setChoiceOpen(false)}
+         onChoose={(choice) => {
+           setChoiceOpen(false);
+           if (!pendingTrip) return;
+           navigate(choice === 'serfis' ? pendingTrip.planUrl : pendingTrip.intercityUrl);
+         }}
+         fromName={pendingTrip?.fromName}
+         toName={pendingTrip?.toName}
+         language={language}
+       />
+ 
++      <AlertDialog open={cancelTripOpen} onOpenChange={setCancelTripOpen}>
++        <AlertDialogContent className="glass-panel rounded-[2rem]">
++          <AlertDialogHeader>
++            <AlertDialogTitle>{t('cancelTripTitle', language)}</AlertDialogTitle>
++            <AlertDialogDescription>
++              {t('cancelTripDescription', language)}
++            </AlertDialogDescription>
++          </AlertDialogHeader>
++          <AlertDialogFooter>
++            <AlertDialogCancel>{t('keepTrip', language)}</AlertDialogCancel>
++            <AlertDialogAction
++              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
++              onClick={() => { clearTrip(); setCancelTripOpen(false); }}
++            >
++              {t('cancelTrip', language)}
++            </AlertDialogAction>
++          </AlertDialogFooter>
++        </AlertDialogContent>
++      </AlertDialog>
++
+     </div>
+   );
+ };
+ 
+ export default Index;
+diff --git a/artifacts/sikka/src/pages/PlanSetup.tsx b/artifacts/sikka/src/pages/PlanSetup.tsx
+new file mode 100644
+index 0000000000000000000000000000000000000000..5e14c7d5d95c6451954816a2a03d8b1bdb503259
+--- /dev/null
++++ b/artifacts/sikka/src/pages/PlanSetup.tsx
+@@ -0,0 +1,182 @@
++import { useEffect, useMemo, useState } from 'react';
++import { useNavigate, useSearchParams } from 'react-router-dom';
++import { motion } from 'framer-motion';
++import { ArrowLeft, Compass, Loader2, Route, Sparkles } from 'lucide-react';
++import { Button } from '@/components/ui/button';
++import { Card, CardContent } from '@/components/ui/card';
++import { useAuth } from '@/contexts/AuthContext';
++import { t } from '@/lib/i18n';
++import { api } from '@/lib/api';
++
++const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
++
++async function reverseGeocode(lat: number, lng: number): Promise<string> {
++  try {
++    const res = await fetch(
++      `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${MAPBOX_TOKEN}&language=en,ar&limit=1&types=address,neighborhood,locality,place`,
++    );
++    const data = await res.json();
++    return data.features?.[0]?.place_name || '';
++  } catch {
++    return '';
++  }
++}
++
++const loadingSteps = [
++  'setupStepGraph',
++  'setupStepRoutes',
++  'setupStepPrice',
++  'setupStepGuide',
++] as const;
++
++export default function PlanSetup() {
++  const [params] = useSearchParams();
++  const navigate = useNavigate();
++  const { language } = useAuth();
++  const [elapsed, setElapsed] = useState(0);
++  const [error, setError] = useState<string | null>(null);
++  const [isNoRoute, setIsNoRoute] = useState(false);
++
++  const request = useMemo(() => {
++    const destination = params.get('destination') || '';
++    return {
++      destination,
++      destLat: parseFloat(params.get('destLat') || '0'),
++      destLng: parseFloat(params.get('destLng') || '0'),
++      startLat: parseFloat(params.get('lat') || '30.0444'),
++      startLng: parseFloat(params.get('lng') || '31.2357'),
++      tripType: params.get('tripType') || 'economic',
++      budget: params.get('budget') ? parseFloat(params.get('budget') || '') : null,
++      mode: params.get('mode') || undefined,
++    };
++  }, [params]);
++
++  useEffect(() => {
++    const timer = window.setInterval(() => setElapsed((s) => s + 1), 1000);
++    return () => window.clearInterval(timer);
++  }, []);
++
++  useEffect(() => {
++    let cancelled = false;
++    const plan = async () => {
++      try {
++        const data = await api.post<{ segments?: Array<Record<string, unknown>>; [k: string]: unknown }>('/trips/plan', {
++          startLat: request.startLat,
++          startLng: request.startLng,
++          endLat: request.destLat,
++          endLng: request.destLng,
++          tripType: request.tripType,
++          budget: request.budget,
++          language,
++          mode: request.mode,
++        });
++        if (cancelled) return;
++        if (!data?.segments?.length) throw new Error(t('noRouteTitle', language));
++
++        const originName = await reverseGeocode(request.startLat, request.startLng);
++        if (Array.isArray(data.segments) && data.segments.length > 0) {
++          const segs = [...data.segments];
++          if (originName) segs[0] = { ...segs[0], start_name: originName };
++          if (request.destination) {
++            const last = segs.length - 1;
++            segs[last] = { ...segs[last], end_name: request.destination };
++          }
++          data.segments = segs;
++        }
++
++        sessionStorage.setItem('tripPlan', JSON.stringify({
++          ...data,
++          destination: request.destination,
++          tripType: request.tripType,
++          startLat: request.startLat,
++          startLng: request.startLng,
++          destLat: request.destLat,
++          destLng: request.destLng,
++        }));
++        navigate('/trip-result', { replace: true });
++      } catch (err) {
++        if (cancelled) return;
++        setIsNoRoute(true);
++        setError(err instanceof Error ? err.message : t('noRouteBody', language));
++      }
++    };
++    void plan();
++    return () => { cancelled = true; };
++  }, [language, navigate, request]);
++
++  const activeStep = Math.min(loadingSteps.length - 1, Math.floor(elapsed / 2) % loadingSteps.length);
++  const tooLong = elapsed >= 10;
++
++  if (isNoRoute) {
++    const discoverParams = new URLSearchParams({
++      destination: request.destination,
++      destLat: String(request.destLat),
++      destLng: String(request.destLng),
++      lat: String(request.startLat),
++      lng: String(request.startLng),
++    });
++    return (
++      <div className="min-h-screen bg-background p-4 flex items-center justify-center">
++        <Card className="max-w-md w-full glass-panel rounded-[2rem]">
++          <CardContent className="p-6 space-y-5 text-center">
++            <div className="mx-auto h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center">
++              <Compass className="h-8 w-8 text-primary" />
++            </div>
++            <div className="space-y-2">
++              <h1 className="text-2xl font-bold text-foreground">{t('noRouteTitle', language)}</h1>
++              <p className="text-sm text-muted-foreground leading-relaxed">{t('noRouteBody', language)}</p>
++              {error && <p className="text-xs text-muted-foreground/80">{error}</p>}
++            </div>
++            <div className="rounded-2xl bg-primary/8 border border-primary/15 p-4 text-left space-y-2">
++              <p className="text-sm font-semibold text-foreground">{t('helpJourneyTitle', language)}</p>
++              <p className="text-xs text-muted-foreground leading-relaxed">{t('helpJourneyBody', language)}</p>
++            </div>
++            <Button className="w-full h-12 rounded-2xl" onClick={() => navigate(`/discover-trip?${discoverParams.toString()}`)}>
++              {t('registerJourney', language)}
++            </Button>
++            <Button variant="outline" className="w-full h-11 rounded-2xl" onClick={() => navigate('/')}>
++              {t('back', language)}
++            </Button>
++          </CardContent>
++        </Card>
++      </div>
++    );
++  }
++
++  return (
++    <div className="min-h-screen bg-background p-4 flex items-center justify-center">
++      <Button variant="ghost" size="icon" className="absolute top-4 left-4" onClick={() => navigate(-1)}>
++        <ArrowLeft className="h-5 w-5" />
++      </Button>
++      <motion.div initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} className="max-w-md w-full">
++        <Card className="glass-panel rounded-[2rem] overflow-hidden">
++          <CardContent className="p-6 space-y-6 text-center">
++            <div className="relative mx-auto h-24 w-24">
++              <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1.4, ease: 'linear' }} className="absolute inset-0 rounded-full border-4 border-primary/15 border-t-primary" />
++              <div className="absolute inset-3 rounded-full bg-primary/10 flex items-center justify-center">
++                <Route className="h-9 w-9 text-primary" />
++              </div>
++            </div>
++            <div className="space-y-2">
++              <h1 className="text-2xl font-bold text-foreground">{t('settingUpPlanTitle', language)}</h1>
++              <p className="text-sm text-muted-foreground">{t('settingUpPlanBody', language)}</p>
++            </div>
++            <div className="space-y-2 text-left">
++              {loadingSteps.map((step, index) => (
++                <div key={step} className={`flex items-center gap-3 rounded-2xl px-3 py-2 ${index === activeStep ? 'bg-primary/10' : 'bg-background/30'}`}>
++                  {index === activeStep ? <Loader2 className="h-4 w-4 animate-spin text-primary" /> : <Sparkles className="h-4 w-4 text-muted-foreground" />}
++                  <span className="text-sm text-foreground">{t(step, language)}</span>
++                </div>
++              ))}
++            </div>
++            {tooLong && (
++              <p className="rounded-2xl bg-amber-500/10 border border-amber-500/20 p-3 text-xs text-muted-foreground leading-relaxed">
++                {t('setupTakingLong', language)}
++              </p>
++            )}
++          </CardContent>
++        </Card>
++      </motion.div>
++    </div>
++  );
++}
+diff --git a/artifacts/sikka/src/pages/Profile.tsx b/artifacts/sikka/src/pages/Profile.tsx
+index 15eaf783f9ec2fd1aca465f68eeca0d050c6a5ef..3e43045c5181c30001a0003a577049b53ca66831 100644
+--- a/artifacts/sikka/src/pages/Profile.tsx
++++ b/artifacts/sikka/src/pages/Profile.tsx
+@@ -1,103 +1,125 @@
+-import { useState } from 'react';
+ import { useNavigate } from 'react-router-dom';
+ import { useAuth } from '@/contexts/AuthContext';
+ import { t } from '@/lib/i18n';
+ import { Button } from '@/components/ui/button';
+ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+-import { ArrowLeft, LogOut, Shield, User, Milestone } from 'lucide-react';
++import { ArrowLeft, LogOut, Shield, User, Milestone, Map } from 'lucide-react';
+ import { motion } from 'framer-motion';
+ import LanguageSelect from '@/components/LanguageSelect';
+ import ThemeToggle from '@/components/ThemeToggle';
+-import ContributeTransportDialog from '@/components/ContributeTransportDialog';
++import { MAP_MODES, type MapMode, useMapStyle } from '@/hooks/useMapStyle';
+ 
+ const Profile = () => {
+   const { user, profile, isAdmin, language, setLanguage, signOut } = useAuth();
+   const navigate = useNavigate();
+-  const [contributeOpen, setContributeOpen] = useState(false);
++  const { mode: mapMode, setMode: setMapMode } = useMapStyle();
+ 
+   const handleLogout = async () => {
+     await signOut();
+     navigate('/auth');
+   };
+ 
+   return (
+     <div className="min-h-screen bg-background">
+-      <div className="sticky top-0 bg-card/95 backdrop-blur-sm border-b z-10 p-4 flex items-center gap-3">
++      <div className="sticky top-0 bg-card/82 backdrop-blur-2xl border-b z-10 p-4 flex items-center gap-3">
+         <Button variant="ghost" size="icon" onClick={() => navigate('/')}>
+           <ArrowLeft className="h-5 w-5" />
+         </Button>
+         <h1 className="font-semibold text-lg">{t('profile', language)}</h1>
+         <div className="ml-auto">
+           <ThemeToggle />
+         </div>
+       </div>
+ 
+       <div className="p-4 space-y-4">
+         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }}>
+-          <Card>
++          <Card className="rounded-[2rem] glass-panel">
+             <CardContent className="p-4 flex items-center gap-4">
+               <div className="h-14 w-14 rounded-full bg-primary/10 flex items-center justify-center">
+                 <User className="h-7 w-7 text-primary" />
+               </div>
+               <div>
+                 <p className="font-semibold text-foreground">{profile?.displayName ?? profile?.phone ?? user?.id?.replace(/^(?:phone|admin):/, '') ?? 'User'}</p>
+                 <p className="text-sm text-muted-foreground capitalize">{profile?.nationality || 'egyptian'}</p>
+               </div>
+               {isAdmin && (
+                 <div className="ml-auto">
+                   <span className="text-xs bg-primary/10 text-primary px-2 py-1 rounded-full flex items-center gap-1">
+                     <Shield className="h-3 w-3" /> Admin
+                   </span>
+                 </div>
+               )}
+             </CardContent>
+           </Card>
+         </motion.div>
+ 
+         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.1 }}>
+-          <Card>
++          <Card className="rounded-[2rem] glass-panel">
+             <CardHeader className="pb-2">
+               <CardTitle className="text-sm text-muted-foreground">
+                 {t('language', language)}
+               </CardTitle>
+             </CardHeader>
+             <CardContent>
+               <LanguageSelect value={language} onChange={setLanguage} className="w-full" />
+             </CardContent>
+           </Card>
+         </motion.div>
+ 
++        <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.12 }}>
++          <Card className="rounded-[2rem] glass-panel">
++            <CardHeader className="pb-2">
++              <CardTitle className="text-sm text-muted-foreground flex items-center gap-2">
++                <Map className="h-4 w-4" /> {t('mapSettings', language)}
++              </CardTitle>
++            </CardHeader>
++            <CardContent className="space-y-3">
++              <p className="text-xs text-muted-foreground">{t('mapSettingsDesc', language)}</p>
++              <div className="grid grid-cols-2 gap-3">
++                {(Object.keys(MAP_MODES) as MapMode[]).map((key) => {
++                  const item = MAP_MODES[key];
++                  return (
++                    <button
++                      key={key}
++                      onClick={() => setMapMode(key)}
++                      className={`rounded-[1.5rem] border p-2 text-left transition-all ${mapMode === key ? 'border-primary bg-primary/10' : 'border-white/20 bg-background/30'}`}
++                    >
++                      <div className="h-16 rounded-[1.15rem] border border-white/30 shadow-inner mb-2" style={{ background: item.preview }} />
++                      <p className="text-sm font-semibold text-foreground">{language === 'ar' ? item.labelAr : item.labelEn}</p>
++                      <p className="text-[10px] text-muted-foreground leading-snug">{language === 'ar' ? item.descriptionAr : item.descriptionEn}</p>
++                    </button>
++                  );
++                })}
++              </div>
++            </CardContent>
++          </Card>
++        </motion.div>
++
+         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.15 }}>
+-          <Button variant="outline" className="w-full" onClick={() => setContributeOpen(true)}>
++          <Button variant="outline" className="w-full rounded-[1.5rem] glass-panel" onClick={() => navigate('/discover-trip')}>
+             <Milestone className="h-4 w-4 mr-2" />
+             {t('contributeRoute', language)}
+           </Button>
+         </motion.div>
+ 
+         {isAdmin && (
+           <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.2 }}>
+-            <Button variant="outline" className="w-full" onClick={() => navigate('/admin')}>
++            <Button variant="outline" className="w-full rounded-[1.5rem] glass-panel" onClick={() => navigate('/admin')}>
+               <Shield className="h-4 w-4 mr-2" />
+               {t('dashboard', language)}
+             </Button>
+           </motion.div>
+         )}
+ 
+         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.3 }}>
+-          <Button variant="destructive" className="w-full" onClick={handleLogout}>
++          <Button variant="destructive" className="w-full rounded-[1.5rem]" onClick={handleLogout}>
+             <LogOut className="h-4 w-4 mr-2" />
+             {t('logout', language)}
+           </Button>
+         </motion.div>
+       </div>
+-
+-      <ContributeTransportDialog
+-        open={contributeOpen}
+-        onClose={() => setContributeOpen(false)}
+-        language={language}
+-      />
+     </div>
+   );
+ };
+ 
+ export default Profile;
+diff --git a/artifacts/sikka/src/pages/TripPlan.tsx b/artifacts/sikka/src/pages/TripPlan.tsx
+index 798f9e49c314eb3ca40536cff724d634d79c7740..038a76e862132802f936521ee5eb8a35946ff52e 100644
+--- a/artifacts/sikka/src/pages/TripPlan.tsx
++++ b/artifacts/sikka/src/pages/TripPlan.tsx
+@@ -1,144 +1,99 @@
+ import { useState, useEffect, useMemo } from 'react';
+ import { useSearchParams, useNavigate } from 'react-router-dom';
+ import { useAuth } from '@/contexts/AuthContext';
+ import { t } from '@/lib/i18n';
+-import { api } from '@/lib/api';
+ import { Button } from '@/components/ui/button';
+ import { Input } from '@/components/ui/input';
+ import { Card, CardContent } from '@/components/ui/card';
+ import { motion } from 'framer-motion';
+-import { ArrowLeft, Wallet, Clock, MapPin, ChevronRight, Loader2 } from 'lucide-react';
+-import { toast } from 'sonner';
++import { ArrowLeft, Wallet, Clock, MapPin, ChevronRight } from 'lucide-react';
+ 
+ type TripType = 'economic' | 'comfortable' | 'premium';
+ 
+-const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
+-
+-async function reverseGeocode(lat: number, lng: number): Promise<string> {
+-  try {
+-    const res = await fetch(
+-      `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${MAPBOX_TOKEN}&language=en,ar&limit=1&types=address,neighborhood,locality,place`
+-    );
+-    const data = await res.json();
+-    return data.features?.[0]?.place_name || '';
+-  } catch {
+-    return '';
+-  }
+-}
+-
+ const TripPlan = () => {
+   const [searchParams] = useSearchParams();
+   const navigate = useNavigate();
+   const { language } = useAuth();
+ 
+   const destination = searchParams.get('destination') || '';
+   const destLat = parseFloat(searchParams.get('destLat') || '0');
+   const destLng = parseFloat(searchParams.get('destLng') || '0');
+   const startLat = parseFloat(searchParams.get('lat') || '30.0444');
+   const startLng = parseFloat(searchParams.get('lng') || '31.2357');
+   const mode = searchParams.get('mode') || undefined;
+ 
+   const [tripType, setTripType] = useState<TripType>('economic');
+   const [budget, setBudget] = useState('');
+-  const [isPlanning, setIsPlanning] = useState(false);
+ 
+   const distanceKm = useMemo(() => {
+     const R = 6371;
+     const dLat = (destLat - startLat) * Math.PI / 180;
+     const dLng = (destLng - startLng) * Math.PI / 180;
+     const a = Math.sin(dLat / 2) ** 2 + Math.cos(startLat * Math.PI / 180) * Math.cos(destLat * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+   }, [startLat, startLng, destLat, destLng]);
+ 
+   const budgetRange = useMemo(() => {
+     const busFare = distanceKm > 25 ? 25 : 13;
+     const metroFare = distanceKm > 23 ? 20 : distanceKm > 9 ? 15 : 8;
+     const taxiFare = 15 + distanceKm * 4.5;
+     const ranges: Record<TripType, { min: number; max: number }> = {
+       economic: { min: Math.round(Math.min(busFare, metroFare)), max: Math.round(Math.max(25, busFare + 15)) },
+       comfortable: { min: Math.round(Math.min(metroFare, 25)), max: Math.round(Math.max(45, metroFare + 30)) },
+       premium: { min: Math.round(taxiFare), max: Math.round(taxiFare * 1.35) },
+     };
+     return ranges[tripType];
+   }, [distanceKm, tripType]);
+ 
+   useEffect(() => {
+     setBudget(String(budgetRange.min));
+   }, [tripType, budgetRange]);
+ 
+   const tripTypes: { value: TripType; icon: string; color: string }[] = [
+     { value: 'economic', icon: '💰', color: 'border-green-400' },
+     { value: 'comfortable', icon: '🛋️', color: 'border-blue-400' },
+     { value: 'premium', icon: '✨', color: 'border-yellow-400' },
+   ];
+ 
+-  const handlePlanTrip = async () => {
+-    setIsPlanning(true);
+-    try {
+-      const data = await api.post<{ segments?: Array<Record<string, unknown>>; [k: string]: unknown }>('/trips/plan', {
+-        startLat, startLng,
+-        endLat: destLat, endLng: destLng,
+-        tripType,
+-        budget: budget ? parseFloat(budget) : null,
+-        language,
+-        mode,
+-      });
+-
+-      if (!data) throw new Error('No plan returned');
+-
+-      // Replace generic boundary labels ("Your Location" / "Near Destination")
+-      // with real place names: actual origin (reverse-geocoded) and destination.
+-      if (Array.isArray(data.segments) && data.segments.length > 0) {
+-        const originName = await reverseGeocode(startLat, startLng);
+-        const segs = [...data.segments];
+-        if (originName) segs[0] = { ...segs[0], start_name: originName };
+-        if (destination) {
+-          const last = segs.length - 1;
+-          segs[last] = { ...segs[last], end_name: destination };
+-        }
+-        data.segments = segs;
+-      }
+-
+-      sessionStorage.setItem('tripPlan', JSON.stringify({
+-        ...data,
+-        destination,
+-        tripType,
+-        startLat, startLng, destLat, destLng,
+-      }));
+-      navigate('/trip-result');
+-    } catch (err: unknown) {
+-      console.error('Plan error:', err);
+-      toast.error(err instanceof Error ? err.message : 'Failed to plan trip');
+-    } finally {
+-      setIsPlanning(false);
+-    }
++  const handlePlanTrip = () => {
++    const params = new URLSearchParams({
++      destination,
++      destLat: String(destLat),
++      destLng: String(destLng),
++      lat: String(startLat),
++      lng: String(startLng),
++      tripType,
++      budget: budget || '',
++    });
++    if (mode) params.set('mode', mode);
++    navigate(`/plan/setup?${params.toString()}`);
+   };
+ 
+   return (
+     <div className="min-h-screen bg-background">
+-      <div className="sticky top-0 bg-card/95 backdrop-blur-sm border-b z-10 p-4 flex items-center gap-3">
++      <div className="sticky top-0 bg-card/82 backdrop-blur-2xl border-b z-10 p-4 flex items-center gap-3">
+         <Button variant="ghost" size="icon" onClick={() => navigate('/')}>
+           <ArrowLeft className="h-5 w-5" />
+         </Button>
+         <div>
+           <p className="text-sm text-muted-foreground">{t('searchDestination', language)}</p>
+           <p className="font-semibold text-foreground truncate max-w-[250px]">{destination}</p>
+         </div>
+       </div>
+ 
+       <div className="p-4 space-y-6">
+         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }}>
+           <Card>
+             <CardContent className="p-4 flex items-center gap-3">
+               <div className="h-10 w-10 rounded-full bg-destructive/10 flex items-center justify-center shrink-0">
+                 <MapPin className="h-5 w-5 text-destructive" />
+               </div>
+               <div className="flex-1">
+                 <p className="text-xs text-muted-foreground">Destination</p>
+                 <p className="font-medium text-foreground truncate">{destination}</p>
+                 <p className="text-xs text-muted-foreground">{distanceKm.toFixed(1)} km away</p>
+               </div>
+             </CardContent>
+           </Card>
+         </motion.div>
+ 
+@@ -161,45 +116,36 @@ const TripPlan = () => {
+         </motion.div>
+ 
+         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.2 }}>
+           <p className="text-sm font-medium text-foreground mb-3">{t('budget', language)}</p>
+           <div className="relative">
+             <Wallet className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+             <Input
+               type="number"
+               placeholder={String(budgetRange.min)}
+               value={budget}
+               onChange={(e) => setBudget(e.target.value)}
+               className="pl-10 h-12 text-base"
+               dir="ltr"
+             />
+             <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+               {t('egp', language)}
+             </span>
+           </div>
+           <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
+             <Clock className="h-3 w-3" />
+             {t('recommendedBudget', language)}: {budgetRange.min}–{budgetRange.max} {t('egp', language)}
+           </p>
+         </motion.div>
+ 
+         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.3 }}>
+-          <Button onClick={handlePlanTrip} disabled={isPlanning} className="w-full h-14 text-base rounded-xl gap-2">
+-            {isPlanning ? (
+-              <>
+-                <Loader2 className="h-5 w-5 animate-spin" />
+-                {t('settingUp', language)}
+-              </>
+-            ) : (
+-              <>
+-                {t('planTrip', language)}
+-                <ChevronRight className="h-5 w-5" />
+-              </>
+-            )}
++          <Button onClick={handlePlanTrip} className="w-full h-14 text-base rounded-xl gap-2">
++            {t('planTrip', language)}
++            <ChevronRight className="h-5 w-5" />
+           </Button>
+         </motion.div>
+       </div>
+     </div>
+   );
+ };
+ 
+ export default TripPlan;
+diff --git a/artifacts/sikka/src/pages/admin/AdminDiscovery.tsx b/artifacts/sikka/src/pages/admin/AdminDiscovery.tsx
+index 26d0184f05214e8310bd8f82657b1f358a19673f..34c65b09e700326cb297604c2f1cd982735770c6 100644
+--- a/artifacts/sikka/src/pages/admin/AdminDiscovery.tsx
++++ b/artifacts/sikka/src/pages/admin/AdminDiscovery.tsx
+@@ -1,120 +1,166 @@
+ import { useEffect, useState } from 'react';
+ import { api } from '@/lib/api';
+ import { useAuth } from '@/contexts/AuthContext';
+ import { t } from '@/lib/i18n';
+ import { Card, CardContent } from '@/components/ui/card';
+ import { Button } from '@/components/ui/button';
+ import { Badge } from '@/components/ui/badge';
+ import { toast } from 'sonner';
+-import { Users, ArrowRight } from 'lucide-react';
++import { Users, ArrowRight, Star, Brain, Route, MapPinned } from 'lucide-react';
+ 
+ interface DiscoveryRow {
+   transportName: string;
+   transportNumber: string | null;
+   reportCount: number;
+   sampleFromArea: string | null;
+   sampleToArea: string | null;
+   avgPrice: number | null;
++  gpsTraceCount?: number;
++  avgGpsPoints?: number | null;
++  confidenceScore?: number;
+ }
+ 
+ interface TransportReport {
+   id: string;
+   transportName: string;
+   transportNumber: string | null;
+   fromArea: string | null;
+   toArea: string | null;
+   priceEgp: number | null;
+   status: string;
+   createdAt: string;
+ }
+ 
+ const AdminDiscovery = () => {
+   const { language } = useAuth();
+   const [discovery, setDiscovery] = useState<DiscoveryRow[]>([]);
+   const [pending, setPending] = useState<TransportReport[]>([]);
+   const [isLoading, setIsLoading] = useState(true);
+ 
+   const fetchData = () => {
+     setIsLoading(true);
+     Promise.all([
+       api.get<DiscoveryRow[]>('/transport-reports?discovery=true'),
+       api.get<TransportReport[]>('/transport-reports?status=pending'),
+     ])
+       .then(([disc, pend]) => {
+         setDiscovery(disc ?? []);
+         setPending(pend ?? []);
+       })
+       .catch((err: unknown) => toast.error(err instanceof Error ? err.message : 'Failed to load'))
+       .finally(() => setIsLoading(false));
+   };
+ 
+   useEffect(() => { fetchData(); }, []);
+ 
+   const updateStatus = async (id: string, status: string) => {
+     try {
+       await api.put(`/transport-reports/${id}`, { status });
+       setPending((prev) => prev.filter((r) => r.id !== id));
+       toast.success(t('planUpdated', language));
+       fetchData();
+     } catch (err: unknown) {
+       toast.error(err instanceof Error ? err.message : 'Failed to update');
+     }
+   };
+ 
+   if (isLoading) return <p className="text-muted-foreground text-sm">Loading...</p>;
+ 
+   return (
+     <div className="space-y-6">
++
++      <Card className="glass-panel rounded-[2rem]">
++        <CardContent className="p-4 space-y-3">
++          <div className="flex items-start gap-3">
++            <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
++              <Brain className="h-5 w-5 text-primary" />
++            </div>
++            <div>
++              <h3 className="text-sm font-semibold text-foreground">Discovery learning brain</h3>
++              <p className="text-xs text-muted-foreground leading-relaxed">
++                Each contributed journey is split into single transport legs, clustered by mode/operator/number and overlapping GPS geometry, converted into GTFS-style stop_times + shapes, then scored from 1–5 by report volume, GPS completeness, route stability, and rider confirmations.
++              </p>
++            </div>
++          </div>
++          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
++            <div className="rounded-2xl bg-background/35 border p-3">
++              <Route className="h-4 w-4 text-primary mb-1" />
++              <p className="text-xs font-semibold">Segment-first storage</p>
++              <p className="text-[11px] text-muted-foreground">Bus + microbus in one journey become two scored route candidates.</p>
++            </div>
++            <div className="rounded-2xl bg-background/35 border p-3">
++              <MapPinned className="h-4 w-4 text-primary mb-1" />
++              <p className="text-xs font-semibold">GTFS geometry lock</p>
++              <p className="text-[11px] text-muted-foreground">A candidate only graduates when repeated traces agree on stops and shape.</p>
++            </div>
++            <div className="rounded-2xl bg-background/35 border p-3">
++              <Star className="h-4 w-4 text-primary mb-1" />
++              <p className="text-xs font-semibold">1–5 confidence</p>
++              <p className="text-[11px] text-muted-foreground">Scores rise with unique riders, completed GPS, and positive reviews.</p>
++            </div>
++          </div>
++        </CardContent>
++      </Card>
++
+       <div className="space-y-3">
+         <h3 className="text-sm font-semibold text-foreground">{t('routeDiscovery', language)}</h3>
+         {discovery.length === 0 && <p className="text-muted-foreground text-sm">{t('noDiscovery', language)}</p>}
+         {discovery.map((d, i) => (
+           <Card key={`${d.transportName}-${d.transportNumber}-${i}`}>
+             <CardContent className="p-4 space-y-1">
+               <div className="flex items-center justify-between gap-2">
+                 <p className="text-sm font-medium text-foreground">
+                   {d.transportNumber ? `${d.transportNumber} · ` : ''}{d.transportName}
+                 </p>
+-                <Badge variant="secondary" className="gap-1">
+-                  <Users className="h-3 w-3" />
+-                  {d.reportCount}
+-                </Badge>
++                <div className="flex items-center gap-2">
++                  <Badge variant="secondary" className="gap-1">
++                    <Star className="h-3 w-3 fill-current" />
++                    {(d.confidenceScore ?? 1).toFixed(1)}/5
++                  </Badge>
++                  <Badge variant="secondary" className="gap-1">
++                    <Users className="h-3 w-3" />
++                    {d.reportCount}
++                  </Badge>
++                </div>
+               </div>
+               <p className="text-xs text-muted-foreground">
+                 {d.reportCount} {t('usersReported', language)}
+               </p>
+               {(d.sampleFromArea || d.sampleToArea) && (
+                 <p className="text-xs text-muted-foreground flex items-center gap-1">
+                   {d.sampleFromArea || '?'} <ArrowRight className="h-3 w-3" /> {d.sampleToArea || '?'}
+                 </p>
+               )}
+               {d.avgPrice != null && (
+                 <p className="text-xs text-muted-foreground">
+                   {t('avgPrice', language)}: {Math.round(d.avgPrice)} {t('egp', language)}
+                 </p>
+               )}
++              <p className="text-xs text-muted-foreground">
++                GPS traces: {d.gpsTraceCount ?? 0} · avg points: {Math.round(d.avgGpsPoints ?? 0)}
++              </p>
+             </CardContent>
+           </Card>
+         ))}
+       </div>
+ 
+       <div className="space-y-3">
+         <h3 className="text-sm font-semibold text-foreground">{t('pending', language)}</h3>
+         {pending.length === 0 && <p className="text-muted-foreground text-sm">{t('noReports', language)}</p>}
+         {pending.map((r) => (
+           <Card key={r.id}>
+             <CardContent className="p-4 space-y-2">
+               <p className="text-sm font-medium text-foreground">
+                 {r.transportNumber ? `${r.transportNumber} · ` : ''}{r.transportName}
+               </p>
+               {(r.fromArea || r.toArea) && (
+                 <p className="text-xs text-muted-foreground flex items-center gap-1">
+                   {r.fromArea || '?'} <ArrowRight className="h-3 w-3" /> {r.toArea || '?'}
+                 </p>
+               )}
+               {r.priceEgp != null && (
+                 <p className="text-xs text-muted-foreground">{Math.round(r.priceEgp)} {t('egp', language)}</p>
+               )}
+               <p className="text-xs text-muted-foreground">{new Date(r.createdAt).toLocaleString()}</p>
+               <div className="flex gap-2 pt-1">
+                 <Button size="sm" className="h-8" onClick={() => updateStatus(r.id, 'approved')}>
+diff --git a/artifacts/sikka/src/pages/admin/AdminMap.tsx b/artifacts/sikka/src/pages/admin/AdminMap.tsx
+index 87754c0076672a477c60737596d664b53fee28dd..261a5425f5b449826c1ec05a496ca5bccce32d5a 100644
+--- a/artifacts/sikka/src/pages/admin/AdminMap.tsx
++++ b/artifacts/sikka/src/pages/admin/AdminMap.tsx
+@@ -541,67 +541,69 @@ const AdminMap = () => {
+             <Source id="drawing" type="geojson" data={drawGeoJSON}>
+               <Layer id="draw-line" type="line" paint={{ 'line-color': '#FF6B6B', 'line-width': 4, 'line-dasharray': [2, 2] }} />
+             </Source>
+           )}
+           {isDrawing && drawPoints.map((pt, i) => (
+             <Marker key={`dp-${i}`} latitude={pt[1]} longitude={pt[0]}><div className="h-3 w-3 rounded-full bg-destructive border border-background" /></Marker>
+           ))}
+ 
+           {showHeatmap && heatmapGeoJSON.features.length > 0 && (
+             <Source id="heatmap" type="geojson" data={heatmapGeoJSON}>
+               <Layer id="heatmap-layer" type="heatmap" paint={{
+                 'heatmap-weight': ['get', 'intensity'], 'heatmap-intensity': 1, 'heatmap-radius': 42, 'heatmap-opacity': 0.65,
+                 'heatmap-color': ['interpolate', ['linear'], ['heatmap-density'], 0, 'rgba(0,0,0,0)', 0.2, 'rgba(255,165,0,0.3)', 0.5, 'rgba(255,140,0,0.5)', 0.8, 'rgba(255,69,0,0.7)', 1, 'rgba(255,0,0,0.9)'],
+               }} />
+             </Source>
+           )}
+ 
+           {showHeatmap && isHeatmapEditing && heatmapData.filter(h => heatmapTypeIds.includes(h.transportTypeId)).map(h => (
+             <Marker key={h.id} latitude={h.latitude} longitude={h.longitude}>
+               <button onClick={e => { e.stopPropagation(); deleteHeatPoint(h.id); }} className="h-7 w-7 rounded-full bg-destructive text-destructive-foreground text-xs shadow-lg border border-background">×</button>
+             </Marker>
+           ))}
+ 
+           {mawaqef.map(station => (
+             <Marker key={station.id} latitude={station.latitude} longitude={station.longitude}>
+-              <button onClick={e => { e.stopPropagation(); setViewState(v => ({ ...v, latitude: station.latitude, longitude: station.longitude, zoom: 13 })); }} className="h-7 w-7 rounded-full bg-card/90 border border-primary shadow-lg flex items-center justify-center">
+-                <MapPin className="h-3.5 w-3.5 text-primary" />
+-              </button>
++              <button
++                onClick={e => { e.stopPropagation(); setViewState(v => ({ ...v, latitude: station.latitude, longitude: station.longitude, zoom: 13 })); }}
++                className="h-2.5 w-2.5 rounded-full bg-primary border-2 border-background shadow"
++                title={station.nameEn || station.nameAr || 'Station'}
++                aria-label={station.nameEn || station.nameAr || 'Station'}
++              />
+             </Marker>
+           ))}
+ 
+           {visibleLines.map((line, idx) => {
+             const coords = getLineGeometry(line)?.coordinates;
+             if (!coords?.length) return null;
+             const mid = coords[Math.floor(coords.length / 2)];
+             const tt = transportTypes.find(t => t.id === line.transportTypeId);
+             const color = getRouteColor(line, idx);
+             return (
+               <Marker key={`icon-${line.id}`} latitude={mid[1]} longitude={mid[0]}>
+                 <button onClick={e => { e.stopPropagation(); setDetailLine(line); setSelectedLine(line); }} className="group">
+-                  <div className="flex items-center gap-1 pl-0.5 pr-2 py-0.5 rounded-full shadow-lg border-2 border-background group-hover:scale-110 transition-transform" style={{ backgroundColor: color }}>
+-                    <div className="h-6 w-6 rounded-full flex items-center justify-center text-xs bg-background/20">{ICONS[tt?.icon || 'bus']}</div>
++                  <div className="flex items-center px-2 py-1 rounded-full shadow-lg border-2 border-background group-hover:scale-110 transition-transform" style={{ backgroundColor: color }}>
+                     <span className="text-[11px] font-bold text-white whitespace-nowrap">{line.lineNumber || tt?.nameEn?.slice(0, 6)}</span>
+                   </div>
+                 </button>
+               </Marker>
+             );
+           })}
+ 
+           {/* Stops of the selected line — rendered as small ordered markers */}
+           {selectedLine?.stops?.map((s, i) => (
+             <Marker key={`stop-${selectedLine.id}-${i}`} latitude={s.lat} longitude={s.lng}>
+               <div title={s.name} className="h-2.5 w-2.5 rounded-full bg-background border-2 shadow" style={{ borderColor: getRouteColor(selectedLine, 0) }} />
+             </Marker>
+           ))}
+         </Map>
+ 
+         {isDrawing && (
+           <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-card/95 backdrop-blur-sm rounded-xl shadow-xl p-3 flex items-center gap-3 z-10">
+             <span className="text-sm font-medium">Click the real route points ({drawPoints.length})</span>
+             {drawPoints.length > 0 && <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setDrawPoints(prev => prev.slice(0, -1))}>Undo</Button>}
+             <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setDrawPoints([])}>Clear</Button>
+             <Button size="sm" className="h-7 text-xs" onClick={() => { setIsDrawing(false); setShowForm(true); }}>Done</Button>
+           </div>
+         )}
+       </div>
+ 
+ 
+EOF
+)

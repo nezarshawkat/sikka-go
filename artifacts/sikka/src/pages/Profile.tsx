@@ -1,19 +1,18 @@
-import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { t } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { ArrowLeft, LogOut, Shield, User, Milestone } from 'lucide-react';
+import { ArrowLeft, LogOut, Shield, User, Milestone, Map } from 'lucide-react';
 import { motion } from 'framer-motion';
 import LanguageSelect from '@/components/LanguageSelect';
 import ThemeToggle from '@/components/ThemeToggle';
-import ContributeTransportDialog from '@/components/ContributeTransportDialog';
+import { MAP_MODES, type MapMode, useMapStyle } from '@/hooks/useMapStyle';
 
 const Profile = () => {
   const { user, profile, isAdmin, language, setLanguage, signOut } = useAuth();
   const navigate = useNavigate();
-  const [contributeOpen, setContributeOpen] = useState(false);
+  const { mode: mapMode, setMode: setMapMode } = useMapStyle();
 
   const handleLogout = async () => {
     await signOut();
@@ -22,7 +21,7 @@ const Profile = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="sticky top-0 bg-card/95 backdrop-blur-sm border-b z-10 p-4 flex items-center gap-3">
+      <div className="sticky top-0 bg-card/82 backdrop-blur-2xl border-b z-10 p-4 flex items-center gap-3">
         <Button variant="ghost" size="icon" onClick={() => navigate('/')}>
           <ArrowLeft className="h-5 w-5" />
         </Button>
@@ -34,7 +33,7 @@ const Profile = () => {
 
       <div className="p-4 space-y-4">
         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }}>
-          <Card>
+          <Card className="rounded-[2rem] glass-panel">
             <CardContent className="p-4 flex items-center gap-4">
               <div className="h-14 w-14 rounded-full bg-primary/10 flex items-center justify-center">
                 <User className="h-7 w-7 text-primary" />
@@ -55,7 +54,7 @@ const Profile = () => {
         </motion.div>
 
         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.1 }}>
-          <Card>
+          <Card className="rounded-[2rem] glass-panel">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm text-muted-foreground">
                 {t('language', language)}
@@ -67,8 +66,37 @@ const Profile = () => {
           </Card>
         </motion.div>
 
+        <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.12 }}>
+          <Card className="rounded-[2rem] glass-panel">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm text-muted-foreground flex items-center gap-2">
+                <Map className="h-4 w-4" /> {t('mapSettings', language)}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-xs text-muted-foreground">{t('mapSettingsDesc', language)}</p>
+              <div className="grid grid-cols-2 gap-3">
+                {(Object.keys(MAP_MODES) as MapMode[]).map((key) => {
+                  const item = MAP_MODES[key];
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => setMapMode(key)}
+                      className={`rounded-[1.5rem] border p-2 text-left transition-all ${mapMode === key ? 'border-primary bg-primary/10' : 'border-white/20 bg-background/30'}`}
+                    >
+                      <div className="h-16 rounded-[1.15rem] border border-white/30 shadow-inner mb-2" style={{ background: item.preview }} />
+                      <p className="text-sm font-semibold text-foreground">{language === 'ar' ? item.labelAr : item.labelEn}</p>
+                      <p className="text-[10px] text-muted-foreground leading-snug">{language === 'ar' ? item.descriptionAr : item.descriptionEn}</p>
+                    </button>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+
         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.15 }}>
-          <Button variant="outline" className="w-full" onClick={() => setContributeOpen(true)}>
+          <Button variant="outline" className="w-full rounded-[1.5rem] glass-panel" onClick={() => navigate('/discover-trip')}>
             <Milestone className="h-4 w-4 mr-2" />
             {t('contributeRoute', language)}
           </Button>
@@ -76,7 +104,7 @@ const Profile = () => {
 
         {isAdmin && (
           <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.2 }}>
-            <Button variant="outline" className="w-full" onClick={() => navigate('/admin')}>
+            <Button variant="outline" className="w-full rounded-[1.5rem] glass-panel" onClick={() => navigate('/admin')}>
               <Shield className="h-4 w-4 mr-2" />
               {t('dashboard', language)}
             </Button>
@@ -84,18 +112,12 @@ const Profile = () => {
         )}
 
         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.3 }}>
-          <Button variant="destructive" className="w-full" onClick={handleLogout}>
+          <Button variant="destructive" className="w-full rounded-[1.5rem]" onClick={handleLogout}>
             <LogOut className="h-4 w-4 mr-2" />
             {t('logout', language)}
           </Button>
         </motion.div>
       </div>
-
-      <ContributeTransportDialog
-        open={contributeOpen}
-        onClose={() => setContributeOpen(false)}
-        language={language}
-      />
     </div>
   );
 };

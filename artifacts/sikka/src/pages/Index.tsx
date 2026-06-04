@@ -9,7 +9,7 @@ import Map, { Marker, type MapRef } from 'react-map-gl/maplibre';
 import RouteLayers from '@/components/RouteLayers';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import LocationAutocomplete from '@/components/LocationAutocomplete';
-import { useIsDark, MAP_STYLE_LIGHT, MAP_STYLE_DARK } from '@/hooks/useIsDark';
+import { useMapStyle } from '@/hooks/useMapStyle';
 import { useTripTracking } from '@/hooks/useTripTracking';
 import TripGuideSheet, { type GuidePlan, type GuideSegment, type GuideAlternative } from '@/components/trip/TripGuideSheet';
 import SegmentReviewDialog, { type ReviewSegment } from '@/components/trip/SegmentReviewDialog';
@@ -18,6 +18,10 @@ import IntercityChoiceDialog from '@/components/trip/IntercityChoiceDialog';
 import ReportDialog from '@/components/ReportDialog';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
 const CAIRO_CENTER = { latitude: 30.0444, longitude: 31.2357 };
@@ -43,7 +47,7 @@ interface ActiveTripPlan extends GuidePlan {
 const Index = () => {
   const { user, isLoading, language } = useAuth();
   const navigate = useNavigate();
-  const isDark = useIsDark();
+  const { style: mapStyle } = useMapStyle();
   const mapRef = useRef<MapRef | null>(null);
   const [viewState, setViewState] = useState({ ...CAIRO_CENTER, zoom: 14 });
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
@@ -62,6 +66,7 @@ const Index = () => {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [tripReviewOpen, setTripReviewOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
+  const [cancelTripOpen, setCancelTripOpen] = useState(false);
 
   // #6 — ask which bus the user took after finishing a bus segment
   const [busUsedOpen, setBusUsedOpen] = useState(false);
@@ -328,7 +333,7 @@ const Index = () => {
           onClick={(evt) => { void handleMapClick(evt); }}
           onError={(e) => { const err = (e as { error?: Error })?.error; console.error('[home-map] error:', err?.message || e, err?.stack); }}
           cursor={activeTrip ? undefined : 'crosshair'}
-          mapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
+          mapStyle={mapStyle}
           style={{ width: '100%', height: '100%' }}
           attributionControl={false}
         >
@@ -374,11 +379,17 @@ const Index = () => {
             }}
             placeholder={t('searchDestination', language)}
             className="flex-1"
+            readOnlyDisplay={activeTrip?.destination || undefined}
+            trailingAction={activeTrip ? 'cancelTrip' : searchQuery ? 'clear' : undefined}
+            onTrailingAction={() => {
+              if (activeTrip) setCancelTripOpen(true);
+              else setSearchQuery('');
+            }}
           />
           <Button
             variant="outline"
             size="icon"
-            className="h-12 w-12 rounded-xl bg-card/95 backdrop-blur-sm shadow-lg border-0 shrink-0"
+            className="h-14 w-14 rounded-full bg-card/82 backdrop-blur-2xl shadow-xl border border-white/20 shrink-0 glass-panel"
             onClick={() => navigate('/profile')}
           >
             <User className="h-5 w-5" />
@@ -398,7 +409,6 @@ const Index = () => {
           onNext={handleNext}
           onBack={handleBack}
           onDone={handleDone}
-          onClose={clearTrip}
           onSwap={handleSwap}
           onReport={() => setReportOpen(true)}
           language={language}
@@ -412,7 +422,7 @@ const Index = () => {
                 initial={{ y: 20, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
                 exit={{ y: 20, opacity: 0 }}
-                className="bg-card/95 backdrop-blur-sm rounded-xl shadow-lg p-4 space-y-3"
+                className="bg-card/82 backdrop-blur-2xl rounded-[2rem] shadow-2xl border border-white/20 p-4 space-y-3 glass-panel"
               >
                 <div className="flex items-start gap-3">
                   <div className="h-10 w-10 rounded-full bg-destructive/10 flex items-center justify-center shrink-0">
@@ -446,7 +456,7 @@ const Index = () => {
                 className="space-y-2"
               >
                 {userLocation && (
-                  <div className="bg-card/95 backdrop-blur-sm rounded-xl shadow-lg p-4 flex items-center gap-3">
+                  <div className="bg-card/82 backdrop-blur-2xl rounded-[2rem] shadow-2xl border border-white/20 p-4 flex items-center gap-3 glass-panel">
                     <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
                       <Navigation className="h-5 w-5 text-primary" />
                     </div>
@@ -456,7 +466,7 @@ const Index = () => {
                     </div>
                   </div>
                 )}
-                <p className="text-center text-xs text-muted-foreground/90 bg-card/70 backdrop-blur-sm rounded-lg py-1.5 px-3 inline-block mx-auto w-full">
+                <p className="text-center text-xs text-muted-foreground/90 bg-card/70 backdrop-blur-xl rounded-[1.25rem] py-1.5 px-3 inline-block mx-auto w-full border border-white/10">
                   {t('chooseOnMapHint', language)}
                 </p>
               </motion.div>
@@ -514,6 +524,26 @@ const Index = () => {
         toName={pendingTrip?.toName}
         language={language}
       />
+
+      <AlertDialog open={cancelTripOpen} onOpenChange={setCancelTripOpen}>
+        <AlertDialogContent className="glass-panel rounded-[2rem]">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('cancelTripTitle', language)}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('cancelTripDescription', language)}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('keepTrip', language)}</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => { clearTrip(); setCancelTripOpen(false); }}
+            >
+              {t('cancelTrip', language)}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
     </div>
   );

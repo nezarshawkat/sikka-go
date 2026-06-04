@@ -6,7 +6,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
-import { Users, ArrowRight } from 'lucide-react';
+import { Users, ArrowRight, Star, Brain, Route, MapPinned } from 'lucide-react';
 
 interface DiscoveryRow {
   transportName: string;
@@ -15,6 +15,9 @@ interface DiscoveryRow {
   sampleFromArea: string | null;
   sampleToArea: string | null;
   avgPrice: number | null;
+  gpsTraceCount?: number;
+  avgGpsPoints?: number | null;
+  confidenceScore?: number;
 }
 
 interface TransportReport {
@@ -65,6 +68,40 @@ const AdminDiscovery = () => {
 
   return (
     <div className="space-y-6">
+
+      <Card className="glass-panel rounded-[2rem]">
+        <CardContent className="p-4 space-y-3">
+          <div className="flex items-start gap-3">
+            <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+              <Brain className="h-5 w-5 text-primary" />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">Discovery learning brain</h3>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Each contributed journey is split into single transport legs, clustered by mode/operator/number and overlapping GPS geometry, converted into GTFS-style stop_times + shapes, then scored from 1–5 by report volume, GPS completeness, route stability, and rider confirmations.
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div className="rounded-2xl bg-background/35 border p-3">
+              <Route className="h-4 w-4 text-primary mb-1" />
+              <p className="text-xs font-semibold">Segment-first storage</p>
+              <p className="text-[11px] text-muted-foreground">Bus + microbus in one journey become two scored route candidates.</p>
+            </div>
+            <div className="rounded-2xl bg-background/35 border p-3">
+              <MapPinned className="h-4 w-4 text-primary mb-1" />
+              <p className="text-xs font-semibold">GTFS geometry lock</p>
+              <p className="text-[11px] text-muted-foreground">A candidate only graduates when repeated traces agree on stops and shape.</p>
+            </div>
+            <div className="rounded-2xl bg-background/35 border p-3">
+              <Star className="h-4 w-4 text-primary mb-1" />
+              <p className="text-xs font-semibold">1–5 confidence</p>
+              <p className="text-[11px] text-muted-foreground">Scores rise with unique riders, completed GPS, and positive reviews.</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       <div className="space-y-3">
         <h3 className="text-sm font-semibold text-foreground">{t('routeDiscovery', language)}</h3>
         {discovery.length === 0 && <p className="text-muted-foreground text-sm">{t('noDiscovery', language)}</p>}
@@ -75,10 +112,16 @@ const AdminDiscovery = () => {
                 <p className="text-sm font-medium text-foreground">
                   {d.transportNumber ? `${d.transportNumber} · ` : ''}{d.transportName}
                 </p>
-                <Badge variant="secondary" className="gap-1">
-                  <Users className="h-3 w-3" />
-                  {d.reportCount}
-                </Badge>
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary" className="gap-1">
+                    <Star className="h-3 w-3 fill-current" />
+                    {(d.confidenceScore ?? 1).toFixed(1)}/5
+                  </Badge>
+                  <Badge variant="secondary" className="gap-1">
+                    <Users className="h-3 w-3" />
+                    {d.reportCount}
+                  </Badge>
+                </div>
               </div>
               <p className="text-xs text-muted-foreground">
                 {d.reportCount} {t('usersReported', language)}
@@ -93,6 +136,9 @@ const AdminDiscovery = () => {
                   {t('avgPrice', language)}: {Math.round(d.avgPrice)} {t('egp', language)}
                 </p>
               )}
+              <p className="text-xs text-muted-foreground">
+                GPS traces: {d.gpsTraceCount ?? 0} · avg points: {Math.round(d.avgGpsPoints ?? 0)}
+              </p>
             </CardContent>
           </Card>
         ))}
