@@ -5,7 +5,8 @@ import { t } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
 import { User, MapPin, Navigation } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import Map, { Marker, Source, Layer, type MapRef } from 'react-map-gl/maplibre';
+import Map, { Marker, type MapRef } from 'react-map-gl/maplibre';
+import RouteLayers from '@/components/RouteLayers';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import LocationAutocomplete from '@/components/LocationAutocomplete';
 import { useIsDark, MAP_STYLE_LIGHT, MAP_STYLE_DARK } from '@/hooks/useIsDark';
@@ -322,19 +323,14 @@ const Index = () => {
           {...viewState}
           onMove={(evt) => setViewState(evt.viewState)}
           onClick={(evt) => { void handleMapClick(evt); }}
+          onError={(e) => { const err = (e as { error?: Error })?.error; console.error('[home-map] error:', err?.message || e, err?.stack); }}
           cursor={activeTrip ? undefined : 'crosshair'}
           mapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
           style={{ width: '100%', height: '100%' }}
           attributionControl={false}
         >
           {activeTrip && routeCoords.length > 0 && (
-            <Source id="home-route" type="geojson" data={routeGeoJSON}>
-              <Layer id="home-route-line" type="line"
-                paint={{ 'line-color': ['get', 'color'], 'line-width': 5, 'line-opacity': 0.85 }} />
-              <Layer id="home-route-labels" type="symbol"
-                layout={{ 'symbol-placement': 'line', 'symbol-spacing': 200, 'text-field': ['get', 'name'], 'text-size': 13, 'text-font': ['Noto Sans Bold'] }}
-                paint={{ 'text-color': '#fff', 'text-halo-color': ['get', 'color'], 'text-halo-width': 3 }} />
-            </Source>
+            <RouteLayers id="home-route" data={routeGeoJSON} />
           )}
 
           {activeTrip && (

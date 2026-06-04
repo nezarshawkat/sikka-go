@@ -9,7 +9,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, Clock, Wallet, MapPin, RefreshCw, Check, Navigation, X, Info, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
-import Map, { Source, Layer, Marker } from 'react-map-gl/maplibre';
+import Map, { Marker } from 'react-map-gl/maplibre';
+import RouteLayers from '@/components/RouteLayers';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { useIsDark, MAP_STYLE_LIGHT, MAP_STYLE_DARK } from '@/hooks/useIsDark';
 
@@ -204,19 +205,14 @@ const TripResult = () => {
               mapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
               style={{ width: '100%', height: isTracking ? 420 : 320 }}
               attributionControl={false}
+              onError={(e) => { const err = (e as { error?: Error })?.error; console.error('[trip-map] error:', err?.message || e, err?.stack); }}
             >
               {isLoadingRoutes && (
                 <div className="absolute inset-0 flex items-center justify-center bg-background/50 z-10">
                   <div className="h-6 w-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
                 </div>
               )}
-              <Source id="route" type="geojson" data={routeGeoJSON}>
-                <Layer id="route-line" type="line"
-                  paint={{ 'line-color': ['get', 'color'], 'line-width': 5, 'line-opacity': 0.85 }} />
-                <Layer id="route-line-labels" type="symbol"
-                  layout={{ 'symbol-placement': 'line', 'symbol-spacing': 200, 'text-field': ['get', 'name'], 'text-size': 13, 'text-font': ['Noto Sans Bold'] }}
-                  paint={{ 'text-color': '#fff', 'text-halo-color': ['get', 'color'], 'text-halo-width': 3 }} />
-              </Source>
+              <RouteLayers id="route" data={routeGeoJSON} />
 
               {/* Segment icon markers — clickable to open popup */}
               {routeCoords.map(({ segIndex, coords }) => {
