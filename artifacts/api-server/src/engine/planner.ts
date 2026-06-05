@@ -395,19 +395,12 @@ function legInstructions(leg: PlanLeg, type: TransportTypeInfo | null, isArabic:
   }
 
   if (leg.mode === "taxi" || leg.mode === "tuktuk") {
-    const verb = leg.mode === "taxi" ? (isArabic ? "اطلب" : "Request") : (isArabic ? "اركب" : "Take");
     return isArabic
       ? [
-          `${verb} ${name} من ${leg.startName || "موقعك"}.`,
-          `اطلب من السائق اتباع أقصر مسار شارع إلى ${leg.endName || "الوجهة"}.`,
-          `المسافة حوالي ${km} كم، الوقت ${mins} دقيقة، والتكلفة المتوقعة ${cost} جنيه.`,
-          `انزل عند ${leg.endName || "نقطة النزول"} وجهّز للخطوة التالية.`,
+          `من ${leg.startName || "موقعك"} إلى ${leg.endName || "الوجهة"}.`,
         ]
       : [
-          `${verb} ${name} from ${leg.startName || "your location"}.`,
-          `Ask for the shortest street route to ${leg.endName || "your destination"}.`,
-          `Expect about ${km} km, ${mins} min, and ~${cost} EGP.`,
-          `Get out at ${leg.endName || "the drop-off"} and prepare for the next leg.`,
+          `From ${leg.startName || "your location"} to ${leg.endName || "your destination"}.`,
         ];
   }
 
@@ -416,11 +409,16 @@ function legInstructions(leg: PlanLeg, type: TransportTypeInfo | null, isArabic:
   const stopText = isArabic
     ? stops > 0 ? `عدّ ${stops} محطة/محطات تقريباً` : `تابع الخط حوالي ${km} كم`
     : stops > 0 ? `Count about ${stops} stop${stops === 1 ? "" : "s"}` : `Stay on the line for about ${km} km`;
+  const isStreetBus = leg.mode === "bus" || leg.mode === "microbus" || leg.mode === "serfis";
+  const askDestination = isArabic
+    ? `اسأل هل يتجه إلى ${leg.endName}.`
+    : `Ask if it goes to ${leg.endName}.`;
 
   return isArabic
     ? [
         `توجه إلى نقطة الركوب: ${leg.startName}.`,
         `اركب ${name}${ln}${leg.lineNumber ? " (تأكد من رقم/لافتة الخط قبل الركوب)" : ""}.`,
+        ...(isStreetBus ? [askDestination] : []),
         `ادفع حوالي ${cost} جنيه عند الركوب أو حسب نظام الوسيلة.`,
         `${stopText}، وراقب الاتجاه نحو ${leg.endName}.`,
         `انزل عند ${leg.endName}. مستوى الزحام المتوقع: ${crowd}.`,
@@ -428,6 +426,7 @@ function legInstructions(leg: PlanLeg, type: TransportTypeInfo | null, isArabic:
     : [
         `Go to the boarding point: ${leg.startName}.`,
         `Board ${name}${ln}${leg.lineNumber ? " (confirm the number/sign before boarding)" : ""}.`,
+        ...(isStreetBus ? [askDestination] : []),
         `Pay about ${cost} EGP when boarding or as the operator requests.`,
         `${stopText}, watching for the direction toward ${leg.endName}.`,
         `Get off at ${leg.endName}. Expected condition: ${crowd}.`,

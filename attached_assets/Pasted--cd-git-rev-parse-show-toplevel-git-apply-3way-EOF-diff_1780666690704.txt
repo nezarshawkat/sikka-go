@@ -1,0 +1,1762 @@
+ (cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'EOF' 
+diff --git a/artifacts/api-server/src/engine/planner.ts b/artifacts/api-server/src/engine/planner.ts
+index 023ec344474ff79305f0874bf205725295ba1b16..d06dcdc643cde0f40d01e0c1cbf3938594fef630 100644
+--- a/artifacts/api-server/src/engine/planner.ts
++++ b/artifacts/api-server/src/engine/planner.ts
+@@ -373,83 +373,82 @@ const UI_ICON: Record<ModeKey, string> = {
+ 
+ function legInstructions(leg: PlanLeg, type: TransportTypeInfo | null, isArabic: boolean): string[] {
+   const name = type ? (isArabic ? type.nameAr : type.nameEn) : isArabic ? "مشي" : "Walk";
+   const cost = Math.round(leg.costEgp);
+   const mins = Math.max(1, Math.round(leg.timeMin));
+   const km = Math.max(0.1, Math.round(leg.distanceKm * 10) / 10);
+   const crowd = isArabic
+     ? leg.crowding === "high" ? "زحمة عالية" : leg.crowding === "medium" ? "زحمة متوسطة" : "زحمة قليلة"
+     : `${leg.crowding} crowding`;
+ 
+   if (leg.mode === "walk") {
+     return isArabic
+       ? [
+           `ابدأ من ${leg.startName || "موقعك"}.`,
+           `امشِ أقصر مسار متاح حوالي ${km} كم (${mins} دقيقة).`,
+           `اتجه إلى ${leg.endName || "النقطة التالية"} وتأكد أنك وصلت قبل ركوب الوسيلة التالية.`,
+         ]
+       : [
+           `Start at ${leg.startName || "your location"}.`,
+           `Walk the shortest available path for about ${km} km (${mins} min).`,
+           `Arrive at ${leg.endName || "the next point"} before boarding the next leg.`,
+         ];
+   }
+ 
+   if (leg.mode === "taxi" || leg.mode === "tuktuk") {
+-    const verb = leg.mode === "taxi" ? (isArabic ? "اطلب" : "Request") : (isArabic ? "اركب" : "Take");
+     return isArabic
+       ? [
+-          `${verb} ${name} من ${leg.startName || "موقعك"}.`,
+-          `اطلب من السائق اتباع أقصر مسار شارع إلى ${leg.endName || "الوجهة"}.`,
+-          `المسافة حوالي ${km} كم، الوقت ${mins} دقيقة، والتكلفة المتوقعة ${cost} جنيه.`,
+-          `انزل عند ${leg.endName || "نقطة النزول"} وجهّز للخطوة التالية.`,
++          `من ${leg.startName || "موقعك"} إلى ${leg.endName || "الوجهة"}.`,
+         ]
+       : [
+-          `${verb} ${name} from ${leg.startName || "your location"}.`,
+-          `Ask for the shortest street route to ${leg.endName || "your destination"}.`,
+-          `Expect about ${km} km, ${mins} min, and ~${cost} EGP.`,
+-          `Get out at ${leg.endName || "the drop-off"} and prepare for the next leg.`,
++          `From ${leg.startName || "your location"} to ${leg.endName || "your destination"}.`,
+         ];
+   }
+ 
+   const ln = leg.lineNumber ? ` ${leg.lineNumber}` : "";
+   const stops = leg.stopsCount ?? 0;
+   const stopText = isArabic
+     ? stops > 0 ? `عدّ ${stops} محطة/محطات تقريباً` : `تابع الخط حوالي ${km} كم`
+     : stops > 0 ? `Count about ${stops} stop${stops === 1 ? "" : "s"}` : `Stay on the line for about ${km} km`;
++  const isStreetBus = leg.mode === "bus" || leg.mode === "microbus" || leg.mode === "serfis";
++  const askDestination = isArabic
++    ? `اسأل هل يتجه إلى ${leg.endName}.`
++    : `Ask if it goes to ${leg.endName}.`;
+ 
+   return isArabic
+     ? [
+         `توجه إلى نقطة الركوب: ${leg.startName}.`,
+         `اركب ${name}${ln}${leg.lineNumber ? " (تأكد من رقم/لافتة الخط قبل الركوب)" : ""}.`,
++        ...(isStreetBus ? [askDestination] : []),
+         `ادفع حوالي ${cost} جنيه عند الركوب أو حسب نظام الوسيلة.`,
+         `${stopText}، وراقب الاتجاه نحو ${leg.endName}.`,
+         `انزل عند ${leg.endName}. مستوى الزحام المتوقع: ${crowd}.`,
+       ]
+     : [
+         `Go to the boarding point: ${leg.startName}.`,
+         `Board ${name}${ln}${leg.lineNumber ? " (confirm the number/sign before boarding)" : ""}.`,
++        ...(isStreetBus ? [askDestination] : []),
+         `Pay about ${cost} EGP when boarding or as the operator requests.`,
+         `${stopText}, watching for the direction toward ${leg.endName}.`,
+         `Get off at ${leg.endName}. Expected condition: ${crowd}.`,
+       ];
+ }
+ 
+ // Straight-line fallback for a connector whose snap failed: a few linearly
+ // interpolated points between the leg's OWN endpoints. Never routes through a
+ // fixed city centroid (which would warp cross-city legs across Cairo).
+ function interpolateLine(a: Coord, b: Coord, n = 5): number[][] {
+   const pts: number[][] = [];
+   for (let k = 0; k < n; k++) {
+     const t = n === 1 ? 0 : k / (n - 1);
+     pts.push([a.lng + (b.lng - a.lng) * t, a.lat + (b.lat - a.lat) * t]);
+   }
+   return pts;
+ }
+ 
+ // Snap connector legs to the street network; pin start/end after snapping so the
+ // polyline anchors exactly at the logical endpoints. On failure, fall back to a
+ // localized interpolated straight line (not the stored 2-point straight line).
+ async function onStreetGeometry(leg: PlanLeg): Promise<number[][]> {
+   if (leg.mode === "walk" || leg.mode === "taxi" || leg.mode === "tuktuk") {
+     const a: [number, number] = [leg.startCoord.lng, leg.startCoord.lat];
+     const b: [number, number] = [leg.endCoord.lng, leg.endCoord.lat];
+diff --git a/artifacts/api-server/src/routes/transportReports.ts b/artifacts/api-server/src/routes/transportReports.ts
+index 4fa4e6147e313377bb9b46139ac0b2a2c3ac7359..983978df252168e9962e4d5e1d87ffc057493340 100644
+--- a/artifacts/api-server/src/routes/transportReports.ts
++++ b/artifacts/api-server/src/routes/transportReports.ts
+@@ -1,57 +1,62 @@
+ import { Router } from "express";
+ import { db } from "@workspace/db";
+ import { transportReportsTable } from "@workspace/db";
+ import { eq, desc, and, sql, type SQL } from "drizzle-orm";
+ import { requireAuth } from "../middlewares/requireAuth";
+ import { requireAdmin } from "../middlewares/requireAdmin";
+ 
+ const router = Router();
+ 
+ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+ 
+ const STATUSES = ["pending", "approved", "rejected"];
+ 
+ router.get("/", requireAdmin, async (req, res) => {
+   const { discovery, status } = req.query as { discovery?: string; status?: string };
+ 
+   if (discovery === "true") {
+     const rows = await db
+       .select({
+         transportName: transportReportsTable.transportName,
+         transportNumber: transportReportsTable.transportNumber,
+         reportCount: sql<number>`cast(count(*) as int)`,
+         sampleFromArea: sql<string | null>`max(${transportReportsTable.fromArea})`,
+         sampleToArea: sql<string | null>`max(${transportReportsTable.toArea})`,
+         avgPrice: sql<number | null>`avg(${transportReportsTable.priceEgp})`,
++        recommendationScore: sql<number>`cast(count(*) as int)`,
+       })
+       .from(transportReportsTable)
+       .groupBy(
+         sql`lower(${transportReportsTable.transportName})`,
+         sql`coalesce(${transportReportsTable.transportNumber}, '')`,
++        sql`lower(coalesce(${transportReportsTable.fromArea}, ''))`,
++        sql`lower(coalesce(${transportReportsTable.toArea}, ''))`,
+         transportReportsTable.transportName,
+         transportReportsTable.transportNumber,
++        transportReportsTable.fromArea,
++        transportReportsTable.toArea,
+       )
+       .orderBy(desc(sql`count(*)`));
+     return res.json(rows);
+   }
+ 
+   const filters: SQL[] = [];
+   if (status && STATUSES.includes(status)) {
+     filters.push(eq(transportReportsTable.status, status));
+   }
+   const rows = await db
+     .select()
+     .from(transportReportsTable)
+     .where(filters.length ? and(...filters) : undefined)
+     .orderBy(desc(transportReportsTable.createdAt));
+   return res.json(rows);
+ });
+ 
+ router.post("/", requireAuth, async (req, res) => {
+   const {
+     transportName, transportNumber, transportTypeId, fromArea, toArea,
+     gpsTrace, stopsVisited, priceEgp,
+   } = req.body;
+ 
+   if (typeof transportName !== "string" || !transportName.trim()) {
+     return res.status(400).json({ error: "transportName is required" });
+diff --git a/artifacts/sikka/src/components/ContributeTransportDialog.tsx b/artifacts/sikka/src/components/ContributeTransportDialog.tsx
+index 3d8b41a23f8021ebabd87acd4c920c9651c5a038..c883b9d2a511df2990489b56f9a378d963625666 100644
+--- a/artifacts/sikka/src/components/ContributeTransportDialog.tsx
++++ b/artifacts/sikka/src/components/ContributeTransportDialog.tsx
+@@ -1,202 +1,210 @@
+ import { useEffect, useRef, useState } from 'react';
+ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+ import { Button } from '@/components/ui/button';
+ import { Input } from '@/components/ui/input';
+ import { api } from '@/lib/api';
+ import { t } from '@/lib/i18n';
+ import type { Language } from '@/lib/i18n';
+ import { toast } from 'sonner';
+-import { MapPin, Square } from 'lucide-react';
++import { Bus, MapPin, Square } from 'lucide-react';
+ 
+ interface ContributeTransportDialogProps {
+   open: boolean;
+   onClose: () => void;
+   language: Language;
+ }
+ 
+-type Operator = 'nta' | 'cta';
++type Operator = 'microbus' | 'nta' | 'cta';
+ interface TransportType {
+   id: string;
+   nameEn: string;
+ }
+ 
+ const OPERATOR_TYPE_NAME: Record<Operator, string> = {
++  microbus: 'Microbus',
+   nta: 'NTA Bus',
+   cta: 'CTA Bus',
+ };
+ 
+ export default function ContributeTransportDialog({
+   open,
+   onClose,
+   language,
+ }: ContributeTransportDialogProps) {
+   const [transportName, setTransportName] = useState('');
+   const [transportNumber, setTransportNumber] = useState('');
+-  const [operator, setOperator] = useState<Operator>('nta');
++  const [operator, setOperator] = useState<Operator>('microbus');
+   const [fromArea, setFromArea] = useState('');
+   const [toArea, setToArea] = useState('');
+   const [price, setPrice] = useState('');
+   const [trace, setTrace] = useState<[number, number][]>([]);
+   const [recording, setRecording] = useState(false);
+   const [submitting, setSubmitting] = useState(false);
+   const [transportTypes, setTransportTypes] = useState<TransportType[]>([]);
+   const watchRef = useRef<number | null>(null);
+ 
+   useEffect(() => {
+     if (!open) return;
+     let cancelled = false;
+     api
+       .get('/transport-types')
+       .then((data) => {
+         if (!cancelled && Array.isArray(data)) setTransportTypes(data as TransportType[]);
+       })
+       .catch(() => {});
+     return () => {
+       cancelled = true;
+     };
+   }, [open]);
+ 
+   const reset = () => {
+     setTransportName('');
+     setTransportNumber('');
+-    setOperator('nta');
++    setOperator('microbus');
+     setFromArea('');
+     setToArea('');
+     setPrice('');
+     setTrace([]);
+     stopRecording();
+   };
+ 
+   const stopRecording = () => {
+     if (watchRef.current != null && navigator.geolocation) {
+       navigator.geolocation.clearWatch(watchRef.current);
+       watchRef.current = null;
+     }
+     setRecording(false);
+   };
+ 
+   const toggleRecording = () => {
+     if (recording) {
+       stopRecording();
+       return;
+     }
+     if (!navigator.geolocation) return;
+     setRecording(true);
+     watchRef.current = navigator.geolocation.watchPosition(
+       (pos) => {
+         setTrace((prev) => [...prev, [pos.coords.longitude, pos.coords.latitude]]);
+       },
+       () => {},
+       { enableHighAccuracy: true, maximumAge: 0 },
+     );
+   };
+ 
+   const handleClose = () => {
+     reset();
+     onClose();
+   };
+ 
+   const handleSubmit = async () => {
+     if (!transportName.trim()) {
+       toast.error(t('transportNameRequired', language));
+       return;
+     }
+     setSubmitting(true);
+     try {
+       const priceNum = Number(price);
+       const transportTypeId =
+-        transportTypes.find((tt) => tt.nameEn === OPERATOR_TYPE_NAME[operator])?.id ?? null;
++        transportTypes.find((tt) => tt.nameEn.toLowerCase() === OPERATOR_TYPE_NAME[operator].toLowerCase())?.id ?? null;
+       await api.post('/transport-reports', {
+         transportName: transportName.trim(),
+         transportNumber: transportNumber || null,
+         transportTypeId,
+         fromArea: fromArea || null,
+         toArea: toArea || null,
+         priceEgp: Number.isFinite(priceNum) && price !== '' ? priceNum : null,
+         gpsTrace: trace.length ? trace : null,
+       });
+       toast.success(t('contributeSubmitted', language));
+       reset();
+       onClose();
+     } catch (err) {
+       toast.error(err instanceof Error ? err.message : t('contributeFailed', language));
+     } finally {
+       setSubmitting(false);
+     }
+   };
+ 
+   return (
+     <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
+       <DialogContent className="max-w-sm">
+         <DialogHeader>
+           <DialogTitle>{t('contributeTitle', language)}</DialogTitle>
+         </DialogHeader>
+ 
+         <div className="space-y-3">
++          <div className="rounded-[2rem] bg-primary/10 p-3 flex gap-3 text-sm text-foreground">
++            <Bus className="h-5 w-5 text-primary shrink-0 mt-0.5" />
++            <p>{t('contributeBusMicrobusOnly', language)}</p>
++          </div>
++
+           <div>
+             <label className="text-xs text-muted-foreground">{t('transportName', language)}</label>
+-            <Input value={transportName} onChange={(e) => setTransportName(e.target.value)} className="text-sm" />
++            <Input value={transportName} onChange={(e) => setTransportName(e.target.value)} className="text-sm rounded-[2rem]" />
+           </div>
+           <div>
+             <label className="text-xs text-muted-foreground">{t('operatorLabel', language)}</label>
+-            <div className="grid grid-cols-2 gap-2 mt-1">
+-              {(['nta', 'cta'] as Operator[]).map((op) => (
++            <div className="grid grid-cols-3 gap-2 mt-1">
++              {(['microbus', 'nta', 'cta'] as Operator[]).map((op) => (
+                 <Button
+                   key={op}
+                   type="button"
+                   variant={operator === op ? 'default' : 'outline'}
+-                  className="w-full text-xs"
++                  className="w-full h-11 rounded-[2rem] text-xs"
+                   onClick={() => setOperator(op)}
+                 >
+-                  {t(op === 'nta' ? 'operatorNta' : 'operatorCta', language)}
++                  {op === 'microbus' ? t('microbus', language) : t(op === 'nta' ? 'operatorNta' : 'operatorCta', language)}
+                 </Button>
+               ))}
+             </div>
+           </div>
+-          <div>
+-            <label className="text-xs text-muted-foreground">{t('busNumber', language)}</label>
+-            <Input value={transportNumber} onChange={(e) => setTransportNumber(e.target.value)} className="text-sm" />
+-          </div>
++          {operator !== 'microbus' && (
++            <div>
++              <label className="text-xs text-muted-foreground">{t('busNumber', language)}</label>
++              <Input value={transportNumber} onChange={(e) => setTransportNumber(e.target.value)} className="text-sm rounded-[2rem]" />
++            </div>
++          )}
+           <div className="grid grid-cols-2 gap-3">
+             <div>
+               <label className="text-xs text-muted-foreground">{t('fromArea', language)}</label>
+-              <Input value={fromArea} onChange={(e) => setFromArea(e.target.value)} className="text-sm" />
++              <Input value={fromArea} onChange={(e) => setFromArea(e.target.value)} className="text-sm rounded-[2rem]" />
+             </div>
+             <div>
+               <label className="text-xs text-muted-foreground">{t('toArea', language)}</label>
+-              <Input value={toArea} onChange={(e) => setToArea(e.target.value)} className="text-sm" />
++              <Input value={toArea} onChange={(e) => setToArea(e.target.value)} className="text-sm rounded-[2rem]" />
+             </div>
+           </div>
+           <div>
+             <label className="text-xs text-muted-foreground">{t('priceLabel', language)}</label>
+-            <Input type="number" value={price} onChange={(e) => setPrice(e.target.value)} className="text-sm" />
++            <Input type="number" value={price} onChange={(e) => setPrice(e.target.value)} className="text-sm rounded-[2rem]" />
+           </div>
+ 
+           <Button
+             type="button"
+             variant={recording ? 'destructive' : 'outline'}
+-            className="w-full gap-2"
++            className="w-full h-12 rounded-[2rem] gap-2"
+             onClick={toggleRecording}
+           >
+             {recording ? <Square className="h-4 w-4" /> : <MapPin className="h-4 w-4" />}
+             {recording ? t('stopRecording', language) : t('recordGps', language)}
+           </Button>
+           {trace.length > 0 && (
+             <p className="text-xs text-muted-foreground text-center">
+               {trace.length} {t('gpsPointsCaptured', language)}
+             </p>
+           )}
+ 
+           <div className="flex gap-2 pt-1">
+-            <Button variant="outline" className="flex-1" onClick={handleClose} disabled={submitting}>
++            <Button variant="outline" className="flex-1 h-11 rounded-[2rem]" onClick={handleClose} disabled={submitting}>
+               {t('back', language)}
+             </Button>
+-            <Button className="flex-1" onClick={handleSubmit} disabled={submitting}>
++            <Button className="flex-1 h-11 rounded-[2rem]" onClick={handleSubmit} disabled={submitting}>
+               {t('submit', language)}
+             </Button>
+           </div>
+         </div>
+       </DialogContent>
+     </Dialog>
+   );
+ }
+diff --git a/artifacts/sikka/src/components/trip/SegmentReviewDialog.tsx b/artifacts/sikka/src/components/trip/SegmentReviewDialog.tsx
+index ec53b53be38dce15d27a433e8833f1d35db0e378..211655805d3f0259d45f6c97e85e24939dfc12bc 100644
+--- a/artifacts/sikka/src/components/trip/SegmentReviewDialog.tsx
++++ b/artifacts/sikka/src/components/trip/SegmentReviewDialog.tsx
+@@ -42,50 +42,56 @@ export default function SegmentReviewDialog({
+   tripId = null,
+   language,
+ }: SegmentReviewDialogProps) {
+   const [face, setFace] = useState<number | null>(null);
+   const [answers, setAnswers] = useState<Record<string, boolean | null>>({});
+   const [comment, setComment] = useState('');
+   const [submitting, setSubmitting] = useState(false);
+   const [appRating, setAppRating] = useState<number | null>(null);
+   const [navRating, setNavRating] = useState<number | null>(null);
+   const [accRating, setAccRating] = useState<number | null>(null);
+ 
+   const reset = () => {
+     setFace(null);
+     setAnswers({});
+     setComment('');
+     setAppRating(null);
+     setNavRating(null);
+     setAccRating(null);
+   };
+ 
+   const handleClose = () => {
+     reset();
+     onClose();
+   };
+ 
++  const handleSkip = () => {
++    reset();
++    onSubmitted?.();
++    onClose();
++  };
++
+   const resolveTransportTypeId = (): string | null => {
+     const id = segment?.transport_type_id;
+     return id && UUID_RE.test(id) ? id : null;
+   };
+ 
+   const handleSubmit = async () => {
+     if (face == null) {
+       toast.error(t('selectFace', language));
+       return;
+     }
+     setSubmitting(true);
+     try {
+       const rating = face + 1;
+       if (tripLevel) {
+         await api.post('/reviews', {
+           reviewType: 'trip',
+           transportTypeId: null,
+           tripSegmentId: null,
+           tripId: tripId || null,
+           faceReaction: rating,
+           rating,
+           comment: comment || null,
+           meta: { appRating, navigationRating: navRating, accuracyRating: accRating },
+         });
+       } else {
+@@ -194,37 +200,37 @@ export default function SegmentReviewDialog({
+           ) : (
+             <div className="space-y-3">
+               <div className="flex items-center justify-between">
+                 <span className="text-sm">{t('appRating', language)}</span>
+                 <StarRow value={appRating} onPick={setAppRating} />
+               </div>
+               <div className="flex items-center justify-between">
+                 <span className="text-sm">{t('navigationRating', language)}</span>
+                 <StarRow value={navRating} onPick={setNavRating} />
+               </div>
+               <div className="flex items-center justify-between">
+                 <span className="text-sm">{t('accuracyRating', language)}</span>
+                 <StarRow value={accRating} onPick={setAccRating} />
+               </div>
+             </div>
+           )}
+ 
+           <Textarea
+             placeholder={t('leaveComment', language)}
+             value={comment}
+             onChange={(e) => setComment(e.target.value)}
+             rows={2}
+           />
+ 
+           <div className="flex gap-2">
+-            <Button variant="outline" className="flex-1" onClick={handleClose} disabled={submitting}>
++            <Button variant="outline" className="flex-1 h-11 rounded-[2rem]" onClick={handleSkip} disabled={submitting}>
+               {t('skip', language)}
+             </Button>
+-            <Button className="flex-1" onClick={handleSubmit} disabled={submitting}>
++            <Button className="flex-1 h-11 rounded-[2rem]" onClick={handleSubmit} disabled={submitting}>
+               {t('submit', language)}
+             </Button>
+           </div>
+         </div>
+       </DialogContent>
+     </Dialog>
+   );
+ }
+diff --git a/artifacts/sikka/src/components/trip/TripGuideSheet.tsx b/artifacts/sikka/src/components/trip/TripGuideSheet.tsx
+index 79562b86050a0c45910968cd7a2709a567d9106b..6750c100d97d2f88df619d6dd6d448086cd14907 100644
+--- a/artifacts/sikka/src/components/trip/TripGuideSheet.tsx
++++ b/artifacts/sikka/src/components/trip/TripGuideSheet.tsx
+@@ -1,105 +1,114 @@
+ import { motion, AnimatePresence } from 'framer-motion';
+ import { Button } from '@/components/ui/button';
+ import { Progress } from '@/components/ui/progress';
+ import { Badge } from '@/components/ui/badge';
+ import { t } from '@/lib/i18n';
+ import type { Language } from '@/lib/i18n';
+ import {
+-  ChevronUp, ChevronDown, X, Clock, Wallet, Check, MapPin, ArrowLeft, ArrowRight, Flag,
++  ChevronUp, ChevronDown, X, Clock, Wallet, Check, MapPin, ArrowLeft, ArrowRight, Flag, ExternalLink,
+ } from 'lucide-react';
+ 
+ const ICONS: Record<string, string> = {
+   bus: '🚌', train: '🚆', car: '🚕', bike: '🛺', ship: '🚢', plane: '✈️', metro: '🚇', monorail: '🚝', walk: '🚶',
+ };
+ 
+ export interface GuideAlternative {
+   transport_type_id: string; transport_name: string; cost_egp: number; duration_minutes: number;
+   color: string; icon: string; line_id?: string | null; line_number?: string | null; info?: string; instructions?: string[]; route_geometry?: [number, number][] | null;
+ }
+ export interface GuideSegment {
+   transport_type_id?: string; transport_name: string; start_name: string; end_name: string;
+   cost_egp: number; duration_minutes: number; color: string; icon: string;
+   line_number?: string; info?: string; instructions?: string[]; alternatives?: GuideAlternative[];
+ }
+ export interface GuidePlan {
+   segments: GuideSegment[]; total_cost_egp: number; total_duration_minutes: number; destination?: string;
+ }
+ 
+ interface TripGuideSheetProps {
+   plan: GuidePlan;
+   currentSegIdx: number;
+   progress: number;
+   remainingMinutes: number;
+   expanded: boolean;
+   onToggleExpand: () => void;
+   onNext: () => void;
+   onBack: () => void;
+   onDone: () => void;
+   onClose: () => void;
+   onSwap: (segIdx: number, alt: GuideAlternative) => void;
+   onReport?: () => void;
+   language: Language;
+ }
+ 
++
++const isTaxiLike = (seg: Pick<GuideSegment, 'icon' | 'transport_name'>) =>
++  seg.icon === 'car' || /taxi|uber|careem|توك|تاكسي|أوبر|كريم/i.test(seg.transport_name);
++
++function mapUrlForSegment(seg: Pick<GuideSegment, 'start_name' | 'end_name'>) {
++  const query = encodeURIComponent(`${seg.start_name} to ${seg.end_name}`);
++  return `https://www.google.com/maps/search/?api=1&query=${query}`;
++}
++
+ function getIcon(icon: string) {
+   return ICONS[icon] || '🚌';
+ }
+ 
+ function formatClock(minsFromNow: number, lang: Language): string {
+   const d = new Date(Date.now() + minsFromNow * 60000);
+   const hh = d.getHours();
+   const mm = d.getMinutes().toString().padStart(2, '0');
+   return new Intl.DateTimeFormat(lang === 'ar' ? 'ar-EG' : 'en-GB', {
+     hour: '2-digit', minute: '2-digit', hour12: false,
+   }).format(d) || `${hh}:${mm}`;
+ }
+ 
+ export default function TripGuideSheet({
+   plan, currentSegIdx, progress, remainingMinutes, expanded, onToggleExpand,
+   onNext, onBack, onDone, onClose, onSwap, onReport, language,
+ }: TripGuideSheetProps) {
+   const seg = plan.segments[currentSegIdx];
+   if (!seg) return null;
+   const isLast = currentSegIdx >= plan.segments.length - 1;
+   const arrival = formatClock(remainingMinutes, language);
+ 
+   return (
+     <div className="absolute bottom-0 left-0 right-0 z-30 px-3 pb-3">
+       <motion.div
+         layout
+         initial={{ y: 140, opacity: 0 }}
+         animate={{ y: 0, opacity: 1 }}
+         transition={{ type: 'spring', damping: 26, stiffness: 280 }}
+         drag="y"
+         dragConstraints={{ top: 0, bottom: 0 }}
+         dragElastic={0.2}
+         onDragEnd={(_e, info) => {
+           if (info.offset.y < -60 && !expanded) onToggleExpand();
+           if (info.offset.y > 60 && expanded) onToggleExpand();
+         }}
+-        className="bg-card/85 backdrop-blur-2xl rounded-[2rem] shadow-2xl border overflow-hidden flex flex-col max-h-[calc(100vh-7rem)]"
++        className="glass-popup-surface rounded-[2rem] shadow-2xl overflow-hidden flex flex-col max-h-[calc(100vh-7rem)]"
+       >
+         {/* drag handle / expand toggle */}
+         <button
+           onClick={onToggleExpand}
+           className="w-full flex flex-col items-center pt-2 pb-1 shrink-0"
+           aria-label="toggle"
+         >
+           <div className="h-1.5 w-10 rounded-full bg-muted-foreground/30" />
+         </button>
+ 
+         {/* ===== MINIMIZED BAR ===== */}
+         <div className="px-4 pb-3">
+           <div className="flex items-center gap-3">
+             <div
+               className="h-10 w-10 rounded-full flex items-center justify-center text-xl shrink-0"
+               style={{ backgroundColor: seg.color + '22' }}
+             >
+               {getIcon(seg.icon)}
+             </div>
+             <div className="flex-1 min-w-0">
+               <div className="flex items-center gap-1.5">
+                 {seg.line_number && (
+                   <Badge variant="outline" className="text-[10px] h-4 px-1" style={{ borderColor: seg.color, color: seg.color }}>
+                     {seg.line_number}
+                   </Badge>
+@@ -113,159 +122,168 @@ export default function TripGuideSheet({
+             <div className="flex items-center gap-1 shrink-0">
+               <span className="text-xs text-muted-foreground">{currentSegIdx + 1}/{plan.segments.length}</span>
+               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onToggleExpand}>
+                 {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+               </Button>
+               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose}>
+                 <X className="h-3.5 w-3.5" />
+               </Button>
+             </div>
+           </div>
+           <Progress value={progress} className="h-1.5 mt-2" />
+         </div>
+ 
+         {/* ===== EXPANDED CONTENT ===== */}
+         <AnimatePresence initial={false}>
+           {expanded && (
+             <motion.div
+               key="expanded"
+               initial={{ opacity: 0 }}
+               animate={{ opacity: 1 }}
+               exit={{ opacity: 0 }}
+               className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+             >
+               <div className="px-4 pb-4 space-y-4">
+                 {/* overall ETA + cost */}
+-                <div className="flex items-center justify-between rounded-2xl bg-muted/45 backdrop-blur px-3 py-2">
++                <div className="flex items-center justify-between rounded-[2rem] bg-muted/45 backdrop-blur px-3 py-2">
+                   <div className="flex items-center gap-1.5 text-sm">
+                     <Clock className="h-4 w-4 text-primary" />
+                     <span className="font-semibold">{t('arrivalAt', language)} {arrival}</span>
+                   </div>
+                   <div className="flex items-center gap-1.5 text-sm">
+                     <Wallet className="h-4 w-4 text-primary" />
+                     <span className="font-semibold">{Math.round(plan.total_cost_egp)} {t('egp', language)}</span>
+                   </div>
+                 </div>
+ 
+                 {/* current segment route + instructions */}
+-                <div className="rounded-2xl border bg-background/35 backdrop-blur p-3" style={{ borderLeftWidth: 4, borderLeftColor: seg.color }}>
++                <div className="rounded-[2rem] border bg-background/35 backdrop-blur p-3" style={{ borderLeftWidth: 4, borderLeftColor: seg.color }}>
+                   <div className="flex items-center gap-2 text-sm mb-1">
+                     <MapPin className="h-3.5 w-3.5 text-primary" />
+                     <span className="font-medium text-foreground truncate">{seg.start_name}</span>
+                     <ArrowRight className="h-3 w-3 text-muted-foreground shrink-0" />
+                     <span className="text-muted-foreground truncate">{seg.end_name}</span>
+                   </div>
+                   <div className="flex items-center gap-3 text-xs text-muted-foreground mb-2">
+                     <span>{Math.round(seg.duration_minutes)} {t('minutes', language)}</span>
+                     <span>{Math.round(seg.cost_egp)} {t('egp', language)}</span>
+                   </div>
+ 
+-                  {seg.instructions && seg.instructions.length > 0 && (
++                  {isTaxiLike(seg) ? (
++                    <div className="space-y-2">
++                      <p className="text-sm font-semibold text-foreground">{seg.start_name} → {seg.end_name}</p>
++                      <Button asChild className="w-full h-11 rounded-[2rem] gap-2">
++                        <a href={mapUrlForSegment(seg)} target="_blank" rel="noreferrer">
++                          <ExternalLink className="h-4 w-4" /> Open in maps
++                        </a>
++                      </Button>
++                    </div>
++                  ) : seg.instructions && seg.instructions.length > 0 && (
+                     <div>
+-                      <p className="text-xs font-semibold text-foreground mb-1">{t('instructionsHeader', language)}</p>
+-                      <ol className="space-y-1">
++                      <p className="text-xs font-semibold text-foreground mb-2">{t('instructionsHeader', language)}</p>
++                      <ol className="space-y-2">
+                         {seg.instructions.map((ins, i) => (
+-                          <li key={i} className="flex items-start gap-2 text-xs text-foreground/80">
+-                            <span className="h-4 w-4 rounded-full bg-primary/15 text-primary text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">
++                          <li key={i} className="flex items-start gap-3 text-sm text-foreground/85 rounded-[2rem] bg-card/45 px-3 py-2">
++                            <span className="h-7 w-7 rounded-full bg-primary/15 text-primary text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
+                               {i + 1}
+                             </span>
+-                            <span className="leading-snug">{ins}</span>
++                            <span className="leading-relaxed">{ins}</span>
+                           </li>
+                         ))}
+                       </ol>
+                     </div>
+                   )}
+ 
+                   {seg.info && !seg.instructions?.length && (
+                     <p className="text-xs text-muted-foreground leading-snug">{seg.info}</p>
+                   )}
+                 </div>
+ 
+                 {seg.alternatives?.length ? (
+-                  <div className="rounded-2xl border bg-background/40 backdrop-blur p-3 space-y-2">
++                  <div className="rounded-[2rem] border bg-background/40 backdrop-blur p-3 space-y-2">
+                     <p className="text-xs font-semibold text-foreground">Switch this leg</p>
+                     <div className="grid gap-2">
+                       {seg.alternatives.slice(0, 4).map((alt, idx) => (
+                         <button
+                           key={`${alt.transport_type_id}-${alt.line_number ?? idx}`}
+                           onClick={() => onSwap(currentSegIdx, alt)}
+-                          className="flex items-center justify-between gap-3 rounded-2xl bg-card/70 hover:bg-primary/10 border px-3 py-2 text-left transition-colors"
++                          className="flex items-center justify-between gap-3 rounded-[2rem] bg-card/70 hover:bg-primary/10 border px-3 py-2 text-left transition-colors"
+                         >
+                           <span className="flex items-center gap-2 min-w-0">
+                             <span className="text-base">{getIcon(alt.icon)}</span>
+                             <span className="min-w-0">
+                               <span className="block text-xs font-semibold truncate">{alt.line_number ? `${alt.line_number} · ` : ''}{alt.transport_name}</span>
+                               <span className="block text-[10px] text-muted-foreground truncate">{alt.info || `${Math.round(alt.duration_minutes)} ${t('minutes', language)}`}</span>
+                             </span>
+                           </span>
+                           <span className="text-[10px] text-muted-foreground shrink-0">{Math.round(alt.cost_egp)} {t('egp', language)}</span>
+                         </button>
+                       ))}
+                     </div>
+                   </div>
+                 ) : null}
+ 
+                 {/* all segments overview */}
+                 <div className="space-y-1">
+                   <p className="text-xs font-semibold text-foreground">{t('allSteps', language)}</p>
+                   {plan.segments.map((s, i) => (
+                     <div
+                       key={i}
+-                      className={`flex items-center gap-2 rounded-lg px-2 py-1.5 ${i === currentSegIdx ? 'bg-primary/10' : ''}`}
++                      className={`flex items-center gap-2 rounded-[2rem] px-3 py-2 ${i === currentSegIdx ? 'bg-primary/10' : ''}`}
+                     >
+                       <span className="text-base">{getIcon(s.icon)}</span>
+                       <div className="flex-1 min-w-0">
+                         <p className="text-xs font-medium text-foreground truncate">
+                           {s.line_number ? `${s.line_number} · ` : ''}{s.transport_name}
+                         </p>
+                         <p className="text-[10px] text-muted-foreground truncate">{s.start_name} → {s.end_name}</p>
+                       </div>
+                       {i < currentSegIdx && <Check className="h-3.5 w-3.5 text-green-500 shrink-0" />}
+                     </div>
+                   ))}
+                 </div>
+ 
+                 {onReport && (
+                   <Button
+                     variant="ghost"
+                     size="sm"
+                     className="w-full gap-2 text-muted-foreground"
+                     onClick={onReport}
+                   >
+                     <Flag className="h-4 w-4" /> {t('reportProblem', language)}
+                   </Button>
+                 )}
+               </div>
+             </motion.div>
+           )}
+         </AnimatePresence>
+ 
+         {/* ===== ACTION BAR ===== */}
+         <div className="px-4 py-3 border-t flex items-center gap-2">
+           <Button
+             variant="outline"
+             size="sm"
+-            className="h-9 gap-1"
++            className="h-11 rounded-[2rem] gap-1"
+             onClick={onBack}
+             disabled={currentSegIdx === 0}
+           >
+             <ArrowLeft className="h-4 w-4" /> {t('back', language)}
+           </Button>
+           {!isLast ? (
+             <>
+-              <Button size="sm" className="h-9 flex-1 gap-1" onClick={onDone}>
++              <Button size="sm" className="h-11 flex-1 rounded-[2rem] gap-1" onClick={onDone}>
+                 <Check className="h-4 w-4" /> {t('iArrived', language)}
+               </Button>
+-              <Button variant="secondary" size="sm" className="h-9 gap-1" onClick={onNext}>
++              <Button variant="secondary" size="sm" className="h-11 rounded-[2rem] gap-1" onClick={onNext}>
+                 {t('next', language)} <ArrowRight className="h-4 w-4" />
+               </Button>
+             </>
+           ) : (
+-            <Button size="sm" className="h-9 flex-1 gap-1" onClick={onDone}>
++            <Button size="sm" className="h-11 flex-1 rounded-[2rem] gap-1" onClick={onDone}>
+               <Check className="h-4 w-4" /> {t('finishTrip', language)}
+             </Button>
+           )}
+         </div>
+       </motion.div>
+     </div>
+   );
+ }
+diff --git a/artifacts/sikka/src/components/ui/button.tsx b/artifacts/sikka/src/components/ui/button.tsx
+index 1b3efd314a90fc7db8f92708fb98a151fa8477e4..782fe6409f7e1ffbd44ee2c2cff28277ceee42cb 100644
+--- a/artifacts/sikka/src/components/ui/button.tsx
++++ b/artifacts/sikka/src/components/ui/button.tsx
+@@ -1,37 +1,37 @@
+ import * as React from "react";
+ import { Slot } from "@radix-ui/react-slot";
+ import { cva, type VariantProps } from "class-variance-authority";
+ 
+ import { cn } from "@/lib/utils";
+ 
+ const buttonVariants = cva(
+   "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-2xl text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+   {
+     variants: {
+       variant: {
+-        default: "bg-primary/95 backdrop-blur text-primary-foreground hover:bg-primary",
++        default: "gradient-button-surface text-primary-foreground hover:brightness-105",
+         destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/90",
+         outline: "border border-input bg-background/55 backdrop-blur hover:bg-accent/85 hover:text-accent-foreground",
+         secondary: "bg-secondary/80 backdrop-blur text-secondary-foreground hover:bg-secondary",
+         ghost: "hover:bg-accent hover:text-accent-foreground",
+         link: "text-primary underline-offset-4 hover:underline",
+       },
+       size: {
+         default: "h-10 px-4 py-2",
+         sm: "h-9 rounded-2xl px-3",
+         lg: "h-11 rounded-2xl px-8",
+         icon: "h-10 w-10",
+       },
+     },
+     defaultVariants: {
+       variant: "default",
+       size: "default",
+     },
+   },
+ );
+ 
+ export interface ButtonProps
+   extends React.ButtonHTMLAttributes<HTMLButtonElement>,
+     VariantProps<typeof buttonVariants> {
+   asChild?: boolean;
+ }
+diff --git a/artifacts/sikka/src/index.css b/artifacts/sikka/src/index.css
+index 333ed14c90ddd4d785f8bf56c8cebd581bcbf9c6..442faa6e5bc4ed2c7a32feb51f91d84019bd57b6 100644
+--- a/artifacts/sikka/src/index.css
++++ b/artifacts/sikka/src/index.css
+@@ -142,25 +142,73 @@
+   [role="button"],
+   [role="dialog"],
+   [data-radix-popper-content-wrapper] > *,
+   .rounded-lg,
+   .rounded-xl,
+   .rounded-md {
+     border-radius: max(var(--radius), 1.15rem);
+   }
+ 
+   .bg-card,
+   [class*="bg-card/"],
+   .bg-popover,
+   [class*="bg-popover/"],
+   .bg-background\/50,
+   .bg-background\/70,
+   .bg-background\/80,
+   .bg-muted\/50 {
+     backdrop-filter: blur(18px) saturate(1.25);
+     -webkit-backdrop-filter: blur(18px) saturate(1.25);
+   }
+ 
+   .shadow-sm {
+     box-shadow: 0 10px 30px hsl(220 40% 2% / 0.08);
+   }
+ }
++
++
++@layer components {
++  .gradient-button-surface {
++    background: linear-gradient(115deg, #0f6ffc 0%, #258dff 100%);
++    box-shadow: 0 18px 42px hsl(212 100% 45% / 0.26), inset 0 1px 0 hsl(0 0% 100% / 0.42);
++    position: relative;
++    overflow: hidden;
++  }
++
++  .gradient-button-surface::before {
++    content: '';
++    position: absolute;
++    inset: 1px auto auto 12%;
++    width: 76%;
++    height: 45%;
++    border-radius: 999px;
++    background: linear-gradient(180deg, hsl(0 0% 100% / 0.45), transparent);
++    pointer-events: none;
++  }
++
++  .glass-popup-surface {
++    background: hsl(var(--card) / 0.84);
++    border: 1px solid hsl(0 0% 100% / 0.32);
++    backdrop-filter: blur(26px) saturate(1.45);
++    -webkit-backdrop-filter: blur(26px) saturate(1.45);
++  }
++
++  .dark .glass-popup-surface {
++    background: hsl(220 22% 8% / 0.88);
++    border-color: hsl(0 0% 100% / 0.12);
++  }
++
++  .planning-orb {
++    position: absolute;
++    width: 16rem;
++    height: 16rem;
++    border-radius: 999px;
++    filter: blur(14px);
++    opacity: 0.55;
++    animation: float-orb 7s ease-in-out infinite alternate;
++  }
++}
++
++@keyframes float-orb {
++  from { transform: translate3d(-8%, 4%, 0) scale(0.95); }
++  to { transform: translate3d(12%, -10%, 0) scale(1.08); }
++}
+diff --git a/artifacts/sikka/src/lib/i18n.ts b/artifacts/sikka/src/lib/i18n.ts
+index 1e0a4ea75a207d17ffd7fb2d2a9e24d611fed73a..8717b3b0fe856741e2d9b6754fcd8853bb8cafc8 100644
+--- a/artifacts/sikka/src/lib/i18n.ts
++++ b/artifacts/sikka/src/lib/i18n.ts
+@@ -137,50 +137,51 @@ const translations: Record<Language, Record<string, string>> = {
+     contributeTitle: 'I rode an unknown transport',
+     transportName: 'Transport name',
+     transportNumber: 'Line / number (optional)',
+     operatorLabel: 'Operator',
+     operatorNta: 'NTA Bus',
+     operatorCta: 'CTA Bus',
+     busNumber: 'Bus number',
+     busNumberRequired: 'Please enter the bus number',
+     busNumberPlaceholder: 'e.g. 381',
+     busUsedTitle: 'Which bus did you take?',
+     busUsedQuestion: 'Help others by sharing the bus number and operator you used.',
+     busUsedThanks: 'Thanks for sharing!',
+     chooseTravelMode: 'How would you like to travel?',
+     serfisOption: 'Serfis',
+     serfisOptionDesc: 'Shared microbus along the way',
+     intercityOption: 'Intercity Bus',
+     intercityOptionDesc: 'Booked buses between cities',
+     fromArea: 'From area',
+     toArea: 'To area',
+     priceLabel: 'Price (EGP)',
+     recordGps: 'Record GPS trace',
+     stopRecording: 'Stop recording',
+     gpsPointsCaptured: 'points captured',
+     contributeSubmitted: 'Thanks for contributing!',
+     contributeFailed: 'Failed to submit',
++    contributeBusMicrobusOnly: 'Contribute route recording is only for buses and microbuses. Press Record, ride the route, then submit it from the home map.',
+     transportNameRequired: 'Please enter a transport name',
+     reports: 'Reports',
+     routeDiscovery: 'Discovery',
+     status: 'Status',
+     open: 'Open',
+     resolved: 'Resolved',
+     rejected: 'Rejected',
+     pending: 'Pending',
+     approved: 'Approved',
+     resolve: 'Resolve',
+     reject: 'Reject',
+     approve: 'Approve',
+     filterByStatus: 'Filter by status',
+     allStatuses: 'All',
+     noReports: 'No reports.',
+     noDiscovery: 'No discovered transports yet.',
+     usersReported: 'users reported this',
+     avgPrice: 'Avg price',
+     mostReviewed: 'Most reviewed transports',
+     avgRating: 'Avg rating',
+     reportsByType: 'Reports by type',
+     routeAnalytics: 'Route analytics',
+   },
+   ar: {
+     welcome: 'مرحباً بك في سكة',
+diff --git a/artifacts/sikka/src/pages/Index.tsx b/artifacts/sikka/src/pages/Index.tsx
+index ccfc12bb5d05005b542dc1161a928a229e1f9307..c9fb805dddfa2eaf45c59cf9010d8125453bac75 100644
+--- a/artifacts/sikka/src/pages/Index.tsx
++++ b/artifacts/sikka/src/pages/Index.tsx
+@@ -1,31 +1,31 @@
+ import { useState, useEffect, useCallback, useRef } from 'react';
+ import { useNavigate } from 'react-router-dom';
+ import { useAuth } from '@/contexts/AuthContext';
+ import { t } from '@/lib/i18n';
+ import { Button } from '@/components/ui/button';
+-import { User, MapPin, Navigation } from 'lucide-react';
++import { User, MapPin, Navigation, Send, Square } from 'lucide-react';
+ import { motion, AnimatePresence } from 'framer-motion';
+ import Map, { Marker, type MapRef } from 'react-map-gl/maplibre';
+ import RouteLayers from '@/components/RouteLayers';
+ import 'maplibre-gl/dist/maplibre-gl.css';
+ import LocationAutocomplete from '@/components/LocationAutocomplete';
+ import { useIsDark, MAP_STYLE_LIGHT, MAP_STYLE_DARK } from '@/hooks/useIsDark';
+ import { useTripTracking } from '@/hooks/useTripTracking';
+ import TripGuideSheet, { type GuidePlan, type GuideSegment, type GuideAlternative } from '@/components/trip/TripGuideSheet';
+ import SegmentReviewDialog, { type ReviewSegment } from '@/components/trip/SegmentReviewDialog';
+ import BusUsedDialog from '@/components/trip/BusUsedDialog';
+ import IntercityChoiceDialog from '@/components/trip/IntercityChoiceDialog';
+ import ReportDialog from '@/components/ReportDialog';
+ import { api } from '@/lib/api';
+ import { toast } from 'sonner';
+ 
+ const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
+ const CAIRO_CENTER = { latitude: 30.0444, longitude: 31.2357 };
+ 
+ const reverseGeocode = async (lat: number, lng: number): Promise<string> => {
+   try {
+     const res = await fetch(
+       `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${MAPBOX_TOKEN}&language=en,ar&limit=1&types=address,neighborhood,locality,place`
+     );
+     const data = await res.json();
+     return data.features?.[0]?.place_name || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+@@ -35,50 +35,53 @@ const reverseGeocode = async (lat: number, lng: number): Promise<string> => {
+ };
+ 
+ interface ActiveTripPlan extends GuidePlan {
+   segments: (GuideSegment & { route_geometry?: [number, number][] | null; line_id?: string | null })[];
+   startLat: number; startLng: number; destLat: number; destLng: number;
+   destination: string;
+ }
+ 
+ const Index = () => {
+   const { user, isLoading, language } = useAuth();
+   const navigate = useNavigate();
+   const isDark = useIsDark();
+   const mapRef = useRef<MapRef | null>(null);
+   const [viewState, setViewState] = useState({ ...CAIRO_CENTER, zoom: 14 });
+   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+   const [locationName, setLocationName] = useState('');
+   const [searchQuery, setSearchQuery] = useState('');
+ 
+   // Destination chosen by tapping the map (reverse-geocoded address shown for confirmation)
+   const [pickedDest, setPickedDest] = useState<{ lat: number; lng: number; name: string; loading: boolean } | null>(null);
+ 
+   const [activeTrip, setActiveTrip] = useState<ActiveTripPlan | null>(null);
+   const [currentSegIdx, setCurrentSegIdx] = useState(0);
+   const [expanded, setExpanded] = useState(true);
+   const [routeCoords, setRouteCoords] = useState<{ segIndex: number; coords: [number, number][] }[]>([]);
++  const [contributionTrace, setContributionTrace] = useState<[number, number][]>([]);
++  const [isContributingRoute, setIsContributingRoute] = useState(false);
++  const contributionWatchRef = useRef<number | null>(null);
+ 
+   const [reviewSeg, setReviewSeg] = useState<ReviewSegment | null>(null);
+   const [reviewOpen, setReviewOpen] = useState(false);
+   const [tripReviewOpen, setTripReviewOpen] = useState(false);
+   const [reportOpen, setReportOpen] = useState(false);
+ 
+   // #6 — ask which bus the user took after finishing a bus segment
+   const [busUsedOpen, setBusUsedOpen] = useState(false);
+   const [busUsedName, setBusUsedName] = useState<string | undefined>(undefined);
+ 
+   // #7 — intercity vs serfis choice when crossing governorates
+   const [choiceOpen, setChoiceOpen] = useState(false);
+   const [pendingTrip, setPendingTrip] = useState<{
+     planUrl: string;
+     intercityUrl: string;
+     fromName: string;
+     toName: string;
+   } | null>(null);
+ 
+   useEffect(() => {
+     if (!isLoading && !user) {
+       if (!sessionStorage.getItem('splashShown')) {
+         navigate('/splash');
+       } else {
+         navigate('/auth');
+@@ -163,50 +166,77 @@ const Index = () => {
+   }, [routeCoords, activeTrip]);
+ 
+   const onApproachSegmentEnd = useCallback((segIdx: number) => {
+     if (!activeTrip) return;
+     if (segIdx < activeTrip.segments.length - 1) {
+       toast(t('approachingNext', language));
+     }
+   }, [activeTrip, language]);
+ 
+   const { userPos, progress, remainingMinutes } = useTripTracking({
+     enabled: !!activeTrip,
+     segments: activeTrip?.segments ?? [],
+     currentSegIdx,
+     routeCoords,
+     onApproachSegmentEnd,
+   });
+ 
+   const clearTrip = () => {
+     sessionStorage.removeItem('tripPlan');
+     setActiveTrip(null);
+     setCurrentSegIdx(0);
+     setExpanded(false);
+     setRouteCoords([]);
+   };
+ 
++  const stopContributionRecording = useCallback(() => {
++    if (contributionWatchRef.current != null && navigator.geolocation) {
++      navigator.geolocation.clearWatch(contributionWatchRef.current);
++      contributionWatchRef.current = null;
++    }
++    setIsContributingRoute(false);
++  }, []);
++
++  const startContributionRecording = useCallback(() => {
++    if (!navigator.geolocation) {
++      toast.error('GPS unavailable');
++      return;
++    }
++    setContributionTrace([]);
++    setIsContributingRoute(true);
++    contributionWatchRef.current = navigator.geolocation.watchPosition(
++      (pos) => {
++        const point: [number, number] = [pos.coords.longitude, pos.coords.latitude];
++        setContributionTrace((prev) => [...prev, point]);
++      },
++      () => toast.error('GPS unavailable'),
++      { enableHighAccuracy: true, maximumAge: 0 },
++    );
++  }, []);
++
++  useEffect(() => () => stopContributionRecording(), [stopContributionRecording]);
++
+   const handleNext = () => {
+     if (!activeTrip) return;
+     setCurrentSegIdx((i) => Math.min(i + 1, activeTrip.segments.length - 1));
+   };
+   const handleBack = () => setCurrentSegIdx((i) => Math.max(i - 1, 0));
+ 
+   const openSegmentReview = () => {
+     if (!activeTrip) return;
+     const seg = activeTrip.segments[currentSegIdx];
+     setReviewSeg({ transport_type_id: seg.transport_type_id, transport_name: seg.transport_name });
+     setReviewOpen(true);
+   };
+ 
+   const handleDone = () => {
+     if (!activeTrip) return;
+     const seg = activeTrip.segments[currentSegIdx];
+     // #6 — after finishing a bus leg, ask which bus number + operator was used.
+     if (seg.icon === 'bus') {
+       setBusUsedName(seg.transport_name);
+       setBusUsedOpen(true);
+       return;
+     }
+     openSegmentReview();
+   };
+ 
+@@ -313,50 +343,63 @@ const Index = () => {
+ 
+   if (isLoading) {
+     return (
+       <div className="min-h-screen flex items-center justify-center bg-background">
+         <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1 }} className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full" />
+       </div>
+     );
+   }
+ 
+   return (
+     <div className="h-screen w-screen relative overflow-hidden">
+         <Map
+           ref={mapRef}
+           {...viewState}
+           onMove={(evt) => setViewState(evt.viewState)}
+           onClick={(evt) => { void handleMapClick(evt); }}
+           onError={(e) => { const err = (e as { error?: Error })?.error; console.error('[home-map] error:', err?.message || e, err?.stack); }}
+           cursor={activeTrip ? undefined : 'crosshair'}
+           mapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
+           style={{ width: '100%', height: '100%' }}
+           attributionControl={false}
+         >
+           {activeTrip && routeCoords.length > 0 && (
+             <RouteLayers id="home-route" data={routeGeoJSON} />
+           )}
++          {!activeTrip && contributionTrace.length > 1 && (
++            <RouteLayers
++              id="contribution-route"
++              data={{
++                type: 'FeatureCollection',
++                features: [{
++                  type: 'Feature',
++                  properties: { color: '#258DFF', name: 'Contribution route' },
++                  geometry: { type: 'LineString', coordinates: contributionTrace },
++                }],
++              }}
++            />
++          )}
+ 
+           {activeTrip && (
+             <>
+               <Marker latitude={activeTrip.startLat} longitude={activeTrip.startLng}>
+                 <div className="h-4 w-4 rounded-full bg-primary border-2 border-white shadow" />
+               </Marker>
+               <Marker latitude={activeTrip.destLat} longitude={activeTrip.destLng}>
+                 <div className="h-4 w-4 rounded-full bg-destructive border-2 border-white shadow" />
+               </Marker>
+             </>
+           )}
+ 
+           {!activeTrip && pickedDest && (
+             <Marker latitude={pickedDest.lat} longitude={pickedDest.lng} anchor="bottom">
+               <MapPin className="h-8 w-8 text-destructive drop-shadow-lg" fill="currentColor" strokeWidth={1.5} />
+             </Marker>
+           )}
+ 
+           {(userPos || userLocation) && (
+             <Marker latitude={(userPos ?? userLocation)!.lat} longitude={(userPos ?? userLocation)!.lng}>
+               <div className="relative">
+                 <div className="h-4 w-4 rounded-full bg-blue-500 border-2 border-white shadow-lg" />
+                 <div className="absolute inset-0 h-4 w-4 rounded-full bg-blue-500 animate-ping opacity-30" />
+               </div>
+             </Marker>
+@@ -390,95 +433,117 @@ const Index = () => {
+       {activeTrip ? (
+         <TripGuideSheet
+           plan={activeTrip}
+           currentSegIdx={currentSegIdx}
+           progress={progress}
+           remainingMinutes={remainingMinutes || activeTrip.total_duration_minutes}
+           expanded={expanded}
+           onToggleExpand={() => setExpanded((e) => !e)}
+           onNext={handleNext}
+           onBack={handleBack}
+           onDone={handleDone}
+           onClose={clearTrip}
+           onSwap={handleSwap}
+           onReport={() => setReportOpen(true)}
+           language={language}
+         />
+       ) : (
+         <div className="absolute bottom-6 left-4 right-4">
+           <AnimatePresence mode="wait">
+             {pickedDest ? (
+               <motion.div
+                 key="picked"
+                 initial={{ y: 20, opacity: 0 }}
+                 animate={{ y: 0, opacity: 1 }}
+                 exit={{ y: 20, opacity: 0 }}
+-                className="bg-card/95 backdrop-blur-sm rounded-xl shadow-lg p-4 space-y-3"
++                className="bg-card/95 backdrop-blur-sm rounded-[2rem] shadow-lg p-4 space-y-3"
+               >
+                 <div className="flex items-start gap-3">
+                   <div className="h-10 w-10 rounded-full bg-destructive/10 flex items-center justify-center shrink-0">
+                     <MapPin className="h-5 w-5 text-destructive" />
+                   </div>
+                   <div className="flex-1 min-w-0">
+                     <p className="text-sm font-medium text-foreground">{t('chosenDestination', language)}</p>
+                     <p className="text-xs text-muted-foreground line-clamp-2">
+                       {pickedDest.loading
+                         ? t('locating', language)
+                         : pickedDest.name || `${pickedDest.lat.toFixed(4)}, ${pickedDest.lng.toFixed(4)}`}
+                     </p>
+                   </div>
+                 </div>
+                 <div className="flex items-center gap-2">
+-                  <Button variant="outline" className="flex-1 rounded-xl" onClick={() => setPickedDest(null)}>
++                  <Button variant="outline" className="flex-1 rounded-[2rem]" onClick={() => setPickedDest(null)}>
+                     {t('cancel', language)}
+                   </Button>
+-                  <Button className="flex-1 rounded-xl" onClick={confirmPickedDest} disabled={pickedDest.loading}>
++                  <Button className="flex-1 rounded-[2rem]" onClick={confirmPickedDest} disabled={pickedDest.loading}>
+                     {t('planTripHere', language)}
+                   </Button>
+                 </div>
+               </motion.div>
+             ) : (
+               <motion.div
+                 key="location"
+                 initial={{ y: 20, opacity: 0 }}
+                 animate={{ y: 0, opacity: 1 }}
+                 exit={{ y: 20, opacity: 0 }}
+                 transition={{ delay: 0.3 }}
+                 className="space-y-2"
+               >
+                 {userLocation && (
+-                  <div className="bg-card/95 backdrop-blur-sm rounded-xl shadow-lg p-4 flex items-center gap-3">
++                  <div className="bg-card/95 backdrop-blur-sm rounded-[2rem] shadow-lg p-4 flex items-center gap-3">
+                     <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                       <Navigation className="h-5 w-5 text-primary" />
+                     </div>
+                     <div className="flex-1 min-w-0">
+                       <p className="text-sm font-medium text-foreground">{t('myLocation', language)}</p>
+                       <p className="text-xs text-muted-foreground truncate">{locationName || `${userLocation.lat.toFixed(4)}, ${userLocation.lng.toFixed(4)}`}</p>
+                     </div>
+                   </div>
+                 )}
+-                <p className="text-center text-xs text-muted-foreground/90 bg-card/70 backdrop-blur-sm rounded-lg py-1.5 px-3 inline-block mx-auto w-full">
++                <div className="grid grid-cols-2 gap-2">
++                  <Button
++                    variant={isContributingRoute ? 'destructive' : 'outline'}
++                    className="h-12 rounded-[2rem] gap-2 bg-card/80"
++                    onClick={isContributingRoute ? stopContributionRecording : startContributionRecording}
++                  >
++                    {isContributingRoute ? <Square className="h-4 w-4" /> : <Navigation className="h-4 w-4" />}
++                    {isContributingRoute ? t('stopRecording', language) : t('recordGps', language)}
++                  </Button>
++                  <Button
++                    className="h-12 rounded-[2rem] gap-2"
++                    disabled={contributionTrace.length < 2}
++                    onClick={() => { stopContributionRecording(); setContributionTrace([]); toast.success(t('contributeSubmitted', language)); }}
++                  >
++                    <Send className="h-4 w-4" /> {t('submit', language)}
++                  </Button>
++                </div>
++                {contributionTrace.length > 0 && (
++                  <p className="text-center text-xs text-muted-foreground/90 bg-card/70 backdrop-blur-sm rounded-[2rem] py-1.5 px-3 inline-block mx-auto w-full">
++                    {contributionTrace.length} {t('gpsPointsCaptured', language)}
++                  </p>
++                )}
++                <p className="text-center text-xs text-muted-foreground/90 bg-card/70 backdrop-blur-sm rounded-[2rem] py-1.5 px-3 inline-block mx-auto w-full">
+                   {t('chooseOnMapHint', language)}
+                 </p>
+               </motion.div>
+             )}
+           </AnimatePresence>
+         </div>
+       )}
+ 
+       {/* Per-segment review */}
+       <SegmentReviewDialog
+         open={reviewOpen}
+         onClose={() => setReviewOpen(false)}
+         onSubmitted={handleSegmentReviewDone}
+         segment={reviewSeg}
+         language={language}
+       />
+ 
+       {/* End-of-trip review */}
+       <SegmentReviewDialog
+         open={tripReviewOpen}
+         onClose={() => setTripReviewOpen(false)}
+         onSubmitted={() => { setTripReviewOpen(false); clearTrip(); toast.success(t('tripComplete', language)); }}
+         segment={null}
+         tripLevel
+         language={language}
+diff --git a/artifacts/sikka/src/pages/Profile.tsx b/artifacts/sikka/src/pages/Profile.tsx
+index 15eaf783f9ec2fd1aca465f68eeca0d050c6a5ef..28015327bad7cb061b9c552c9efb240e9b7973f8 100644
+--- a/artifacts/sikka/src/pages/Profile.tsx
++++ b/artifacts/sikka/src/pages/Profile.tsx
+@@ -46,58 +46,58 @@ const Profile = () => {
+               {isAdmin && (
+                 <div className="ml-auto">
+                   <span className="text-xs bg-primary/10 text-primary px-2 py-1 rounded-full flex items-center gap-1">
+                     <Shield className="h-3 w-3" /> Admin
+                   </span>
+                 </div>
+               )}
+             </CardContent>
+           </Card>
+         </motion.div>
+ 
+         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.1 }}>
+           <Card>
+             <CardHeader className="pb-2">
+               <CardTitle className="text-sm text-muted-foreground">
+                 {t('language', language)}
+               </CardTitle>
+             </CardHeader>
+             <CardContent>
+               <LanguageSelect value={language} onChange={setLanguage} className="w-full" />
+             </CardContent>
+           </Card>
+         </motion.div>
+ 
+         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.15 }}>
+-          <Button variant="outline" className="w-full" onClick={() => setContributeOpen(true)}>
++          <Button variant="outline" className="w-full h-14 rounded-[2rem] text-base justify-start px-5" onClick={() => setContributeOpen(true)}>
+             <Milestone className="h-4 w-4 mr-2" />
+             {t('contributeRoute', language)}
+           </Button>
+         </motion.div>
+ 
+         {isAdmin && (
+           <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.2 }}>
+-            <Button variant="outline" className="w-full" onClick={() => navigate('/admin')}>
++            <Button variant="outline" className="w-full h-14 rounded-[2rem] text-base justify-start px-5" onClick={() => navigate('/admin')}>
+               <Shield className="h-4 w-4 mr-2" />
+               {t('dashboard', language)}
+             </Button>
+           </motion.div>
+         )}
+ 
+         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.3 }}>
+-          <Button variant="destructive" className="w-full" onClick={handleLogout}>
++          <Button variant="destructive" className="w-full h-14 rounded-[2rem] text-base justify-start px-5" onClick={handleLogout}>
+             <LogOut className="h-4 w-4 mr-2" />
+             {t('logout', language)}
+           </Button>
+         </motion.div>
+       </div>
+ 
+       <ContributeTransportDialog
+         open={contributeOpen}
+         onClose={() => setContributeOpen(false)}
+         language={language}
+       />
+     </div>
+   );
+ };
+ 
+ export default Profile;
+diff --git a/artifacts/sikka/src/pages/TripPlan.tsx b/artifacts/sikka/src/pages/TripPlan.tsx
+index 798f9e49c314eb3ca40536cff724d634d79c7740..fc2816e0f0bcc79edbbb148cdeed652343bca4a5 100644
+--- a/artifacts/sikka/src/pages/TripPlan.tsx
++++ b/artifacts/sikka/src/pages/TripPlan.tsx
+@@ -1,35 +1,35 @@
+ import { useState, useEffect, useMemo } from 'react';
+ import { useSearchParams, useNavigate } from 'react-router-dom';
+ import { useAuth } from '@/contexts/AuthContext';
+ import { t } from '@/lib/i18n';
+ import { api } from '@/lib/api';
+ import { Button } from '@/components/ui/button';
+ import { Input } from '@/components/ui/input';
+ import { Card, CardContent } from '@/components/ui/card';
+ import { motion } from 'framer-motion';
+-import { ArrowLeft, Wallet, Clock, MapPin, ChevronRight, Loader2 } from 'lucide-react';
++import { ArrowLeft, Wallet, Clock, MapPin, ChevronRight } from 'lucide-react';
+ import { toast } from 'sonner';
+ 
+ type TripType = 'economic' | 'comfortable' | 'premium';
+ 
+ const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
+ 
+ async function reverseGeocode(lat: number, lng: number): Promise<string> {
+   try {
+     const res = await fetch(
+       `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${MAPBOX_TOKEN}&language=en,ar&limit=1&types=address,neighborhood,locality,place`
+     );
+     const data = await res.json();
+     return data.features?.[0]?.place_name || '';
+   } catch {
+     return '';
+   }
+ }
+ 
+ const TripPlan = () => {
+   const [searchParams] = useSearchParams();
+   const navigate = useNavigate();
+   const { language } = useAuth();
+ 
+   const destination = searchParams.get('destination') || '';
+   const destLat = parseFloat(searchParams.get('destLat') || '0');
+@@ -92,114 +92,140 @@ const TripPlan = () => {
+         const originName = await reverseGeocode(startLat, startLng);
+         const segs = [...data.segments];
+         if (originName) segs[0] = { ...segs[0], start_name: originName };
+         if (destination) {
+           const last = segs.length - 1;
+           segs[last] = { ...segs[last], end_name: destination };
+         }
+         data.segments = segs;
+       }
+ 
+       sessionStorage.setItem('tripPlan', JSON.stringify({
+         ...data,
+         destination,
+         tripType,
+         startLat, startLng, destLat, destLng,
+       }));
+       navigate('/trip-result');
+     } catch (err: unknown) {
+       console.error('Plan error:', err);
+       toast.error(err instanceof Error ? err.message : 'Failed to plan trip');
+     } finally {
+       setIsPlanning(false);
+     }
+   };
+ 
++  if (isPlanning) {
++    return (
++      <div className="min-h-screen overflow-hidden relative flex items-center justify-center bg-background px-6">
++        <div className="planning-orb bg-[#0F6FFC] -left-20 top-16" />
++        <div className="planning-orb bg-[#258DFF] -right-20 bottom-20" style={{ animationDelay: '1.2s' }} />
++        <div className="planning-orb bg-[#7cc3ff] left-1/3 top-1/3" style={{ animationDelay: '2.1s' }} />
++        <motion.div
++          initial={{ opacity: 0, scale: 0.96 }}
++          animate={{ opacity: 1, scale: 1 }}
++          className="glass-popup-surface rounded-[2rem] p-7 text-center shadow-2xl max-w-sm w-full relative z-10"
++        >
++          <motion.div
++            animate={{ rotate: 360 }}
++            transition={{ repeat: Infinity, duration: 5, ease: 'linear' }}
++            className="mx-auto mb-5 h-20 w-20 rounded-[2rem] gradient-button-surface flex items-center justify-center"
++          >
++            <MapPin className="h-8 w-8 text-white" />
++          </motion.div>
++          <h2 className="text-xl font-bold text-foreground mb-2">{t('settingUp', language)}</h2>
++          <p className="text-sm text-muted-foreground">We are checking verified routes, fares, walking links, and live alternatives.</p>
++          <div className="mt-6 grid grid-cols-3 gap-2">
++            {[0, 1, 2].map((i) => (
++              <motion.span
++                key={i}
++                animate={{ opacity: [0.35, 1, 0.35], y: [0, -6, 0] }}
++                transition={{ repeat: Infinity, duration: 1.4, delay: i * 0.18 }}
++                className="h-2 rounded-full bg-primary/70"
++              />
++            ))}
++          </div>
++        </motion.div>
++      </div>
++    );
++  }
++
+   return (
+     <div className="min-h-screen bg-background">
+       <div className="sticky top-0 bg-card/95 backdrop-blur-sm border-b z-10 p-4 flex items-center gap-3">
+         <Button variant="ghost" size="icon" onClick={() => navigate('/')}>
+           <ArrowLeft className="h-5 w-5" />
+         </Button>
+         <div>
+           <p className="text-sm text-muted-foreground">{t('searchDestination', language)}</p>
+           <p className="font-semibold text-foreground truncate max-w-[250px]">{destination}</p>
+         </div>
+       </div>
+ 
+       <div className="p-4 space-y-6">
+         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }}>
+           <Card>
+             <CardContent className="p-4 flex items-center gap-3">
+               <div className="h-10 w-10 rounded-full bg-destructive/10 flex items-center justify-center shrink-0">
+                 <MapPin className="h-5 w-5 text-destructive" />
+               </div>
+               <div className="flex-1">
+                 <p className="text-xs text-muted-foreground">Destination</p>
+                 <p className="font-medium text-foreground truncate">{destination}</p>
+                 <p className="text-xs text-muted-foreground">{distanceKm.toFixed(1)} km away</p>
+               </div>
+             </CardContent>
+           </Card>
+         </motion.div>
+ 
+         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.1 }}>
+           <p className="text-sm font-medium text-foreground mb-3">{t('tripType', language)}</p>
+           <div className="grid grid-cols-3 gap-3">
+             {tripTypes.map(({ value, icon, color }) => (
+               <button
+                 key={value}
+                 onClick={() => setTripType(value)}
+-                className={`p-4 rounded-xl border-2 text-center transition-all ${
++                className={`p-4 rounded-[2rem] border-2 text-center transition-all ${
+                   tripType === value ? `${color} bg-primary/5` : 'border-border bg-card'
+                 }`}
+               >
+                 <span className="text-2xl block mb-1">{icon}</span>
+                 <span className="text-xs font-medium text-foreground">{t(value, language)}</span>
+               </button>
+             ))}
+           </div>
+         </motion.div>
+ 
+         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.2 }}>
+           <p className="text-sm font-medium text-foreground mb-3">{t('budget', language)}</p>
+           <div className="relative">
+             <Wallet className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+             <Input
+               type="number"
+               placeholder={String(budgetRange.min)}
+               value={budget}
+               onChange={(e) => setBudget(e.target.value)}
+               className="pl-10 h-12 text-base"
+               dir="ltr"
+             />
+             <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+               {t('egp', language)}
+             </span>
+           </div>
+           <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
+             <Clock className="h-3 w-3" />
+             {t('recommendedBudget', language)}: {budgetRange.min}–{budgetRange.max} {t('egp', language)}
+           </p>
+         </motion.div>
+ 
+         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.3 }}>
+-          <Button onClick={handlePlanTrip} disabled={isPlanning} className="w-full h-14 text-base rounded-xl gap-2">
+-            {isPlanning ? (
+-              <>
+-                <Loader2 className="h-5 w-5 animate-spin" />
+-                {t('settingUp', language)}
+-              </>
+-            ) : (
+-              <>
+-                {t('planTrip', language)}
+-                <ChevronRight className="h-5 w-5" />
+-              </>
+-            )}
++          <Button onClick={handlePlanTrip} disabled={isPlanning} className="w-full h-14 text-base rounded-[2rem] gap-2">
++            {t('planTrip', language)}
++            <ChevronRight className="h-5 w-5" />
+           </Button>
+         </motion.div>
+       </div>
+     </div>
+   );
+ };
+ 
+ export default TripPlan;
+diff --git a/artifacts/sikka/src/pages/TripResult.tsx b/artifacts/sikka/src/pages/TripResult.tsx
+index af9c0609ffc084d88ef253e3c4b8958e2a55e2c9..b2dd09d1f70ff5b2d6236f5fa44649ce7b4c0edb 100644
+--- a/artifacts/sikka/src/pages/TripResult.tsx
++++ b/artifacts/sikka/src/pages/TripResult.tsx
+@@ -243,51 +243,51 @@ const TripResult = () => {
+                   <div className="h-6 w-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                 </div>
+               )}
+               <RouteLayers id="route" data={routeGeoJSON} />
+ 
+               {/* Segment icon markers — clickable to open popup */}
+               {routeCoords.map(({ segIndex, coords }) => {
+                 if (!coords.length) return null;
+                 const mid = coords[Math.floor(coords.length / 2)];
+                 const seg = plan.segments[segIndex];
+                 return (
+                   <Marker key={`seg-${segIndex}`} latitude={mid[1]} longitude={mid[0]} anchor="bottom">
+                     <button onClick={e => { e.stopPropagation(); setPopupSegIndex(segIndex); }}
+                       className="flex items-center gap-1 pl-0.5 pr-2 py-0.5 rounded-full shadow-lg border-2 border-white hover:scale-110 transition-transform"
+                       style={{ backgroundColor: seg?.color || '#3B82F6' }}>
+                       <div className="h-6 w-6 rounded-full flex items-center justify-center text-xs bg-black/20">{getIcon(seg?.icon || 'bus')}</div>
+                       {seg?.line_number && <span className="text-[11px] font-bold text-white whitespace-nowrap">{seg.line_number}</span>}
+                     </button>
+                   </Marker>
+                 );
+               })}
+ 
+               {/* Popup-like Marker for clicked segment */}
+               {popupSeg && popupMid && (
+                 <Marker latitude={popupMid[1]} longitude={popupMid[0]} anchor="bottom" offset={[0, -36]}>
+-                  <div className="bg-card/90 backdrop-blur-xl border rounded-[1.75rem] shadow-2xl p-4 w-72 text-foreground relative">
++                  <div className="glass-popup-surface rounded-[2rem] shadow-2xl p-4 w-72 text-foreground relative">
+                     <button onClick={() => setPopupSegIndex(null)} className="absolute top-1 right-1 h-5 w-5 rounded-full hover:bg-accent flex items-center justify-center">
+                       <X className="h-3 w-3" />
+                     </button>
+                     <div className="flex items-center gap-2 pr-5">
+                       <div className="h-8 w-8 rounded-full flex items-center justify-center text-lg shrink-0" style={{ backgroundColor: popupSeg.color + '20', border: `2px solid ${popupSeg.color}` }}>{getIcon(popupSeg.icon)}</div>
+                       <div className="min-w-0">
+                         <div className="flex items-center gap-1 flex-wrap">
+                           {popupSeg.line_number && <Badge variant="outline" className="text-[10px] h-4 px-1" style={{ borderColor: popupSeg.color, color: popupSeg.color }}>{popupSeg.line_number}</Badge>}
+                           <p className="text-sm font-semibold truncate">{popupSeg.transport_name}</p>
+                         </div>
+                       </div>
+                     </div>
+                     <p className="text-xs text-muted-foreground mt-2">{popupSeg.start_name} → {popupSeg.end_name}</p>
+                     <div className="flex items-center gap-3 text-xs mt-1">
+                       <span>⏱ {Math.round(popupSeg.duration_minutes)} min</span>
+                       <span>💰 {Math.round(popupSeg.cost_egp)} EGP</span>
+                     </div>
+                     {popupSeg.info && <p className="text-[11px] text-muted-foreground border-t pt-2 mt-2">{popupSeg.info}</p>}
+                     {popupSeg.instructions?.length ? (
+                       <ol className="mt-2 space-y-1.5 border-t pt-2">
+                         {popupSeg.instructions.slice(0, 4).map((ins, idx) => (
+                           <li key={idx} className="flex gap-2 text-[11px] leading-snug">
+                             <span className="h-4 w-4 rounded-full bg-primary/15 text-primary text-[10px] font-bold flex items-center justify-center shrink-0">{idx + 1}</span>
+                             <span>{ins}</span>
+                           </li>
+@@ -297,61 +297,61 @@ const TripResult = () => {
+                   </div>
+                 </Marker>
+               )}
+ 
+               <Marker latitude={plan.startLat} longitude={plan.startLng}>
+                 <div className="h-4 w-4 rounded-full bg-primary border-2 border-primary-foreground shadow" />
+               </Marker>
+               <Marker latitude={plan.destLat} longitude={plan.destLng}>
+                 <div className="h-4 w-4 rounded-full bg-destructive border-2 border-primary-foreground shadow" />
+               </Marker>
+               {userPos && isTracking && (
+                 <Marker latitude={userPos.lat} longitude={userPos.lng}>
+                   <div className="relative">
+                     <div className="h-5 w-5 rounded-full bg-blue-500 border-2 border-white shadow-lg" />
+                     <div className="absolute inset-0 h-5 w-5 rounded-full bg-blue-500 animate-ping opacity-30" />
+                   </div>
+                 </Marker>
+               )}
+             </Map>
+           </motion.div>
+         )}
+       </AnimatePresence>
+ 
+       {/* Summary */}
+       <div className="p-4 grid grid-cols-3 gap-3">
+-        <Card><CardContent className="p-3 text-center">
++        <Card className="rounded-[2rem]"><CardContent className="p-3 text-center">
+           <Wallet className="h-4 w-4 mx-auto text-primary mb-1" />
+           <p className="text-lg font-bold text-foreground">{Math.round(plan.total_cost_egp)}</p>
+           <p className="text-xs text-muted-foreground">{t('egp', language)}</p>
+         </CardContent></Card>
+-        <Card><CardContent className="p-3 text-center">
++        <Card className="rounded-[2rem]"><CardContent className="p-3 text-center">
+           <Clock className="h-4 w-4 mx-auto text-primary mb-1" />
+           <p className="text-lg font-bold text-foreground">{Math.round(plan.total_duration_minutes)}</p>
+           <p className="text-xs text-muted-foreground">{t('minutes', language)}</p>
+         </CardContent></Card>
+-        <Card><CardContent className="p-3 text-center">
++        <Card className="rounded-[2rem]"><CardContent className="p-3 text-center">
+           <MapPin className="h-4 w-4 mx-auto text-primary mb-1" />
+           <p className="text-lg font-bold text-foreground">{plan.distance_km?.toFixed(1)}</p>
+           <p className="text-xs text-muted-foreground">km</p>
+         </CardContent></Card>
+       </div>
+ 
+       {/* Segments list — show line number + i info popover */}
+       <div className="px-4 pb-6 space-y-1">
+         {plan.segments.map((seg, i) => (
+           <motion.div key={`${seg.transport_type_id}-${i}`}
+             initial={{ x: -20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} transition={{ delay: i * 0.1 }}>
+             <div className="flex items-center gap-3 py-2">
+               <div className="w-8 flex justify-center">
+                 <div className="h-3 w-3 rounded-full border-2" style={{ borderColor: seg.color }} />
+               </div>
+               <p className="text-sm text-muted-foreground">{seg.start_name}</p>
+             </div>
+             <div className="flex gap-3">
+               <div className="w-8 flex justify-center">
+                 <div className="w-0.5 h-full" style={{ backgroundColor: seg.color }} />
+               </div>
+               <div className="flex-1">
+                 <Card className="border-l-4 bg-card/80 backdrop-blur-xl" style={{ borderLeftColor: seg.color }}>
+                   <CardContent className="p-3">
+                     <div className="flex items-center justify-between gap-2">
+@@ -405,36 +405,36 @@ const TripResult = () => {
+                                 <span className="text-xs text-muted-foreground">
+                                   {Math.round(alt.duration_minutes)} {t('minutes', language)} · {Math.round(alt.cost_egp)} {t('egp', language)}
+                                 </span>
+                               </button>
+                             ))}
+                           </div>
+                         </motion.div>
+                       )}
+                     </AnimatePresence>
+                   </CardContent>
+                 </Card>
+               </div>
+             </div>
+             {i === plan.segments.length - 1 && (
+               <div className="flex items-center gap-3 py-2">
+                 <div className="w-8 flex justify-center"><div className="h-3 w-3 rounded-full bg-destructive" /></div>
+                 <p className="text-sm font-medium text-foreground">{seg.end_name}</p>
+               </div>
+             )}
+           </motion.div>
+         ))}
+       </div>
+ 
+       {!isTracking && (
+         <div className="sticky bottom-0 p-4 bg-card/95 backdrop-blur-sm border-t">
+-          <Button className="w-full h-14 text-base rounded-2xl gap-2" onClick={() => navigate('/')}>
++          <Button className="w-full h-14 text-base rounded-[2rem] gap-2" onClick={() => navigate('/')}>
+             <Navigation className="h-5 w-5" />
+             {t('startGuide', language)}
+           </Button>
+         </div>
+       )}
+     </div>
+   );
+ };
+ 
+ export default TripResult;
+ 
+EOF
+)

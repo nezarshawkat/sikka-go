@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { t } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
-import { User, MapPin, Navigation } from 'lucide-react';
+import { User, MapPin, Navigation, Send, Square } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Map, { Marker, type MapRef } from 'react-map-gl/maplibre';
 import RouteLayers from '@/components/RouteLayers';
@@ -61,6 +61,9 @@ const Index = () => {
   const [currentSegIdx, setCurrentSegIdx] = useState(0);
   const [expanded, setExpanded] = useState(true);
   const [routeCoords, setRouteCoords] = useState<{ segIndex: number; coords: [number, number][] }[]>([]);
+  const [contributionTrace, setContributionTrace] = useState<[number, number][]>([]);
+  const [isContributingRoute, setIsContributingRoute] = useState(false);
+  const contributionWatchRef = useRef<number | null>(null);
 
   const [reviewSeg, setReviewSeg] = useState<ReviewSegment | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -189,6 +192,33 @@ const Index = () => {
     setExpanded(false);
     setRouteCoords([]);
   };
+
+  const stopContributionRecording = useCallback(() => {
+    if (contributionWatchRef.current != null && navigator.geolocation) {
+      navigator.geolocation.clearWatch(contributionWatchRef.current);
+      contributionWatchRef.current = null;
+    }
+    setIsContributingRoute(false);
+  }, []);
+
+  const startContributionRecording = useCallback(() => {
+    if (!navigator.geolocation) {
+      toast.error('GPS unavailable');
+      return;
+    }
+    setContributionTrace([]);
+    setIsContributingRoute(true);
+    contributionWatchRef.current = navigator.geolocation.watchPosition(
+      (pos) => {
+        const point: [number, number] = [pos.coords.longitude, pos.coords.latitude];
+        setContributionTrace((prev) => [...prev, point]);
+      },
+      () => toast.error('GPS unavailable'),
+      { enableHighAccuracy: true, maximumAge: 0 },
+    );
+  }, []);
+
+  useEffect(() => () => stopContributionRecording(), [stopContributionRecording]);
 
   const handleNext = () => {
     if (!activeTrip) return;
@@ -340,6 +370,19 @@ const Index = () => {
           {activeTrip && routeCoords.length > 0 && (
             <RouteLayers id="home-route" data={routeGeoJSON} />
           )}
+          {!activeTrip && contributionTrace.length > 1 && (
+            <RouteLayers
+              id="contribution-route"
+              data={{
+                type: 'FeatureCollection',
+                features: [{
+                  type: 'Feature',
+                  properties: { color: '#258DFF', name: 'Contribution route' },
+                  geometry: { type: 'LineString', coordinates: contributionTrace },
+                }],
+              }}
+            />
+          )}
 
           {activeTrip && (
             <>
@@ -439,10 +482,10 @@ const Index = () => {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button variant="outline" className="flex-1 rounded-xl" onClick={() => setPickedDest(null)}>
+                  <Button variant="outline" className="flex-1 rounded-[2rem]" onClick={() => setPickedDest(null)}>
                     {t('cancel', language)}
                   </Button>
-                  <Button className="flex-1 rounded-xl" onClick={confirmPickedDest} disabled={pickedDest.loading}>
+                  <Button className="flex-1 rounded-[2rem]" onClick={confirmPickedDest} disabled={pickedDest.loading}>
                     {t('planTripHere', language)}
                   </Button>
                 </div>
@@ -466,6 +509,28 @@ const Index = () => {
                       <p className="text-xs text-muted-foreground truncate">{locationName || `${userLocation.lat.toFixed(4)}, ${userLocation.lng.toFixed(4)}`}</p>
                     </div>
                   </div>
+                )}
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    variant={isContributingRoute ? 'destructive' : 'outline'}
+                    className="h-12 rounded-[2rem] gap-2 bg-card/80"
+                    onClick={isContributingRoute ? stopContributionRecording : startContributionRecording}
+                  >
+                    {isContributingRoute ? <Square className="h-4 w-4" /> : <Navigation className="h-4 w-4" />}
+                    {isContributingRoute ? t('stopRecording', language) : t('recordGps', language)}
+                  </Button>
+                  <Button
+                    className="h-12 rounded-[2rem] gap-2"
+                    disabled={contributionTrace.length < 2}
+                    onClick={() => { stopContributionRecording(); setContributionTrace([]); toast.success(t('contributeSubmitted', language)); }}
+                  >
+                    <Send className="h-4 w-4" /> {t('submit', language)}
+                  </Button>
+                </div>
+                {contributionTrace.length > 0 && (
+                  <p className="text-center text-xs text-muted-foreground/90 bg-card/70 backdrop-blur-xl rounded-[2rem] py-1.5 px-3 inline-block mx-auto w-full border border-white/10">
+                    {contributionTrace.length} {t('gpsPointsCaptured', language)}
+                  </p>
                 )}
                 <p className="text-center text-xs text-muted-foreground/90 bg-card/70 backdrop-blur-xl rounded-[1.25rem] py-1.5 px-3 inline-block mx-auto w-full border border-white/10">
                   {t('chooseOnMapHint', language)}

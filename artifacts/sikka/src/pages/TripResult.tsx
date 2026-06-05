@@ -265,7 +265,7 @@ const TripResult = () => {
               {/* Popup-like Marker for clicked segment */}
               {popupSeg && popupMid && (
                 <Marker latitude={popupMid[1]} longitude={popupMid[0]} anchor="bottom" offset={[0, -36]}>
-                  <div className="glass-panel rounded-[1.75rem] p-4 w-72 text-foreground relative">
+                  <div className="glass-popup-surface rounded-[2rem] p-4 w-72 text-foreground relative">
                     <button onClick={() => setPopupSegIndex(null)} className="absolute top-1 right-1 h-5 w-5 rounded-full hover:bg-accent flex items-center justify-center">
                       <X className="h-3 w-3" />
                     </button>
@@ -319,17 +319,17 @@ const TripResult = () => {
 
       {/* Summary */}
       <div className="p-4 grid grid-cols-3 gap-3">
-        <Card className="glass-panel"><CardContent className="p-3 text-center">
+        <Card className="glass-panel rounded-[2rem]"><CardContent className="p-3 text-center">
           <Wallet className="h-4 w-4 mx-auto text-primary mb-1" />
           <p className="text-lg font-bold text-foreground">{Math.round(plan.total_cost_egp)}</p>
           <p className="text-xs text-muted-foreground">{t('egp', language)}</p>
         </CardContent></Card>
-        <Card className="glass-panel"><CardContent className="p-3 text-center">
+        <Card className="glass-panel rounded-[2rem]"><CardContent className="p-3 text-center">
           <Clock className="h-4 w-4 mx-auto text-primary mb-1" />
           <p className="text-lg font-bold text-foreground">{Math.round(plan.total_duration_minutes)}</p>
           <p className="text-xs text-muted-foreground">{t('minutes', language)}</p>
         </CardContent></Card>
-        <Card className="glass-panel"><CardContent className="p-3 text-center">
+        <Card className="glass-panel rounded-[2rem]"><CardContent className="p-3 text-center">
           <MapPin className="h-4 w-4 mx-auto text-primary mb-1" />
           <p className="text-lg font-bold text-foreground">{plan.distance_km?.toFixed(1)}</p>
           <p className="text-xs text-muted-foreground">km</p>
@@ -427,7 +427,7 @@ const TripResult = () => {
 
       {!isTracking && (
         <div className="sticky bottom-0 p-4 glass-panel border-t">
-          <Button className="w-full h-14 text-base rounded-2xl gap-2" onClick={() => navigate('/')}>
+          <Button className="w-full h-14 text-base rounded-[2rem] gap-2" onClick={() => navigate('/')}>
             <Navigation className="h-5 w-5" />
             {t('startGuide', language)}
           </Button>

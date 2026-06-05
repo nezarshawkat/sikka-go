@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { t } from '@/lib/i18n';
 import type { Language } from '@/lib/i18n';
 import {
-  ChevronUp, ChevronDown, Clock, Wallet, Check, MapPin, ArrowLeft, ArrowRight, Flag,
+  ChevronUp, ChevronDown, Clock, Wallet, Check, MapPin, ArrowLeft, ArrowRight, Flag, ExternalLink,
 } from 'lucide-react';
 
 const ICONS: Record<string, string> = {
@@ -39,6 +39,14 @@ interface TripGuideSheetProps {
   onSwap: (segIdx: number, alt: GuideAlternative) => void;
   onReport?: () => void;
   language: Language;
+}
+
+const isTaxiLike = (seg: Pick<GuideSegment, 'icon' | 'transport_name'>) =>
+  seg.icon === 'car' || /taxi|uber|careem|توك|تاكسي|أوبر|كريم/i.test(seg.transport_name);
+
+function mapUrlForSegment(seg: Pick<GuideSegment, 'start_name' | 'end_name'>) {
+  const query = encodeURIComponent(`${seg.start_name} to ${seg.end_name}`);
+  return `https://www.google.com/maps/search/?api=1&query=${query}`;
 }
 
 function getIcon(icon: string) {
@@ -132,7 +140,7 @@ export default function TripGuideSheet({
             >
               <div className="px-4 pb-4 space-y-4">
                 {/* overall ETA + cost */}
-                <div className="flex items-center justify-between rounded-2xl bg-muted/45 backdrop-blur px-3 py-2">
+                <div className="flex items-center justify-between rounded-[2rem] bg-muted/45 backdrop-blur px-3 py-2">
                   <div className="flex items-center gap-1.5 text-sm">
                     <Clock className="h-4 w-4 text-primary" />
                     <span className="font-semibold">{t('arrivalAt', language)} {arrival}</span>
@@ -144,7 +152,7 @@ export default function TripGuideSheet({
                 </div>
 
                 {/* current segment route + instructions */}
-                <div className="rounded-2xl border bg-background/35 backdrop-blur p-3" style={{ borderLeftWidth: 4, borderLeftColor: seg.color }}>
+                <div className="rounded-[2rem] border bg-background/35 backdrop-blur p-3" style={{ borderLeftWidth: 4, borderLeftColor: seg.color }}>
                   <div className="flex items-center gap-2 text-sm mb-1">
                     <MapPin className="h-3.5 w-3.5 text-primary" />
                     <span className="font-medium text-foreground truncate">{seg.start_name}</span>
@@ -156,16 +164,25 @@ export default function TripGuideSheet({
                     <span>{Math.round(seg.cost_egp)} {t('egp', language)}</span>
                   </div>
 
-                  {seg.instructions && seg.instructions.length > 0 && (
+                  {isTaxiLike(seg) ? (
+                    <div className="space-y-2">
+                      <p className="text-sm font-semibold text-foreground">{seg.start_name} → {seg.end_name}</p>
+                      <Button asChild className="w-full h-11 rounded-[2rem] gap-2">
+                        <a href={mapUrlForSegment(seg)} target="_blank" rel="noreferrer">
+                          <ExternalLink className="h-4 w-4" /> Open in maps
+                        </a>
+                      </Button>
+                    </div>
+                  ) : seg.instructions && seg.instructions.length > 0 && (
                     <div>
-                      <p className="text-xs font-semibold text-foreground mb-1">{t('instructionsHeader', language)}</p>
-                      <ol className="space-y-1">
+                      <p className="text-xs font-semibold text-foreground mb-2">{t('instructionsHeader', language)}</p>
+                      <ol className="space-y-2">
                         {seg.instructions.map((ins, i) => (
-                          <li key={i} className="flex items-start gap-2 text-xs text-foreground/80">
-                            <span className="h-4 w-4 rounded-full bg-primary/15 text-primary text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">
+                          <li key={i} className="flex items-start gap-3 text-sm text-foreground/85 rounded-[2rem] bg-card/45 px-3 py-2">
+                            <span className="h-7 w-7 rounded-full bg-primary/15 text-primary text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
                               {i + 1}
                             </span>
-                            <span className="leading-snug">{ins}</span>
+                            <span className="leading-relaxed">{ins}</span>
                           </li>
                         ))}
                       </ol>
@@ -183,7 +200,7 @@ export default function TripGuideSheet({
                   {plan.segments.map((s, i) => (
                     <div
                       key={i}
-                      className={`flex items-center gap-2 rounded-lg px-2 py-1.5 ${i === currentSegIdx ? 'bg-primary/10' : ''}`}
+                      className={`flex items-center gap-2 rounded-[2rem] px-3 py-2 ${i === currentSegIdx ? 'bg-primary/10' : ''}`}
                     >
                       <span className="text-base">{getIcon(s.icon)}</span>
                       <div className="flex-1 min-w-0">
@@ -217,7 +234,7 @@ export default function TripGuideSheet({
           <Button
             variant="outline"
             size="sm"
-            className="h-9 gap-1"
+            className="h-11 rounded-[2rem] gap-1"
             onClick={onBack}
             disabled={currentSegIdx === 0}
           >
@@ -225,15 +242,15 @@ export default function TripGuideSheet({
           </Button>
           {!isLast ? (
             <>
-              <Button size="sm" className="h-9 flex-1 gap-1" onClick={onDone}>
+              <Button size="sm" className="h-11 flex-1 rounded-[2rem] gap-1" onClick={onDone}>
                 <Check className="h-4 w-4" /> {t('iArrived', language)}
               </Button>
-              <Button variant="secondary" size="sm" className="h-9 gap-1" onClick={onNext}>
+              <Button variant="secondary" size="sm" className="h-11 rounded-[2rem] gap-1" onClick={onNext}>
                 {t('next', language)} <ArrowRight className="h-4 w-4" />
               </Button>
             </>
           ) : (
-            <Button size="sm" className="h-9 flex-1 gap-1" onClick={onDone}>
+            <Button size="sm" className="h-11 flex-1 rounded-[2rem] gap-1" onClick={onDone}>
               <Check className="h-4 w-4" /> {t('finishTrip', language)}
             </Button>
           )}

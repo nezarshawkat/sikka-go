@@ -96,7 +96,7 @@ const Profile = () => {
         </motion.div>
 
         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.15 }}>
-          <Button variant="outline" className="w-full rounded-[1.5rem] glass-panel" onClick={() => navigate('/discover-trip')}>
+          <Button variant="outline" className="w-full h-14 rounded-[2rem] text-base justify-start px-5 glass-panel" onClick={() => navigate('/discover-trip')}>
             <Milestone className="h-4 w-4 mr-2" />
             {t('contributeRoute', language)}
           </Button>
@@ -104,7 +104,7 @@ const Profile = () => {
 
         {isAdmin && (
           <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.2 }}>
-            <Button variant="outline" className="w-full rounded-[1.5rem] glass-panel" onClick={() => navigate('/admin')}>
+            <Button variant="outline" className="w-full h-14 rounded-[2rem] text-base justify-start px-5 glass-panel" onClick={() => navigate('/admin')}>
               <Shield className="h-4 w-4 mr-2" />
               {t('dashboard', language)}
             </Button>
@@ -112,7 +112,7 @@ const Profile = () => {
         )}
 
         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.3 }}>
-          <Button variant="destructive" className="w-full rounded-[1.5rem]" onClick={handleLogout}>
+          <Button variant="destructive" className="w-full h-14 rounded-[2rem] text-base justify-start px-5" onClick={handleLogout}>
             <LogOut className="h-4 w-4 mr-2" />
             {t('logout', language)}
           </Button>

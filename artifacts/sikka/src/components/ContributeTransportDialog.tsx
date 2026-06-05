@@ -6,7 +6,7 @@ import { api } from '@/lib/api';
 import { t } from '@/lib/i18n';
 import type { Language } from '@/lib/i18n';
 import { toast } from 'sonner';
-import { MapPin, Square } from 'lucide-react';
+import { Bus, MapPin, Square } from 'lucide-react';
 
 interface ContributeTransportDialogProps {
   open: boolean;
@@ -14,13 +14,14 @@ interface ContributeTransportDialogProps {
   language: Language;
 }
 
-type Operator = 'nta' | 'cta';
+type Operator = 'microbus' | 'nta' | 'cta';
 interface TransportType {
   id: string;
   nameEn: string;
 }
 
 const OPERATOR_TYPE_NAME: Record<Operator, string> = {
+  microbus: 'Microbus',
   nta: 'NTA Bus',
   cta: 'CTA Bus',
 };
@@ -32,7 +33,7 @@ export default function ContributeTransportDialog({
 }: ContributeTransportDialogProps) {
   const [transportName, setTransportName] = useState('');
   const [transportNumber, setTransportNumber] = useState('');
-  const [operator, setOperator] = useState<Operator>('nta');
+  const [operator, setOperator] = useState<Operator>('microbus');
   const [fromArea, setFromArea] = useState('');
   const [toArea, setToArea] = useState('');
   const [price, setPrice] = useState('');
@@ -59,7 +60,7 @@ export default function ContributeTransportDialog({
   const reset = () => {
     setTransportName('');
     setTransportNumber('');
-    setOperator('nta');
+    setOperator('microbus');
     setFromArea('');
     setToArea('');
     setPrice('');
@@ -105,7 +106,7 @@ export default function ContributeTransportDialog({
     try {
       const priceNum = Number(price);
       const transportTypeId =
-        transportTypes.find((tt) => tt.nameEn === OPERATOR_TYPE_NAME[operator])?.id ?? null;
+        transportTypes.find((tt) => tt.nameEn.toLowerCase() === OPERATOR_TYPE_NAME[operator].toLowerCase())?.id ?? null;
       await api.post('/transport-reports', {
         transportName: transportName.trim(),
         transportNumber: transportNumber || null,
@@ -133,49 +134,56 @@ export default function ContributeTransportDialog({
         </DialogHeader>
 
         <div className="space-y-3">
+          <div className="rounded-[2rem] bg-primary/10 p-3 flex gap-3 text-sm text-foreground">
+            <Bus className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+            <p>{t('contributeBusMicrobusOnly', language)}</p>
+          </div>
+
           <div>
             <label className="text-xs text-muted-foreground">{t('transportName', language)}</label>
-            <Input value={transportName} onChange={(e) => setTransportName(e.target.value)} className="text-sm" />
+            <Input value={transportName} onChange={(e) => setTransportName(e.target.value)} className="text-sm rounded-[2rem]" />
           </div>
           <div>
             <label className="text-xs text-muted-foreground">{t('operatorLabel', language)}</label>
-            <div className="grid grid-cols-2 gap-2 mt-1">
-              {(['nta', 'cta'] as Operator[]).map((op) => (
+            <div className="grid grid-cols-3 gap-2 mt-1">
+              {(['microbus', 'nta', 'cta'] as Operator[]).map((op) => (
                 <Button
                   key={op}
                   type="button"
                   variant={operator === op ? 'default' : 'outline'}
-                  className="w-full text-xs"
+                  className="w-full h-11 rounded-[2rem] text-xs"
                   onClick={() => setOperator(op)}
                 >
-                  {t(op === 'nta' ? 'operatorNta' : 'operatorCta', language)}
+                  {op === 'microbus' ? t('microbus', language) : t(op === 'nta' ? 'operatorNta' : 'operatorCta', language)}
                 </Button>
               ))}
             </div>
           </div>
-          <div>
-            <label className="text-xs text-muted-foreground">{t('busNumber', language)}</label>
-            <Input value={transportNumber} onChange={(e) => setTransportNumber(e.target.value)} className="text-sm" />
-          </div>
+          {operator !== 'microbus' && (
+            <div>
+              <label className="text-xs text-muted-foreground">{t('busNumber', language)}</label>
+              <Input value={transportNumber} onChange={(e) => setTransportNumber(e.target.value)} className="text-sm rounded-[2rem]" />
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs text-muted-foreground">{t('fromArea', language)}</label>
-              <Input value={fromArea} onChange={(e) => setFromArea(e.target.value)} className="text-sm" />
+              <Input value={fromArea} onChange={(e) => setFromArea(e.target.value)} className="text-sm rounded-[2rem]" />
             </div>
             <div>
               <label className="text-xs text-muted-foreground">{t('toArea', language)}</label>
-              <Input value={toArea} onChange={(e) => setToArea(e.target.value)} className="text-sm" />
+              <Input value={toArea} onChange={(e) => setToArea(e.target.value)} className="text-sm rounded-[2rem]" />
             </div>
           </div>
           <div>
             <label className="text-xs text-muted-foreground">{t('priceLabel', language)}</label>
-            <Input type="number" value={price} onChange={(e) => setPrice(e.target.value)} className="text-sm" />
+            <Input type="number" value={price} onChange={(e) => setPrice(e.target.value)} className="text-sm rounded-[2rem]" />
           </div>
 
           <Button
             type="button"
             variant={recording ? 'destructive' : 'outline'}
-            className="w-full gap-2"
+            className="w-full h-12 rounded-[2rem] gap-2"
             onClick={toggleRecording}
           >
             {recording ? <Square className="h-4 w-4" /> : <MapPin className="h-4 w-4" />}
@@ -188,10 +196,10 @@ export default function ContributeTransportDialog({
           )}
 
           <div className="flex gap-2 pt-1">
-            <Button variant="outline" className="flex-1" onClick={handleClose} disabled={submitting}>
+            <Button variant="outline" className="flex-1 h-11 rounded-[2rem]" onClick={handleClose} disabled={submitting}>
               {t('back', language)}
             </Button>
-            <Button className="flex-1" onClick={handleSubmit} disabled={submitting}>
+            <Button className="flex-1 h-11 rounded-[2rem]" onClick={handleSubmit} disabled={submitting}>
               {t('submit', language)}
             </Button>
           </div>

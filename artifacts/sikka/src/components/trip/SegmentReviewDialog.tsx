@@ -64,6 +64,12 @@ export default function SegmentReviewDialog({
     onClose();
   };
 
+  const handleSkip = () => {
+    reset();
+    onSubmitted?.();
+    onClose();
+  };
+
   const resolveTransportTypeId = (): string | null => {
     const id = segment?.transport_type_id;
     return id && UUID_RE.test(id) ? id : null;
@@ -216,10 +222,10 @@ export default function SegmentReviewDialog({
           />
 
           <div className="flex gap-2">
-            <Button variant="outline" className="flex-1" onClick={handleClose} disabled={submitting}>
+            <Button variant="outline" className="flex-1 h-11 rounded-[2rem]" onClick={handleSkip} disabled={submitting}>
               {t('skip', language)}
             </Button>
-            <Button className="flex-1" onClick={handleSubmit} disabled={submitting}>
+            <Button className="flex-1 h-11 rounded-[2rem]" onClick={handleSubmit} disabled={submitting}>
               {t('submit', language)}
             </Button>
           </div>

@@ -26,13 +26,18 @@ router.get("/", requireAdmin, async (req, res) => {
         gpsTraceCount: sql<number>`cast(sum(case when ${transportReportsTable.gpsTrace} is not null then 1 else 0 end) as int)`,
         avgGpsPoints: sql<number | null>`avg(jsonb_array_length(coalesce(${transportReportsTable.gpsTrace}, '[]'::jsonb)))`,
         confidenceScore: sql<number>`least(5, greatest(1, round((1 + least(count(*), 12) / 3.0 + least(avg(jsonb_array_length(coalesce(${transportReportsTable.gpsTrace}, '[]'::jsonb))), 120) / 60.0)::numeric, 1)))`,
+        recommendationScore: sql<number>`cast(count(*) as int)`,
       })
       .from(transportReportsTable)
       .groupBy(
         sql`lower(${transportReportsTable.transportName})`,
         sql`coalesce(${transportReportsTable.transportNumber}, '')`,
+        sql`lower(coalesce(${transportReportsTable.fromArea}, ''))`,
+        sql`lower(coalesce(${transportReportsTable.toArea}, ''))`,
         transportReportsTable.transportName,
         transportReportsTable.transportNumber,
+        transportReportsTable.fromArea,
+        transportReportsTable.toArea,
       )
       .orderBy(desc(sql`count(*)`));
     return res.json(rows);

@@ -205,3 +205,50 @@
   }
 }
 
+@layer components {
+  .gradient-button-surface {
+    background: linear-gradient(115deg, #0f6ffc 0%, #258dff 100%);
+    box-shadow: 0 18px 42px hsl(212 100% 45% / 0.26), inset 0 1px 0 hsl(0 0% 100% / 0.42);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .gradient-button-surface::before {
+    content: '';
+    position: absolute;
+    inset: 1px auto auto 12%;
+    width: 76%;
+    height: 45%;
+    border-radius: 999px;
+    background: linear-gradient(180deg, hsl(0 0% 100% / 0.45), transparent);
+    pointer-events: none;
+  }
+
+  .glass-popup-surface {
+    background: hsl(var(--card) / 0.84);
+    border: 1px solid hsl(0 0% 100% / 0.32);
+    backdrop-filter: blur(26px) saturate(1.45);
+    -webkit-backdrop-filter: blur(26px) saturate(1.45);
+  }
+
+  .dark .glass-popup-surface {
+    background: hsl(220 22% 8% / 0.88);
+    border-color: hsl(0 0% 100% / 0.12);
+  }
+
+  .planning-orb {
+    position: absolute;
+    width: 16rem;
+    height: 16rem;
+    border-radius: 999px;
+    filter: blur(14px);
+    opacity: 0.55;
+    animation: float-orb 7s ease-in-out infinite alternate;
+  }
+}
+
+@keyframes float-orb {
+  from { transform: translate3d(-8%, 4%, 0) scale(0.95); }
+  to { transform: translate3d(12%, -10%, 0) scale(1.08); }
+}
+

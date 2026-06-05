@@ -104,7 +104,7 @@ const TripPlan = () => {
               <button
                 key={value}
                 onClick={() => setTripType(value)}
-                className={`p-4 rounded-xl border-2 text-center transition-all ${
+                className={`p-4 rounded-[2rem] border-2 text-center transition-all ${
                   tripType === value ? `${color} bg-primary/5` : 'border-border bg-card'
                 }`}
               >
@@ -138,7 +138,7 @@ const TripPlan = () => {
         </motion.div>
 
         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.3 }}>
-          <Button onClick={handlePlanTrip} className="w-full h-14 text-base rounded-xl gap-2">
+          <Button onClick={handlePlanTrip} className="w-full h-14 text-base rounded-[2rem] gap-2">
             {t('planTrip', language)}
             <ChevronRight className="h-5 w-5" />
           </Button>
