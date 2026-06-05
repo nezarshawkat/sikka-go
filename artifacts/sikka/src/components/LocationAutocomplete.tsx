@@ -54,7 +54,7 @@ const LocationAutocomplete = ({ value, onChange, onSelect, placeholder, classNam
       setIsLoading(true);
       try {
         const res = await fetch(
-          `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(value)}.json?access_token=${MAPBOX_TOKEN}&country=eg&language=en,ar&limit=7&types=country,region,place,district,locality,neighborhood,address,poi`
+          `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(value)}.json?access_token=${MAPBOX_TOKEN}&country=eg&language=en,ar&limit=10&autocomplete=true&fuzzyMatch=true`
         );
         interface MapboxFeature {
           id: string;

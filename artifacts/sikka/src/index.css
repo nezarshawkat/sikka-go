@@ -207,7 +207,7 @@
 
 @layer components {
   .gradient-button-surface {
-    background: linear-gradient(115deg, #0f6ffc 0%, #258dff 100%);
+    background: linear-gradient(90deg, #3d9bff 0%, #0a52d8 100%);
     box-shadow: 0 18px 42px hsl(212 100% 45% / 0.26), inset 0 1px 0 hsl(0 0% 100% / 0.42);
     position: relative;
     overflow: hidden;

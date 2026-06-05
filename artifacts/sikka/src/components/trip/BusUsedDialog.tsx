@@ -25,6 +25,8 @@ interface BusUsedDialogProps {
   /** Called after the user submits or skips, so the trip can continue. */
   onDone: () => void;
   transportName?: string;
+  fromArea?: string;
+  toArea?: string;
   language: Language;
 }
 
@@ -33,6 +35,8 @@ export default function BusUsedDialog({
   onClose,
   onDone,
   transportName,
+  fromArea,
+  toArea,
   language,
 }: BusUsedDialogProps) {
   const [busNumber, setBusNumber] = useState('');
@@ -74,8 +78,8 @@ export default function BusUsedDialog({
         transportName: transportName || OPERATOR_TYPE_NAME[operator],
         transportNumber: busNumber.trim(),
         transportTypeId,
-        fromArea: null,
-        toArea: null,
+        fromArea: fromArea || null,
+        toArea: toArea || null,
         priceEgp: null,
         gpsTrace: null,
       });

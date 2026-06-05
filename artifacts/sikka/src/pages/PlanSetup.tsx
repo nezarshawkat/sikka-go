@@ -105,7 +105,7 @@ export default function PlanSetup() {
   }, [language, navigate, request]);
 
   const activeStep = Math.floor(elapsed / 2) % loadingSteps.length;
-  const tooLong = elapsed >= 7;
+  const tooLong = elapsed >= 11;
 
   if (isNoRoute) {
     const discoverParams = new URLSearchParams({

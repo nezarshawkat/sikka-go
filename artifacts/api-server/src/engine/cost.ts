@@ -36,8 +36,14 @@ export function waitMinutesFor(line: LineInfo | null, mode: ModeKey): number {
 // Walking speed (km/h) for pedestrian legs.
 export const WALK_SPEED_KMH = 4.5;
 
+// Real pedestrian paths are longer than the straight-line (haversine) distance
+// between two points. Apply a circuity factor so walking time reflects actual
+// on-street routes (sidewalks, crossings, detours) instead of an as-the-crow-flies
+// underestimate. ~1.3 is the standard urban pedestrian network detour ratio.
+export const WALK_DETOUR_FACTOR = 1.3;
+
 export function walkMinutes(km: number): number {
-  return (km / WALK_SPEED_KMH) * 60;
+  return ((km * WALK_DETOUR_FACTOR) / WALK_SPEED_KMH) * 60;
 }
 
 // Hard walking limit: a rider should never walk more than ~0.8 km in one go.

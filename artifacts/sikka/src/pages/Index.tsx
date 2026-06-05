@@ -47,7 +47,7 @@ interface ActiveTripPlan extends GuidePlan {
 const Index = () => {
   const { user, isLoading, language } = useAuth();
   const navigate = useNavigate();
-  const { style: mapStyle } = useMapStyle();
+  const { style: mapStyle, mode: mapMode } = useMapStyle();
   const mapRef = useRef<MapRef | null>(null);
   const [viewState, setViewState] = useState({ ...CAIRO_CENTER, zoom: 14 });
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
@@ -74,6 +74,8 @@ const Index = () => {
   // #6 — ask which bus the user took after finishing a bus segment
   const [busUsedOpen, setBusUsedOpen] = useState(false);
   const [busUsedName, setBusUsedName] = useState<string | undefined>(undefined);
+  const [busUsedFrom, setBusUsedFrom] = useState<string | undefined>(undefined);
+  const [busUsedTo, setBusUsedTo] = useState<string | undefined>(undefined);
 
   // #7 — intercity vs serfis choice when crossing governorates
   const [choiceOpen, setChoiceOpen] = useState(false);
@@ -95,7 +97,7 @@ const Index = () => {
   }, [user, isLoading, navigate]);
 
   useEffect(() => {
-    const stored = sessionStorage.getItem('tripPlan');
+    const stored = sessionStorage.getItem('activeTrip');
     if (stored) {
       try {
         const plan = JSON.parse(stored);
@@ -106,6 +108,21 @@ const Index = () => {
       } catch {}
     }
   }, []);
+
+  // On the homepage the UI theme follows the chosen MAP type (a light/white map
+  // forces light mode here, a dark map forces dark mode here), independent of the
+  // app-wide theme. Leaving the homepage restores the user's chosen app theme.
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.toggle('dark', mapMode === 'dark');
+    return () => {
+      const storedTheme = localStorage.getItem('sikka-theme');
+      const appDark = storedTheme
+        ? storedTheme === 'dark'
+        : window.matchMedia('(prefers-color-scheme: dark)').matches;
+      root.classList.toggle('dark', appDark);
+    };
+  }, [mapMode]);
 
   useEffect(() => {
     if (navigator.geolocation) {
@@ -186,6 +203,7 @@ const Index = () => {
   });
 
   const clearTrip = () => {
+    sessionStorage.removeItem('activeTrip');
     sessionStorage.removeItem('tripPlan');
     setActiveTrip(null);
     setCurrentSegIdx(0);
@@ -239,6 +257,8 @@ const Index = () => {
     // #6 — after finishing a bus leg, ask which bus number + operator was used.
     if (seg.icon === 'bus') {
       setBusUsedName(seg.transport_name);
+      setBusUsedFrom(seg.start_name);
+      setBusUsedTo(seg.end_name);
       setBusUsedOpen(true);
       return;
     }
@@ -330,7 +350,7 @@ const Index = () => {
     const updated = { ...activeTrip, segments: newSegments, total_cost_egp: newTotal, total_duration_minutes: newTime };
     setActiveTrip(updated);
     setRouteCoords((prev) => prev.map((r) => r.segIndex === segIdx && alt.route_geometry?.length ? { ...r, coords: alt.route_geometry! } : r));
-    sessionStorage.setItem('tripPlan', JSON.stringify(updated));
+    sessionStorage.setItem('activeTrip', JSON.stringify(updated));
     toast.success(t('planUpdated', language));
   };
 
@@ -574,6 +594,8 @@ const Index = () => {
         onClose={() => setBusUsedOpen(false)}
         onDone={openSegmentReview}
         transportName={busUsedName}
+        fromArea={busUsedFrom}
+        toArea={busUsedTo}
         language={language}
       />
 
