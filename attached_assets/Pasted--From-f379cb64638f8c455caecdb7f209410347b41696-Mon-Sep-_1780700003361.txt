@@ -1,0 +1,100 @@
+﻿From f379cb64638f8c455caecdb7f209410347b41696 Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Sat, 6 Jun 2026 00:09:53 +0300
+Subject: [PATCH] Update discovery recording and travel choice flows
+
+---
+ artifacts/api-server/src/routes/seedCairo.ts  |   2 +-
+ .../api-server/src/routes/transportReports.ts |  32 +++-
+ artifacts/api-server/src/routes/tripPlan.ts   |   6 +-
+ .../api-server/src/scripts/seedDirect.ts      |   2 +-
+ artifacts/sikka/src/App.tsx                   |   2 +
+ .../components/ContributeTransportDialog.tsx  | 102 ++++++++-----
+ .../src/components/LocationAutocomplete.tsx   |  59 ++++++--
+ .../components/trip/IntercityChoiceDialog.tsx |  63 ++++----
+ .../src/components/trip/TripGuideSheet.tsx    |  12 +-
+ artifacts/sikka/src/index.css                 |  31 ++--
+ artifacts/sikka/src/lib/i18n.ts               |  18 +++
+ artifacts/sikka/src/pages/DiscoverTrip.tsx    | 133 ++---------------
+ artifacts/sikka/src/pages/Index.tsx           | 130 +++++++++++++----
+ artifacts/sikka/src/pages/Profile.tsx         |   6 +-
+ artifacts/sikka/src/pages/Splash.tsx          |   8 +-
+ artifacts/sikka/src/pages/TravelMode.tsx      | 138 ++++++++++++++++++
+ artifacts/sikka/src/pages/TripPlan.tsx        |   8 +-
+ attached_assets/sikka-logo.svg                |  34 +++++
+ 18 files changed, 515 insertions(+), 271 deletions(-)
+ create mode 100644 artifacts/sikka/src/pages/TravelMode.tsx
+ create mode 100644 attached_assets/sikka-logo.svg
+
+diff --git a/artifacts/api-server/src/routes/seedCairo.ts b/artifacts/api-server/src/routes/seedCairo.ts
+index bed105e..85f1c85 100644
+--- a/artifacts/api-server/src/routes/seedCairo.ts
++++ b/artifacts/api-server/src/routes/seedCairo.ts
+@@ -24,7 +24,7 @@ const TYPES = [
+   { nameEn: "Microbus",   nameAr: "ميكروباص",                   icon: "bus",      color: "#10B981", base: 3,   pkm: 0.5, spd: 25 },
+   { nameEn: "Tuktuk",     nameAr: "توك توك",                    icon: "bike",     color: "#F97316", base: 5,   pkm: 2,   spd: 20 },
+   { nameEn: "White Taxi", nameAr: "تاكسي أبيض",                icon: "car",      color: "#64748B", base: 10,  pkm: 3,   spd: 30 },
+-  { nameEn: "Uber / Careem", nameAr: "أوبر / كريم",            icon: "car",      color: "#06B6D4", base: 15,  pkm: 4,   spd: 35 },
++  { nameEn: "Taxi app", nameAr: "تطبيق تاكسي",                 icon: "car",      color: "#06B6D4", base: 15,  pkm: 4,   spd: 35 },
+ ];
+ 
+ // ─── Helper: build line records from a stops array ───────────────────────────
+diff --git a/artifacts/api-server/src/routes/transportReports.ts b/artifacts/api-server/src/routes/transportReports.ts
+index 6d32edc..6a33762 100644
+--- a/artifacts/api-server/src/routes/transportReports.ts
++++ b/artifacts/api-server/src/routes/transportReports.ts
+@@ -68,19 +68,41 @@ router.post("/", requireAuth, async (req, res) => {
+   const resolvedTransportTypeId =
+     typeof transportTypeId === "string" && UUID_RE.test(transportTypeId) ? transportTypeId : null;
+   const price = Number(priceEgp);
++  const cleanTransportName = transportName.trim();
++  const cleanTransportNumber = typeof transportNumber === "string" && transportNumber.length ? transportNumber : null;
++  const cleanFromArea = typeof fromArea === "string" && fromArea.length ? fromArea : null;
++  const cleanToArea = typeof toArea === "string" && toArea.length ? toArea : null;
++  const routeName = cleanTransportName.toLowerCase();
++  const routeNumber = cleanTransportNumber ?? "";
++  const routeFrom = (cleanFromArea ?? "").toLowerCase();
++  const routeTo = (cleanToArea ?? "").toLowerCase();
++  const sameRoute = and(
++    sql`lower(${transportReportsTable.transportName}) = ${routeName}`,
++    sql`coalesce(${transportReportsTable.transportNumber}, '') = ${routeNumber}`,
++    sql`lower(coalesce(${transportReportsTable.fromArea}, '')) = ${routeFrom}`,
++    sql`lower(coalesce(${transportReportsTable.toArea}, '')) = ${routeTo}`,
++  );
++  const [cluster] = await db
++    .select({ count: sql<number>`cast(count(*) as int)` })
++    .from(transportReportsTable)
++    .where(sameRoute);
++  const shouldAutoApprove = ((cluster?.count ?? 0) + 1) >= 10;
+ 
+   const [row] = await db.insert(transportReportsTable).values({
+     userId: req.userId!,
+-    transportName: transportName.trim(),
+-    transportNumber: typeof transportNumber === "string" && transportNumber.length ? transportNumber : null,
++    transportName: cleanTransportName,
++    transportNumber: cleanTransportNumber,
+     transportTypeId: resolvedTransportTypeId,
+-    fromArea: typeof fromArea === "string" && fromArea.length ? fromArea : null,
+-    toArea: typeof toArea === "string" && toArea.length ? toArea : null,
++    fromArea: cleanFromArea,
++    toArea: cleanToArea,
+     gpsTrace: Array.isArray(gpsTrace) ? gpsTrace : null,
+     stopsVisited: Array.isArray(stopsVisited) ? stopsVisited : null,
+     priceEgp: Number.isFinite(price) ? price : null,
+-    status: "pending",
++    status: shouldAutoApprove ? "approved" : "pending",
+   }).returning();
++  if (shouldAutoApprove) {
++    await db.update(transportReportsTable).set({ status: "approved" }).where(sameRoute);
++  }
+   return res.json(row);
+ });
+ 
+diff --git a/artifacts/api-server/src/routes/tripPlan.ts b/artifacts/api-server/src/routes/tripPlan.ts
+index f24dc4a..752165c 100644
+--- a/artifacts/api-server/src/routes/tripPlan.ts
++++ b/artifacts/api-server/src/routes/tripPlan.ts
+@@ -248,7 +248,7 @@ async function buildIntercityPlan(
+ 
+ // Last-resort fallback used ONLY when the deterministic graph engine cannot run
+ // at all (e.g. it threw). It NEVER invents a transit route: a door-to-door
