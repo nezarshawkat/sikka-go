@@ -381,6 +381,7 @@ const Index = () => {
             className="flex-1"
             readOnlyDisplay={activeTrip?.destination || undefined}
             trailingAction={activeTrip ? 'cancelTrip' : searchQuery ? 'clear' : undefined}
+            trailingLabel={t('cancel', language)}
             onTrailingAction={() => {
               if (activeTrip) setCancelTripOpen(true);
               else setSearchQuery('');

@@ -7,9 +7,14 @@ description: How the .glass-panel component works and two non-obvious pitfalls w
 
 `.glass-panel` is defined TWICE in index.css (a base `@apply` def and a richer one that
 adds a `background-image` linear-gradient + custom box-shadow, plus a `.dark` variant).
-The visible fill is dominated by the gradient (`hsl(var(--card)/0.96 → 0.86)` light,
-`0.92 → 0.80` dark); the `@apply bg-card/[...]` background-color only shows through the
-gradient's transparency.
+The visible fill is the gradient; `background-color` is set to `transparent` so the gradient
+alpha controls see-through.
+
+INTENTIONALLY TRANSLUCENT (frosted glass): light gradient ~`hsl(var(--card)/0.6 → 0.42)`,
+dark ~`0.52 → 0.32`, with `backdrop-filter: blur(22-24px) saturate(~180%)`. Do NOT bump it
+back toward opaque (e.g. 0.92) — that kills the glassmorphism the user explicitly wants.
+The glass effect is only VISIBLE where a panel overlays content (e.g. the home search bar
+over the Mapbox/maplibre map); over a plain page background it just looks lightly tinted.
 
 ## Pitfall 1 — Tailwind JIT opacity literals
 `@apply bg-card/92` FAILS at build (postcss: "the `bg-card/92` class does not exist").

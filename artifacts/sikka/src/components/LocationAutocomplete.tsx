@@ -20,10 +20,11 @@ interface LocationAutocompleteProps {
   className?: string;
   trailingAction?: 'clear' | 'cancelTrip';
   onTrailingAction?: () => void;
+  trailingLabel?: string;
   readOnlyDisplay?: string;
 }
 
-const LocationAutocomplete = ({ value, onChange, onSelect, placeholder, className, trailingAction, onTrailingAction, readOnlyDisplay }: LocationAutocompleteProps) => {
+const LocationAutocomplete = ({ value, onChange, onSelect, placeholder, className, trailingAction, onTrailingAction, trailingLabel, readOnlyDisplay }: LocationAutocompleteProps) => {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -89,17 +90,22 @@ const LocationAutocomplete = ({ value, onChange, onSelect, placeholder, classNam
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         {isLoading && !trailingAction && <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground animate-spin" />}
-        {trailingAction && (
+        {trailingAction === 'cancelTrip' && (
           <button
             type="button"
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); onTrailingAction?.(); }}
-            className={cn(
-              "absolute right-2 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full border shadow-sm transition-colors flex items-center justify-center",
-              trailingAction === 'cancelTrip'
-                ? "bg-destructive/15 hover:bg-destructive/25 text-destructive border-destructive/30"
-                : "bg-muted/70 hover:bg-muted text-muted-foreground border-border",
-            )}
-            aria-label={trailingAction === 'cancelTrip' ? 'Cancel current trip' : 'Clear search'}
+            className="absolute right-2 top-1/2 -translate-y-1/2 z-10 h-10 px-5 rounded-full bg-destructive hover:bg-destructive/90 text-white text-sm font-semibold shadow-lg transition-colors flex items-center justify-center"
+            aria-label="Cancel current trip"
+          >
+            {trailingLabel || 'Cancel'}
+          </button>
+        )}
+        {trailingAction === 'clear' && (
+          <button
+            type="button"
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onTrailingAction?.(); }}
+            className="absolute right-2 top-1/2 -translate-y-1/2 z-10 h-10 w-10 rounded-full bg-muted/70 hover:bg-muted text-muted-foreground border border-border shadow-sm transition-colors flex items-center justify-center"
+            aria-label="Clear search"
           >
             <X className="h-5 w-5" strokeWidth={2.5} />
           </button>
@@ -111,12 +117,12 @@ const LocationAutocomplete = ({ value, onChange, onSelect, placeholder, classNam
           title={readOnlyDisplay ?? undefined}
           onChange={(e) => onChange(e.target.value)}
           onFocus={() => !readOnlyDisplay && suggestions.length > 0 && setIsOpen(true)}
-          className={cn("pl-11 shadow-xl border border-white/20 h-14 text-base rounded-[2rem] glass-panel truncate", trailingAction ? "pr-14" : "")}
+          className={cn("pl-11 shadow-xl border border-white/20 h-14 text-base rounded-[2rem] glass-panel truncate", trailingAction === 'cancelTrip' ? "pr-28" : trailingAction === 'clear' ? "pr-14" : "")}
         />
       </div>
 
       {isOpen && suggestions.length > 0 && (
-        <div className="absolute top-full left-0 right-0 mt-2 bg-card/86 backdrop-blur-2xl rounded-[1.75rem] shadow-2xl border border-white/20 z-50 overflow-hidden max-h-[300px] overflow-y-auto">
+        <div className="absolute top-full left-0 right-0 mt-2 glass-panel rounded-[1.75rem] z-50 overflow-hidden max-h-[300px] overflow-y-auto">
           {suggestions.map((s) => (
             <button
               key={s.id}
