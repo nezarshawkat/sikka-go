@@ -15,7 +15,7 @@
     --popover: 0 0% 100%;
     --popover-foreground: 220 20% 10%;
 
-    --primary: 217 91% 60%;
+    --primary: 204 100% 57%;
     --primary-foreground: 0 0% 100%;
 
     --secondary: 220 14% 96%;
@@ -38,7 +38,7 @@
 
     --sidebar-background: 0 0% 98%;
     --sidebar-foreground: 240 5.3% 26.1%;
-    --sidebar-primary: 217 91% 60%;
+    --sidebar-primary: 204 100% 57%;
     --sidebar-primary-foreground: 0 0% 100%;
     --sidebar-accent: 220 14% 96%;
     --sidebar-accent-foreground: 220 20% 10%;
@@ -66,7 +66,7 @@
     --popover: 220 20% 10%;
     --popover-foreground: 210 20% 98%;
 
-    --primary: 217 91% 60%;
+    --primary: 204 100% 57%;
     --primary-foreground: 0 0% 100%;
 
     --secondary: 220 14% 16%;
@@ -87,7 +87,7 @@
 
     --sidebar-background: 220 20% 7%;
     --sidebar-foreground: 210 20% 98%;
-    --sidebar-primary: 217 91% 60%;
+    --sidebar-primary: 204 100% 57%;
     --sidebar-primary-foreground: 0 0% 100%;
     --sidebar-accent: 220 14% 16%;
     --sidebar-accent-foreground: 210 20% 98%;
@@ -184,6 +184,13 @@
     border-color: hsl(0 0% 100% / 0.14);
     box-shadow: 0 20px 70px hsl(220 60% 1% / 0.4), inset 0 1px 0 hsl(0 0% 100% / 0.12);
   }
+
+  :root:not(.dark) .profile-glass-action {
+    background: linear-gradient(135deg, hsl(0 0% 100% / 0.72), hsl(204 100% 94% / 0.34)) !important;
+    border-color: hsl(204 100% 80% / 0.4) !important;
+    color: hsl(var(--foreground)) !important;
+    box-shadow: 0 18px 42px hsl(204 80% 45% / 0.12), inset 0 1px 0 hsl(0 0% 100% / 0.72);
+  }
 }
 
 @layer base {
@@ -207,21 +214,16 @@
 
 @layer components {
   .gradient-button-surface {
-    background: linear-gradient(90deg, #3d9bff 0%, #0a52d8 100%);
-    box-shadow: 0 18px 42px hsl(212 100% 45% / 0.26), inset 0 1px 0 hsl(0 0% 100% / 0.42);
-    position: relative;
+    background: linear-gradient(90deg, #02cffa 0%, #02cffa 68%, #258dff 100%);
+    box-shadow: none;
+    background-clip: padding-box;
     overflow: hidden;
   }
 
-  .gradient-button-surface::before {
-    content: '';
-    position: absolute;
-    inset: 1px auto auto 12%;
-    width: 76%;
-    height: 45%;
-    border-radius: 999px;
-    background: linear-gradient(180deg, hsl(0 0% 100% / 0.45), transparent);
-    pointer-events: none;
+  .gradient-button-surface::before,
+  .gradient-button-surface::after {
+    content: none !important;
+    display: none !important;
   }
 
   .glass-popup-surface {

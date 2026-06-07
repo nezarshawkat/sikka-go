@@ -55,8 +55,9 @@ function isConnectorMode(mode: ModeKey): boolean {
 
 function connectorLabel(mode: ModeKey, graph: TransitGraph, isArabic: boolean): { id: string; name: string; color: string; icon: string } | null {
   if (mode === "walk") return { id: "walk", name: isArabic ? "مشي" : "Walk", color: "#64748B", icon: "walk" };
-  const type = pickType(graph, mode, mode === "taxi" ? /uber|careem|taxi/i : undefined);
+  const type = pickType(graph, mode, mode === "taxi" ? /taxi app|uber|careem|تطبيق|taxi/i : undefined);
   if (!type) return null;
+  if (mode === "taxi") return { id: type.id, name: isArabic ? "تطبيق تاكسي" : "Taxi app", color: type.color, icon: UI_ICON[mode] };
   return { id: type.id, name: isArabic ? type.nameAr : type.nameEn, color: type.color, icon: UI_ICON[mode] };
 }
 
@@ -119,7 +120,7 @@ function buildOverlay(
   nodes.set("origin", { id: "origin", coord: origin, kind: "origin" });
   nodes.set("dest", { id: "dest", coord: dest, kind: "dest" });
 
-  const taxiType = pickType(graph, "taxi", /uber|careem/i);
+  const taxiType = pickType(graph, "taxi", /taxi app|uber|careem|تطبيق/i);
   const tuktukType = pickType(graph, "tuktuk");
   const useTuktukFill = planKey === "economic";
 
@@ -162,7 +163,7 @@ function buildOverlay(
     });
   }
 
-  // Door-to-door Uber/Careem is a premium-only product. Non-premium plans may
+  // Door-to-door taxi-app travel is a premium-only product. Non-premium plans may
   // still use taxi as a short access connector to verified transit, but never as
   // the whole trip.
   if (taxiType && planKey === "premium") {
@@ -549,7 +550,7 @@ async function buildConnectorAlternative(
   if (mode === "walk" && leg.distanceKm > WALK_MAX_KM) return null;
   const label = connectorLabel(mode, graph, isArabic);
   if (!label) return null;
-  const type = mode === "walk" ? null : pickType(graph, mode, mode === "taxi" ? /uber|careem|taxi/i : undefined);
+  const type = mode === "walk" ? null : pickType(graph, mode, mode === "taxi" ? /taxi app|uber|careem|تطبيق|taxi/i : undefined);
   const speed = mode === "walk" ? 4.5 : type?.speedKmh ?? 25;
   const cost = mode === "walk" ? 0 : directFare(type!, leg.distanceKm);
   const altLeg: PlanLeg = { ...leg, mode, typeId: type?.id ?? null, lineId: null, lineNumber: null, costEgp: cost, timeMin: (leg.distanceKm / speed) * 60 };

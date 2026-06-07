@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { t } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
-import { User, MapPin, Navigation, Send, Square } from 'lucide-react';
+import { User, MapPin, Navigation, Square, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Map, { Marker, type MapRef } from 'react-map-gl/maplibre';
 import RouteLayers from '@/components/RouteLayers';
@@ -16,6 +16,7 @@ import SegmentReviewDialog, { type ReviewSegment } from '@/components/trip/Segme
 import BusUsedDialog from '@/components/trip/BusUsedDialog';
 import IntercityChoiceDialog from '@/components/trip/IntercityChoiceDialog';
 import ReportDialog from '@/components/ReportDialog';
+import ContributeTransportDialog from '@/components/ContributeTransportDialog';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
 import {
@@ -25,11 +26,15 @@ import {
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
 const CAIRO_CENTER = { latitude: 30.0444, longitude: 31.2357 };
+const FLIGHT_CITY_IDS = new Set(['cairo', 'alexandria', 'luxor', 'aswan', 'hurghada', 'sharm']);
+const NILE_CITY_IDS = new Set(['cairo', 'giza', 'luxor', 'aswan']);
 
-const reverseGeocode = async (lat: number, lng: number): Promise<string> => {
+const langForGeocoding = (language: string) => language === 'zh' ? 'zh-CN' : language;
+
+const reverseGeocode = async (lat: number, lng: number, language: string): Promise<string> => {
   try {
     const res = await fetch(
-      `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${MAPBOX_TOKEN}&language=en,ar&limit=1&types=address,neighborhood,locality,place`
+      `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${MAPBOX_TOKEN}&country=eg&language=${encodeURIComponent(langForGeocoding(language))}&limit=1&types=address,neighborhood,locality,place,poi`
     );
     const data = await res.json();
     return data.features?.[0]?.place_name || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
@@ -63,6 +68,9 @@ const Index = () => {
   const [routeCoords, setRouteCoords] = useState<{ segIndex: number; coords: [number, number][] }[]>([]);
   const [contributionTrace, setContributionTrace] = useState<[number, number][]>([]);
   const [isContributingRoute, setIsContributingRoute] = useState(false);
+  const [showDiscoveryRecorder, setShowDiscoveryRecorder] = useState(false);
+  const [contributionDialogOpen, setContributionDialogOpen] = useState(false);
+  const [contributionOperator, setContributionOperator] = useState<'microbus' | 'bus'>('microbus');
   const contributionWatchRef = useRef<number | null>(null);
 
   const [reviewSeg, setReviewSeg] = useState<ReviewSegment | null>(null);
@@ -82,8 +90,15 @@ const Index = () => {
   const [pendingTrip, setPendingTrip] = useState<{
     planUrl: string;
     intercityUrl: string;
+    trainUrl: string;
+    flightUrl: string;
+    taxiUrl: string;
+    nileUrl: string;
     fromName: string;
     toName: string;
+    hasSerfis: boolean;
+    hasFlight: boolean;
+    hasNile: boolean;
   } | null>(null);
 
   useEffect(() => {
@@ -97,6 +112,13 @@ const Index = () => {
   }, [user, isLoading, navigate]);
 
   useEffect(() => {
+    if (sessionStorage.getItem('sikkaDiscoveryRecord') === '1') {
+      sessionStorage.removeItem('sikkaDiscoveryRecord');
+      const storedMode = sessionStorage.getItem('sikkaDiscoveryMode');
+      sessionStorage.removeItem('sikkaDiscoveryMode');
+      setContributionOperator(storedMode === 'bus' ? 'bus' : 'microbus');
+      setShowDiscoveryRecorder(true);
+    }
     const stored = sessionStorage.getItem('activeTrip');
     if (stored) {
       try {
@@ -131,7 +153,7 @@ const Index = () => {
           const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
           setUserLocation(loc);
           setViewState((v) => ({ ...v, latitude: loc.lat, longitude: loc.lng }));
-          const name = await reverseGeocode(loc.lat, loc.lng);
+          const name = await reverseGeocode(loc.lat, loc.lng, language);
           setLocationName(name);
         },
         () => {
@@ -140,7 +162,7 @@ const Index = () => {
         }
       );
     }
-  }, []);
+  }, [language]);
 
   // Render the route geometry supplied by the backend directly — no client-side
   // road snapping. Segments without geometry fall back to a straight line drawn
@@ -219,6 +241,14 @@ const Index = () => {
     setIsContributingRoute(false);
   }, []);
 
+  const clearContributionFlow = useCallback(() => {
+    stopContributionRecording();
+    setContributionTrace([]);
+    setShowDiscoveryRecorder(false);
+    setContributionDialogOpen(false);
+    setContributionOperator('microbus');
+  }, [stopContributionRecording]);
+
   const startContributionRecording = useCallback(() => {
     if (!navigator.geolocation) {
       toast.error('GPS unavailable');
@@ -292,12 +322,23 @@ const Index = () => {
         const fromName = language === 'ar' ? fromCity.nameAr : fromCity.nameEn;
         const toName = language === 'ar' ? toCity.nameAr : toCity.nameEn;
         const intercityUrl = `/intercity?from=${encodeURIComponent(fromCity.nameEn)}&to=${encodeURIComponent(toCity.nameEn)}`;
-        if (check.hasSerfis) {
-          setPendingTrip({ planUrl: planUrl(true), intercityUrl, fromName, toName });
-          setChoiceOpen(true);
-          return;
-        }
-        navigate(intercityUrl);
+        const travelParams = `from=${encodeURIComponent(fromCity.nameEn)}&to=${encodeURIComponent(toCity.nameEn)}&fromLabel=${encodeURIComponent(fromName)}&toLabel=${encodeURIComponent(toName)}`;
+        const hasFlight = FLIGHT_CITY_IDS.has(fromCity.id) && FLIGHT_CITY_IDS.has(toCity.id);
+        const hasNile = NILE_CITY_IDS.has(fromCity.id) && NILE_CITY_IDS.has(toCity.id);
+        setPendingTrip({
+          planUrl: planUrl(true),
+          intercityUrl,
+          trainUrl: `/travel/train?${travelParams}`,
+          flightUrl: `/travel/flight?${travelParams}`,
+          taxiUrl: `/travel/taxi?${travelParams}`,
+          nileUrl: `/travel/nile?${travelParams}`,
+          fromName,
+          toName,
+          hasSerfis: check.hasSerfis,
+          hasFlight,
+          hasNile,
+        });
+        setChoiceOpen(true);
         return;
       }
     } catch (err) {
@@ -312,9 +353,9 @@ const Index = () => {
     if (activeTrip || choiceOpen) return; // don't hijack taps while a trip guide or blocking dialog is open
     const { lat, lng } = evt.lngLat;
     setPickedDest({ lat, lng, name: '', loading: true });
-    const name = await reverseGeocode(lat, lng);
+    const name = await reverseGeocode(lat, lng, language);
     setPickedDest((prev) => (prev && prev.lat === lat && prev.lng === lng ? { ...prev, name, loading: false } : prev));
-  }, [activeTrip, choiceOpen]);
+  }, [activeTrip, choiceOpen, language]);
 
   // Confirm the tapped destination — runs the exact same flow as a search selection.
   const confirmPickedDest = () => {
@@ -442,6 +483,7 @@ const Index = () => {
             }}
             placeholder={t('searchDestination', language)}
             className="flex-1"
+            language={language}
             readOnlyDisplay={activeTrip?.destination || undefined}
             trailingAction={activeTrip ? 'cancelTrip' : searchQuery ? 'clear' : undefined}
             trailingLabel={t('cancel', language)}
@@ -519,7 +561,7 @@ const Index = () => {
                 transition={{ delay: 0.3 }}
                 className="space-y-2"
               >
-                {userLocation && (
+                {userLocation && !showDiscoveryRecorder && (
                   <div className="rounded-[2rem] shadow-2xl border border-white/20 p-4 flex items-center gap-3 glass-panel">
                     <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
                       <Navigation className="h-5 w-5 text-primary" />
@@ -530,31 +572,50 @@ const Index = () => {
                     </div>
                   </div>
                 )}
-                <div className="grid grid-cols-2 gap-2">
-                  <Button
-                    variant={isContributingRoute ? 'destructive' : 'outline'}
-                    className="h-12 rounded-[2rem] gap-2 bg-card/80"
-                    onClick={isContributingRoute ? stopContributionRecording : startContributionRecording}
-                  >
-                    {isContributingRoute ? <Square className="h-4 w-4" /> : <Navigation className="h-4 w-4" />}
-                    {isContributingRoute ? t('stopRecording', language) : t('recordGps', language)}
-                  </Button>
-                  <Button
-                    className="h-12 rounded-[2rem] gap-2"
-                    disabled={contributionTrace.length < 2}
-                    onClick={() => { stopContributionRecording(); setContributionTrace([]); toast.success(t('contributeSubmitted', language)); }}
-                  >
-                    <Send className="h-4 w-4" /> {t('submit', language)}
-                  </Button>
-                </div>
-                {contributionTrace.length > 0 && (
+                {showDiscoveryRecorder && (
+                  <>
+                    {!isContributingRoute && contributionTrace.length < 2 ? (
+                      <Button
+                        className="w-full h-24 rounded-[2rem] gap-3 text-lg"
+                        onClick={startContributionRecording}
+                      >
+                        <Navigation className="h-7 w-7" />
+                        {t('recordGps', language)}
+                      </Button>
+                    ) : isContributingRoute ? (
+                      <Button
+                        variant="destructive"
+                        className="w-full h-24 rounded-[2rem] gap-3 text-lg"
+                        onClick={stopContributionRecording}
+                      >
+                        <Square className="h-7 w-7" />
+                        {t('stopRecording', language)}
+                      </Button>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button
+                          variant="outline"
+                          className="h-12 rounded-[2rem] gap-2 bg-card/80"
+                          onClick={clearContributionFlow}
+                        >
+                          <X className="h-4 w-4" />
+                          {t('cancel', language)}
+                        </Button>
+                        <Button
+                          className="h-12 rounded-[2rem] gap-2"
+                          onClick={() => setContributionDialogOpen(true)}
+                        >
+                          {t('submit', language)}
+                        </Button>
+                      </div>
+                    )}
+                  </>
+                )}
+                {showDiscoveryRecorder && contributionTrace.length > 0 && (
                   <p className="text-center text-xs text-muted-foreground/90 bg-card/70 backdrop-blur-xl rounded-[2rem] py-1.5 px-3 inline-block mx-auto w-full border border-white/10">
                     {contributionTrace.length} {t('gpsPointsCaptured', language)}
                   </p>
                 )}
-                <p className="text-center text-xs text-muted-foreground/90 bg-card/70 backdrop-blur-xl rounded-[1.25rem] py-1.5 px-3 inline-block mx-auto w-full border border-white/10">
-                  {t('chooseOnMapHint', language)}
-                </p>
               </motion.div>
             )}
           </AnimatePresence>
@@ -588,6 +649,15 @@ const Index = () => {
         language={language}
       />
 
+      <ContributeTransportDialog
+        open={contributionDialogOpen}
+        onClose={() => setContributionDialogOpen(false)}
+        onSubmitted={clearContributionFlow}
+        initialTrace={contributionTrace}
+        initialOperator={contributionOperator}
+        language={language}
+      />
+
       {/* #6 — which bus did you take? */}
       <BusUsedDialog
         open={busUsedOpen}
@@ -606,10 +676,21 @@ const Index = () => {
         onChoose={(choice) => {
           setChoiceOpen(false);
           if (!pendingTrip) return;
-          navigate(choice === 'serfis' ? pendingTrip.planUrl : pendingTrip.intercityUrl);
+          const urls = {
+            serfis: pendingTrip.planUrl,
+            intercity: pendingTrip.intercityUrl,
+            train: pendingTrip.trainUrl,
+            flight: pendingTrip.flightUrl,
+            taxi: pendingTrip.taxiUrl,
+            nile: pendingTrip.nileUrl,
+          };
+          navigate(urls[choice]);
         }}
         fromName={pendingTrip?.fromName}
         toName={pendingTrip?.toName}
+        showSerfis={pendingTrip?.hasSerfis}
+        showFlight={pendingTrip?.hasFlight}
+        showNile={pendingTrip?.hasNile}
         language={language}
       />
 

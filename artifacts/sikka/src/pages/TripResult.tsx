@@ -285,10 +285,10 @@ const TripResult = () => {
                     </div>
                     {popupSeg.info && <p className="text-[11px] text-muted-foreground border-t pt-2 mt-2">{popupSeg.info}</p>}
                     {popupSeg.instructions?.length ? (
-                      <ol className="mt-2 space-y-1.5 border-t pt-2">
+                      <ol className="mt-2 space-y-1 border-t pt-2">
                         {popupSeg.instructions.slice(0, 4).map((ins, idx) => (
-                          <li key={idx} className="flex gap-2 text-[11px] leading-snug">
-                            <span className="h-4 w-4 rounded-full bg-primary/15 text-primary text-[10px] font-bold flex items-center justify-center shrink-0">{idx + 1}</span>
+                          <li key={idx} className="flex gap-1.5 text-[11px] leading-snug">
+                            <span className="h-3.5 w-3.5 rounded-full bg-primary/15 text-primary text-[9px] font-bold flex items-center justify-center shrink-0">{idx + 1}</span>
                             <span>{ins}</span>
                           </li>
                         ))}
@@ -341,7 +341,7 @@ const TripResult = () => {
         {plan.segments.map((seg, i) => (
           <motion.div key={`${seg.transport_type_id}-${i}`}
             initial={{ x: -20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} transition={{ delay: i * 0.1 }}>
-            <div className="flex items-center gap-3 py-2">
+            <div className="flex items-center gap-3 py-1">
               <div className="w-8 flex justify-center">
                 <div className="h-3 w-3 rounded-full border-2" style={{ borderColor: seg.color }} />
               </div>
@@ -353,7 +353,7 @@ const TripResult = () => {
               </div>
               <div className="flex-1">
                 <Card className="border-l-4 glass-panel" style={{ borderLeftColor: seg.color }}>
-                  <CardContent className="p-3">
+                  <CardContent className="p-2.5">
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2 min-w-0">
                         <div className="h-8 w-8 rounded-full flex items-center justify-center text-lg shrink-0"
@@ -416,7 +416,7 @@ const TripResult = () => {
               </div>
             </div>
             {i === plan.segments.length - 1 && (
-              <div className="flex items-center gap-3 py-2">
+              <div className="flex items-center gap-3 py-1">
                 <div className="w-8 flex justify-center"><div className="h-3 w-3 rounded-full bg-destructive" /></div>
                 <p className="text-sm font-medium text-foreground">{seg.end_name}</p>
               </div>

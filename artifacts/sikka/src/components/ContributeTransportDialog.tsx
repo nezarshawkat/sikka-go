@@ -12,9 +12,12 @@ interface ContributeTransportDialogProps {
   open: boolean;
   onClose: () => void;
   language: Language;
+  initialTrace?: [number, number][];
+  initialOperator?: Operator;
+  onSubmitted?: () => void;
 }
 
-type Operator = 'microbus' | 'nta' | 'cta';
+type Operator = 'microbus' | 'bus';
 interface TransportType {
   id: string;
   nameEn: string;
@@ -22,18 +25,21 @@ interface TransportType {
 
 const OPERATOR_TYPE_NAME: Record<Operator, string> = {
   microbus: 'Microbus',
-  nta: 'NTA Bus',
-  cta: 'CTA Bus',
+  bus: 'Bus',
 };
 
 export default function ContributeTransportDialog({
   open,
   onClose,
   language,
+  initialTrace,
+  initialOperator = 'microbus',
+  onSubmitted,
 }: ContributeTransportDialogProps) {
-  const [transportName, setTransportName] = useState('');
+  const isTraceSubmit = !!initialTrace?.length;
   const [transportNumber, setTransportNumber] = useState('');
-  const [operator, setOperator] = useState<Operator>('microbus');
+  const [operator, setOperator] = useState<Operator>(initialOperator);
+  const [busOperator, setBusOperator] = useState<'nta' | 'cta'>('nta');
   const [fromArea, setFromArea] = useState('');
   const [toArea, setToArea] = useState('');
   const [price, setPrice] = useState('');
@@ -45,6 +51,7 @@ export default function ContributeTransportDialog({
 
   useEffect(() => {
     if (!open) return;
+    setOperator(initialOperator);
     let cancelled = false;
     api
       .get('/transport-types')
@@ -55,12 +62,12 @@ export default function ContributeTransportDialog({
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, initialOperator]);
 
   const reset = () => {
-    setTransportName('');
     setTransportNumber('');
-    setOperator('microbus');
+    setOperator(initialOperator);
+    setBusOperator('nta');
     setFromArea('');
     setToArea('');
     setPrice('');
@@ -98,26 +105,30 @@ export default function ContributeTransportDialog({
   };
 
   const handleSubmit = async () => {
-    if (!transportName.trim()) {
-      toast.error(t('transportNameRequired', language));
+    if (operator === 'bus' && !transportNumber.trim()) {
+      toast.error(t('busNumberRequired', language));
       return;
     }
     setSubmitting(true);
     try {
       const priceNum = Number(price);
       const transportTypeId =
-        transportTypes.find((tt) => tt.nameEn.toLowerCase() === OPERATOR_TYPE_NAME[operator].toLowerCase())?.id ?? null;
+        transportTypes.find((tt) => {
+          const name = operator === 'bus' ? (busOperator === 'cta' ? 'CTA Bus' : 'NTA Bus') : OPERATOR_TYPE_NAME[operator];
+          return tt.nameEn.toLowerCase() === name.toLowerCase() || tt.nameEn.toLowerCase() === OPERATOR_TYPE_NAME[operator].toLowerCase();
+        })?.id ?? null;
       await api.post('/transport-reports', {
-        transportName: transportName.trim(),
+        transportName: operator === 'microbus' ? 'Microbus' : (busOperator === 'cta' ? 'CTA Bus' : 'NTA Bus'),
         transportNumber: transportNumber || null,
         transportTypeId,
         fromArea: fromArea || null,
         toArea: toArea || null,
         priceEgp: Number.isFinite(priceNum) && price !== '' ? priceNum : null,
-        gpsTrace: trace.length ? trace : null,
+        gpsTrace: (initialTrace?.length ? initialTrace : trace).length ? (initialTrace?.length ? initialTrace : trace) : null,
       });
       toast.success(t('contributeSubmitted', language));
       reset();
+      onSubmitted?.();
       onClose();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('contributeFailed', language));
@@ -140,13 +151,9 @@ export default function ContributeTransportDialog({
           </div>
 
           <div>
-            <label className="text-xs text-muted-foreground">{t('transportName', language)}</label>
-            <Input value={transportName} onChange={(e) => setTransportName(e.target.value)} className="text-sm rounded-[2rem]" />
-          </div>
-          <div>
             <label className="text-xs text-muted-foreground">{t('operatorLabel', language)}</label>
-            <div className="grid grid-cols-3 gap-2 mt-1">
-              {(['microbus', 'nta', 'cta'] as Operator[]).map((op) => (
+            <div className="grid grid-cols-2 gap-2 mt-1">
+              {(['microbus', 'bus'] as Operator[]).map((op) => (
                 <Button
                   key={op}
                   type="button"
@@ -154,44 +161,68 @@ export default function ContributeTransportDialog({
                   className="w-full h-11 rounded-[2rem] text-xs"
                   onClick={() => setOperator(op)}
                 >
-                  {op === 'microbus' ? t('microbus', language) : t(op === 'nta' ? 'operatorNta' : 'operatorCta', language)}
+                  {op === 'microbus' ? t('microbus', language) : t('bus', language)}
                 </Button>
               ))}
             </div>
           </div>
-          {operator !== 'microbus' && (
-            <div>
-              <label className="text-xs text-muted-foreground">{t('busNumber', language)}</label>
-              <Input value={transportNumber} onChange={(e) => setTransportNumber(e.target.value)} className="text-sm rounded-[2rem]" />
-            </div>
+          {operator === 'bus' && (
+            <>
+              <div>
+                <label className="text-xs text-muted-foreground">{t('operatorLabel', language)}</label>
+                <div className="grid grid-cols-2 gap-2 mt-1">
+                  {(['nta', 'cta'] as const).map((op) => (
+                    <Button
+                      key={op}
+                      type="button"
+                      variant={busOperator === op ? 'default' : 'outline'}
+                      className="w-full h-11 rounded-[2rem] text-xs"
+                      onClick={() => setBusOperator(op)}
+                    >
+                      {t(op === 'nta' ? 'operatorNta' : 'operatorCta', language)}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground">{t('busNumber', language)}</label>
+                <Input value={transportNumber} onChange={(e) => setTransportNumber(e.target.value)} className="text-sm rounded-[2rem]" />
+              </div>
+            </>
           )}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-muted-foreground">{t('fromArea', language)}</label>
-              <Input value={fromArea} onChange={(e) => setFromArea(e.target.value)} className="text-sm rounded-[2rem]" />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground">{t('toArea', language)}</label>
-              <Input value={toArea} onChange={(e) => setToArea(e.target.value)} className="text-sm rounded-[2rem]" />
-            </div>
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground">{t('priceLabel', language)}</label>
-            <Input type="number" value={price} onChange={(e) => setPrice(e.target.value)} className="text-sm rounded-[2rem]" />
-          </div>
+          {!isTraceSubmit && (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted-foreground">{t('fromArea', language)}</label>
+                  <Input value={fromArea} onChange={(e) => setFromArea(e.target.value)} className="text-sm rounded-[2rem]" />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">{t('toArea', language)}</label>
+                  <Input value={toArea} onChange={(e) => setToArea(e.target.value)} className="text-sm rounded-[2rem]" />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground">{t('priceLabel', language)}</label>
+                <Input type="number" value={price} onChange={(e) => setPrice(e.target.value)} className="text-sm rounded-[2rem]" />
+              </div>
+            </>
+          )}
 
-          <Button
-            type="button"
-            variant={recording ? 'destructive' : 'outline'}
-            className="w-full h-12 rounded-[2rem] gap-2"
-            onClick={toggleRecording}
-          >
-            {recording ? <Square className="h-4 w-4" /> : <MapPin className="h-4 w-4" />}
-            {recording ? t('stopRecording', language) : t('recordGps', language)}
-          </Button>
-          {trace.length > 0 && (
+          {!isTraceSubmit && (
+            <Button
+              type="button"
+              variant={recording ? 'destructive' : 'outline'}
+              className="w-full h-12 rounded-[2rem] gap-2"
+              onClick={toggleRecording}
+            >
+              {recording ? <Square className="h-4 w-4" /> : <MapPin className="h-4 w-4" />}
+              {recording ? t('stopRecording', language) : t('recordGps', language)}
+            </Button>
+          )}
+          {(initialTrace?.length || trace.length) > 0 && (
             <p className="text-xs text-muted-foreground text-center">
-              {trace.length} {t('gpsPointsCaptured', language)}
+              {initialTrace?.length || trace.length} {t('gpsPointsCaptured', language)}
             </p>
           )}
 

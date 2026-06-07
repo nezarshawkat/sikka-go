@@ -10,10 +10,12 @@ import { api } from '@/lib/api';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
 
-async function reverseGeocode(lat: number, lng: number): Promise<string> {
+const langForGeocoding = (language: string) => language === 'zh' ? 'zh-CN' : language;
+
+async function reverseGeocode(lat: number, lng: number, language: string): Promise<string> {
   try {
     const res = await fetch(
-      `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${MAPBOX_TOKEN}&language=en,ar&limit=1&types=address,neighborhood,locality,place`,
+      `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${MAPBOX_TOKEN}&country=eg&language=${encodeURIComponent(langForGeocoding(language))}&limit=1&types=address,neighborhood,locality,place,poi`,
     );
     const data = await res.json();
     return data.features?.[0]?.place_name || '';
@@ -73,7 +75,7 @@ export default function PlanSetup() {
         if (cancelled) return;
         if (!data?.segments?.length) throw new Error(t('noRouteTitle', language));
 
-        const originName = await reverseGeocode(request.startLat, request.startLng);
+        const originName = await reverseGeocode(request.startLat, request.startLng, language);
         if (Array.isArray(data.segments) && data.segments.length > 0) {
           const segs = [...data.segments];
           if (originName) segs[0] = { ...segs[0], start_name: originName };
