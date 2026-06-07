@@ -215,9 +215,10 @@ const TripResult = () => {
     const map = mapRef.current.getMap();
     map.easeTo({
       center: trackingLngLat,
-      zoom: 17,
+      zoom: 17.6,
       bearing: trackingBearing,
-      pitch: 55,
+      pitch: 58,
+      offset: [0, 110],
       duration: 700,
       essential: true,
     });
@@ -340,7 +341,7 @@ const TripResult = () => {
           <motion.div initial={{ height: 0 }} animate={{ height: isTracking ? 420 : 320 }} exit={{ height: 0 }} className="overflow-hidden">
             <Map
               ref={mapRef}
-              initialViewState={{ latitude: trackingLngLat?.[1] || userPos?.lat || midLat, longitude: trackingLngLat?.[0] || userPos?.lng || midLng, zoom: isTracking ? 17 : 11, pitch: isTracking ? 55 : 0, bearing: isTracking ? trackingBearing : 0 }}
+              initialViewState={{ latitude: trackingLngLat?.[1] || userPos?.lat || midLat, longitude: trackingLngLat?.[0] || userPos?.lng || midLng, zoom: isTracking ? 17.6 : 11, pitch: isTracking ? 58 : 0, bearing: isTracking ? trackingBearing : 0 }}
               mapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
               style={{ width: '100%', height: isTracking ? 420 : 320 }}
               attributionControl={false}
@@ -418,7 +419,7 @@ const TripResult = () => {
                     <div className="absolute h-12 w-12 rounded-full bg-blue-500/25 animate-ping" />
                     <div
                       className="relative flex h-10 w-10 items-center justify-center rounded-full bg-blue-600 border-2 border-white shadow-xl"
-                      style={{ transform: `rotate(${trackingBearing}deg)` }}
+                      style={{ transform: 'rotate(0deg)' }}
                     >
                       <Navigation className="h-5 w-5 text-white" fill="currentColor" />
                     </div>
