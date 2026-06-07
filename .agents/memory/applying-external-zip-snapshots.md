@@ -22,3 +22,9 @@ These zips omit `App.tsx`. When a snapshot adds a new page (e.g. `TravelMode.tsx
 
 ## Validation note
 `tsc` has long-standing PRE-EXISTING errors in untouched files (`Auth.tsx`, `SignIn/SignUp.tsx`, `AdminMap.tsx`, `AdminRoutes.tsx`, `transportTypes.ts`, `seedDirect.ts`). Dev build uses esbuild (no typecheck), so these don't block runtime. After applying, confirm the errors are only in files you did NOT touch, then restart api-server (build-then-run, no watch) and check browser/HMR for real errors.
+
+## CRLF line endings (Windows zips)
+Files in these zips have **CRLF** line terminators. The `read` tool strips `\r`, so `edit` old_string matches silently FAIL (the file has `\r\n`, your copied string has `\n`). After applying, run `sed -i 's/\r$//' <file>` on every applied file to normalize to LF (the codebase convention) BEFORE attempting any `edit`. Detect with `file <f>` ("with CRLF").
+
+## Genuine syntax errors in zip code must be fixed
+Codex zips can contain real JS parse errors (e.g. `a ?? b || c` mixed without parens → TS5076, a hard esbuild parse failure). Unlike logic quirks (which you flag, not change), a parse error breaks the build for that module — fix it minimally with parens, preserving intent. This is the same class as the missing-route gap: an objective break, not an opinion.

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type KeyboardEvent } from 'react';
+import { useState, useEffect, useRef, type KeyboardEvent, type ClipboardEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useUser, useSignIn } from '@clerk/react';
 import { Button } from '@/components/ui/button';
@@ -114,6 +114,23 @@ const Auth = () => {
       }
       next[index] = cleaned;
       if (index < 5) requestAnimationFrame(() => focusOtpBox(index + 1));
+      return next;
+    });
+  };
+
+  const handleOtpPaste = (index: number, e: ClipboardEvent<HTMLInputElement>) => {
+    const pasted = e.clipboardData.getData('text').replace(/\D/g, '');
+    if (!pasted) return;
+    e.preventDefault();
+    setOtpError(false);
+    setOtpDigits((prev) => {
+      const next = [...prev];
+      const chars = pasted.slice(0, 6 - index).split('');
+      chars.forEach((ch, k) => {
+        next[index + k] = ch;
+      });
+      const focusTo = Math.min(index + chars.length, 5);
+      requestAnimationFrame(() => focusOtpBox(focusTo));
       return next;
     });
   };
@@ -439,6 +456,7 @@ const Auth = () => {
                       autoFocus={i === 0}
                       onChange={(e) => handleOtpChange(i, e.target.value)}
                       onKeyDown={(e) => handleOtpKeyDown(i, e)}
+                      onPaste={(e) => handleOtpPaste(i, e)}
                       onFocus={(e) => e.target.select()}
                       aria-label={`Digit ${i + 1}`}
                       aria-invalid={otpError}
