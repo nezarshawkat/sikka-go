@@ -170,7 +170,7 @@ export default function TripGuideSheet({
                       <p className="text-sm font-semibold text-foreground">{seg.start_name} → {seg.end_name}</p>
                       <Button asChild className="w-full h-11 rounded-[2rem] gap-2">
                         <a href={taxiAppUrlForSegment(seg)}>
-                          <ExternalLink className="h-4 w-4" /> {language === 'ar' ? 'افتح في تطبيقات التاكسي' : 'Open in taxi apps'}
+                          <ExternalLink className="h-4 w-4" /> {t('openTaxiApps', language)}
                         </a>
                       </Button>
                     </div>

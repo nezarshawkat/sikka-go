@@ -109,6 +109,10 @@ export default function ContributeTransportDialog({
       toast.error(t('busNumberRequired', language));
       return;
     }
+    if (isTraceSubmit && operator === 'microbus' && (!fromArea.trim() || !toArea.trim())) {
+      toast.error(t('microbusRouteDetailsRequired', language));
+      return;
+    }
     setSubmitting(true);
     try {
       const priceNum = Number(price);
@@ -190,24 +194,24 @@ export default function ContributeTransportDialog({
               </div>
             </>
           )}
-          {!isTraceSubmit && (
-            <>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-muted-foreground">{t('fromArea', language)}</label>
-                  <Input value={fromArea} onChange={(e) => setFromArea(e.target.value)} className="text-sm rounded-[2rem]" />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground">{t('toArea', language)}</label>
-                  <Input value={toArea} onChange={(e) => setToArea(e.target.value)} className="text-sm rounded-[2rem]" />
-                </div>
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground">{t('priceLabel', language)}</label>
-                <Input type="number" value={price} onChange={(e) => setPrice(e.target.value)} className="text-sm rounded-[2rem]" />
-              </div>
-            </>
-          )}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-muted-foreground">
+                {t(operator === 'microbus' ? 'microbusBoardingArea' : 'fromArea', language)}
+              </label>
+              <Input value={fromArea} onChange={(e) => setFromArea(e.target.value)} className="text-sm rounded-[2rem]" />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground">
+                {t(operator === 'microbus' ? 'microbusRouteEnd' : 'toArea', language)}
+              </label>
+              <Input value={toArea} onChange={(e) => setToArea(e.target.value)} className="text-sm rounded-[2rem]" />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground">{t('priceLabel', language)}</label>
+            <Input type="number" value={price} onChange={(e) => setPrice(e.target.value)} className="text-sm rounded-[2rem]" />
+          </div>
 
           {!isTraceSubmit && (
             <Button
@@ -228,10 +232,10 @@ export default function ContributeTransportDialog({
 
           <div className="flex gap-2 pt-1">
             <Button variant="outline" className="flex-1 h-11 rounded-[2rem]" onClick={handleClose} disabled={submitting}>
-              {t('back', language)}
+              {t('cancel', language)}
             </Button>
             <Button className="flex-1 h-11 rounded-[2rem]" onClick={handleSubmit} disabled={submitting}>
-              {t('submit', language)}
+              {t('save', language)}
             </Button>
           </div>
         </div>

@@ -251,7 +251,7 @@ const Index = () => {
 
   const startContributionRecording = useCallback(() => {
     if (!navigator.geolocation) {
-      toast.error('GPS unavailable');
+      toast.error(t('gpsUnavailable', language));
       return;
     }
     setContributionTrace([]);
@@ -261,10 +261,10 @@ const Index = () => {
         const point: [number, number] = [pos.coords.longitude, pos.coords.latitude];
         setContributionTrace((prev) => [...prev, point]);
       },
-      () => toast.error('GPS unavailable'),
+      () => toast.error(t('gpsUnavailable', language)),
       { enableHighAccuracy: true, maximumAge: 0 },
     );
-  }, []);
+  }, [language]);
 
   useEffect(() => () => stopContributionRecording(), [stopContributionRecording]);
 
@@ -535,7 +535,7 @@ const Index = () => {
                     <MapPin className="h-5 w-5 text-destructive" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-foreground">{t('chosenDestination', language)}</p>
+                  <p className="text-sm font-medium text-foreground">{t('chosenDestination', language)}</p>
                     <p className="text-xs text-muted-foreground line-clamp-2">
                       {pickedDest.loading
                         ? t('locating', language)
@@ -573,22 +573,22 @@ const Index = () => {
                   </div>
                 )}
                 {showDiscoveryRecorder && (
-                  <>
+                  <div className="mx-auto w-[calc(100%-3rem)] max-w-md min-w-[16rem] space-y-2">
                     {!isContributingRoute && contributionTrace.length < 2 ? (
                       <Button
-                        className="w-full h-24 rounded-[2rem] gap-3 text-lg"
+                        className="w-full h-16 rounded-[2rem] gap-2 text-base"
                         onClick={startContributionRecording}
                       >
-                        <Navigation className="h-7 w-7" />
+                        <Navigation className="h-5 w-5" />
                         {t('recordGps', language)}
                       </Button>
                     ) : isContributingRoute ? (
                       <Button
                         variant="destructive"
-                        className="w-full h-24 rounded-[2rem] gap-3 text-lg"
+                        className="w-full h-16 rounded-[2rem] gap-2 text-base"
                         onClick={stopContributionRecording}
                       >
-                        <Square className="h-7 w-7" />
+                        <Square className="h-5 w-5" />
                         {t('stopRecording', language)}
                       </Button>
                     ) : (
@@ -605,14 +605,14 @@ const Index = () => {
                           className="h-12 rounded-[2rem] gap-2"
                           onClick={() => setContributionDialogOpen(true)}
                         >
-                          {t('submit', language)}
+                          {t('save', language)}
                         </Button>
                       </div>
                     )}
-                  </>
+                  </div>
                 )}
                 {showDiscoveryRecorder && contributionTrace.length > 0 && (
-                  <p className="text-center text-xs text-muted-foreground/90 bg-card/70 backdrop-blur-xl rounded-[2rem] py-1.5 px-3 inline-block mx-auto w-full border border-white/10">
+                  <p className="text-center text-xs text-muted-foreground/90 bg-card/70 backdrop-blur-xl rounded-[2rem] py-1.5 px-3 block mx-auto w-[calc(100%-3rem)] max-w-md min-w-[16rem] border border-white/10">
                     {contributionTrace.length} {t('gpsPointsCaptured', language)}
                   </p>
                 )}

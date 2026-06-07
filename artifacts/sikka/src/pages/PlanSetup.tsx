@@ -107,7 +107,7 @@ export default function PlanSetup() {
   }, [language, navigate, request]);
 
   const activeStep = Math.floor(elapsed / 2) % loadingSteps.length;
-  const tooLong = elapsed >= 11;
+  const tooLong = elapsed >= 20;
 
   if (isNoRoute) {
     const discoverParams = new URLSearchParams({
@@ -158,6 +158,10 @@ export default function PlanSetup() {
               <div className="absolute inset-3 rounded-full bg-primary/10 flex items-center justify-center">
                 <Route className="h-9 w-9 text-primary" />
               </div>
+            </div>
+            <div className="space-y-2">
+              <h1 className="text-2xl font-bold text-foreground">{t('settingUpPlanTitle', language)}</h1>
+              <p className="text-sm text-muted-foreground">{t('settingUpPlanBody', language)}</p>
             </div>
             <div className="min-h-[3.5rem] flex items-center justify-center">
               <AnimatePresence mode="wait">

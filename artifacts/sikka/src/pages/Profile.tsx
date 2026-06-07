@@ -39,13 +39,13 @@ const Profile = () => {
                 <User className="h-7 w-7 text-primary" />
               </div>
               <div>
-                <p className="font-semibold text-foreground">{profile?.displayName ?? profile?.phone ?? user?.id?.replace(/^(?:phone|admin):/, '') ?? 'User'}</p>
-                <p className="text-sm text-muted-foreground capitalize">{profile?.nationality || 'egyptian'}</p>
+                <p className="font-semibold text-foreground">{profile?.displayName ?? profile?.phone ?? user?.id?.replace(/^(?:phone|admin):/, '') ?? t('user', language)}</p>
+                <p className="text-sm text-muted-foreground">{t(profile?.nationality || 'egyptian', language)}</p>
               </div>
               {isAdmin && (
                 <div className="ml-auto">
                   <span className="text-xs bg-primary/10 text-primary px-2 py-1 rounded-full flex items-center gap-1">
-                    <Shield className="h-3 w-3" /> Admin
+                    <Shield className="h-3 w-3" /> {t('admin', language)}
                   </span>
                 </div>
               )}
@@ -96,7 +96,7 @@ const Profile = () => {
         </motion.div>
 
         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.15 }}>
-          <Button variant="outline" className="w-full h-14 rounded-[2rem] text-base justify-start px-5 glass-panel" onClick={() => navigate('/discover-trip')}>
+          <Button variant="outline" className="w-full h-14 rounded-[2rem] text-base justify-start px-5 glass-panel profile-glass-action" onClick={() => navigate('/discover-trip')}>
             <Milestone className="h-4 w-4 mr-2" />
             {t('contributeRoute', language)}
           </Button>
@@ -104,7 +104,7 @@ const Profile = () => {
 
         {isAdmin && (
           <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.2 }}>
-            <Button variant="outline" className="w-full h-14 rounded-[2rem] text-base justify-start px-5 glass-panel" onClick={() => navigate('/admin')}>
+            <Button variant="outline" className="w-full h-14 rounded-[2rem] text-base justify-start px-5 glass-panel profile-glass-action" onClick={() => navigate('/admin')}>
               <Shield className="h-4 w-4 mr-2" />
               {t('dashboard', language)}
             </Button>
@@ -112,7 +112,7 @@ const Profile = () => {
         )}
 
         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.3 }}>
-          <Button variant="destructive" className="w-full h-14 rounded-[2rem] text-base justify-start px-5" onClick={handleLogout}>
+          <Button variant="destructive" className="w-full h-14 rounded-[2rem] text-base justify-start px-5 profile-glass-action" onClick={handleLogout}>
             <LogOut className="h-4 w-4 mr-2" />
             {t('logout', language)}
           </Button>

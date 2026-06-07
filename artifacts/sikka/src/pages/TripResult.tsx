@@ -92,7 +92,7 @@ const TripResult = () => {
     if (navigator.geolocation) {
       watchRef.current = navigator.geolocation.watchPosition(
         pos => setUserPos({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-        () => toast.error('GPS unavailable'),
+        () => toast.error(t('gpsUnavailable', language)),
         { enableHighAccuracy: true, maximumAge: 3000 }
       );
     }
@@ -213,13 +213,13 @@ const TripResult = () => {
           <div className="flex gap-2">
             {!isLastSeg ? (
               <Button size="sm" variant="secondary" className="flex-1 gap-1 h-9"
-                onClick={() => { setCurrentSegIndex(i => i + 1); toast.success('Moved to next segment'); }}>
-                <ChevronRight className="h-4 w-4" /> Next segment
+                onClick={() => { setCurrentSegIndex(i => i + 1); toast.success(t('movedToNextSegment', language)); }}>
+                <ChevronRight className="h-4 w-4" /> {t('nextSegment', language)}
               </Button>
             ) : (
               <Button size="sm" variant="secondary" className="flex-1 gap-1 h-9"
-                onClick={() => { stopTracking(); toast.success('Trip complete! 🎉'); }}>
-                <Check className="h-4 w-4" /> Mark trip complete
+                onClick={() => { stopTracking(); toast.success(t('tripComplete', language)); }}>
+                <Check className="h-4 w-4" /> {t('markTripComplete', language)}
               </Button>
             )}
           </div>

@@ -115,6 +115,7 @@ export interface PlanLeg {
   typeId: string | null;
   lineId: string | null;
   lineNumber: string | null;
+  routeDisplayName?: string;
   startName: string;
   endName: string;
   startCoord: Coord;

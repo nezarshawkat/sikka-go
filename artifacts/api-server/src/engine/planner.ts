@@ -84,6 +84,12 @@ function nearPath(path: [number, number][] | null, coord: Coord, maxKm: number):
   return false;
 }
 
+function insideModeHeatmap(graph: TransitGraph, mode: ModeKey, coord: Coord): boolean {
+  return graph.heatPoints.some((hp) =>
+    hp.mode === mode && haversineKm(coord, hp.coord) <= hp.radiusKm,
+  );
+}
+
 function sliceLinePath(line: { path: [number, number][] | null }, a: Coord, b: Coord): [number, number][] {
   const path = line.path;
   if (!path || path.length < 2) return [[a.lng, a.lat], [b.lng, b.lat]];
@@ -321,6 +327,7 @@ function reconstruct(
 
       legs.push({
         mode: board.mode, typeId: board.typeId ?? null, lineId: line.id, lineNumber: line.lineNumber,
+        routeDisplayName: board.mode === "microbus" ? `${line.fromArea} → ${line.toArea}` : undefined,
         startName: startStop.displayName ?? startStop.name,
         endName: endStop.displayName ?? endStop.name,
         startCoord: startStop.coord, endCoord: endStop.coord,
@@ -364,6 +371,7 @@ export interface PlanRequest {
   dest: Coord;
   planKey: PlanKey;
   isArabic: boolean;
+  language?: string;
 }
 
 const UI_ICON: Record<ModeKey, string> = {
@@ -372,7 +380,128 @@ const UI_ICON: Record<ModeKey, string> = {
   taxi: "car", tuktuk: "bike", walk: "walk",
 };
 
-function legInstructions(leg: PlanLeg, type: TransportTypeInfo | null, isArabic: boolean): string[] {
+type PlannerLanguage = "en" | "ar" | "fr" | "de" | "es" | "zh" | "ru";
+
+function plannerLanguage(value: boolean | string): PlannerLanguage {
+  if (typeof value === "boolean") return value ? "ar" : "en";
+  return value === "ar" || value === "fr" || value === "de" || value === "es" || value === "zh" || value === "ru"
+    ? value
+    : "en";
+}
+
+const modeNames: Record<Exclude<PlannerLanguage, "en" | "ar">, Record<ModeKey, string>> = {
+  fr: { metro: "metro", monorail: "monorail", train: "train", bus: "bus", serfis: "serfis", microbus: "minibus", taxi: "taxi", tuktuk: "tuk-tuk", walk: "marche" },
+  de: { metro: "Metro", monorail: "Monorail", train: "Zug", bus: "Bus", serfis: "Serfis", microbus: "Minibus", taxi: "Taxi", tuktuk: "Tuk-tuk", walk: "Fussweg" },
+  es: { metro: "metro", monorail: "monorriel", train: "tren", bus: "autobus", serfis: "serfis", microbus: "microbus", taxi: "taxi", tuktuk: "tuk-tuk", walk: "caminar" },
+  zh: { metro: "地铁", monorail: "单轨", train: "火车", bus: "公交车", serfis: "合乘车", microbus: "小巴", taxi: "出租车", tuktuk: "嘟嘟车", walk: "步行" },
+  ru: { metro: "метро", monorail: "монорельс", train: "поезд", bus: "автобус", serfis: "серфис", microbus: "маршрутка", taxi: "такси", tuktuk: "тук-тук", walk: "пешком" },
+};
+
+function localizedCrowd(crowding: PlanLeg["crowding"], lang: Exclude<PlannerLanguage, "en" | "ar">): string {
+  const labels = {
+    fr: { low: "faible affluence", medium: "affluence moyenne", high: "forte affluence" },
+    de: { low: "geringe Auslastung", medium: "mittlere Auslastung", high: "hohe Auslastung" },
+    es: { low: "poca ocupacion", medium: "ocupacion media", high: "mucha ocupacion" },
+    zh: { low: "低拥挤度", medium: "中等拥挤度", high: "高拥挤度" },
+    ru: { low: "мало людей", medium: "средняя загруженность", high: "много людей" },
+  } as const;
+  return labels[lang][crowding];
+}
+
+function localizedStopText(stops: number, km: number, lang: Exclude<PlannerLanguage, "en" | "ar">): string {
+  if (lang === "fr") return stops > 0 ? `Comptez environ ${stops} arret(s)` : `Restez sur la ligne environ ${km} km`;
+  if (lang === "de") return stops > 0 ? `Zaehlen Sie etwa ${stops} Haltestelle(n)` : `Bleiben Sie etwa ${km} km auf der Linie`;
+  if (lang === "es") return stops > 0 ? `Cuenta unas ${stops} parada(s)` : `Permanece en la linea unos ${km} km`;
+  if (lang === "zh") return stops > 0 ? `大约经过 ${stops} 站` : `沿线路乘坐约 ${km} 公里`;
+  return stops > 0 ? `Считайте примерно ${stops} остановок` : `Оставайтесь на линии около ${km} км`;
+}
+
+function localizedLegInstructions(leg: PlanLeg, type: TransportTypeInfo | null, language: PlannerLanguage): string[] | null {
+  if (language === "en" || language === "ar") return null;
+  const name = modeNames[language][type?.mode ?? leg.mode];
+  const cost = Math.round(leg.costEgp);
+  const mins = Math.max(1, Math.round(leg.timeMin));
+  const km = Math.max(0.1, Math.round(leg.distanceKm * 10) / 10);
+  const stops = leg.stopsCount ?? 0;
+  const stopText = localizedStopText(stops, km, language);
+  const crowd = localizedCrowd(leg.crowding, language);
+  const start = leg.startName || "your location";
+  const end = leg.endName || "your destination";
+
+  if (leg.mode === "walk") {
+    if (language === "fr") return [`Commencez a ${start}.`, `Marchez par le chemin disponible le plus court environ ${km} km (${mins} min).`, `Arrivez a ${end} avant de prendre le prochain trajet.`];
+    if (language === "de") return [`Starten Sie bei ${start}.`, `Gehen Sie den kuerzesten verfuegbaren Weg etwa ${km} km (${mins} Min).`, `Kommen Sie bei ${end} an, bevor Sie den naechsten Abschnitt nehmen.`];
+    if (language === "es") return [`Empieza en ${start}.`, `Camina por la ruta disponible mas corta unos ${km} km (${mins} min).`, `Llega a ${end} antes de subir al siguiente tramo.`];
+    if (language === "zh") return [`从 ${start} 开始。`, `沿最短可用路线步行约 ${km} 公里（${mins} 分钟）。`, `到达 ${end} 后再进入下一段。`];
+    return [`Начните в ${start}.`, `Идите кратчайшим доступным путем около ${km} км (${mins} мин).`, `Дойдите до ${end} перед следующим участком.`];
+  }
+
+  if (leg.mode === "taxi" || leg.mode === "tuktuk") {
+    if (language === "fr") return [`De ${start} a ${end}.`];
+    if (language === "de") return [`Von ${start} nach ${end}.`];
+    if (language === "es") return [`De ${start} a ${end}.`];
+    if (language === "zh") return [`从 ${start} 到 ${end}。`];
+    return [`От ${start} до ${end}.`];
+  }
+
+  const ln = leg.lineNumber ? ` ${leg.lineNumber}` : "";
+  const confirm = leg.lineNumber ? " " : "";
+  const isStreetBus = leg.mode === "bus" || leg.mode === "microbus" || leg.mode === "serfis";
+  if (language === "fr") {
+    return [
+      `Allez au point d embarquement : ${start}.`,
+      `Montez dans ${name}${ln}${confirm && leg.lineNumber ? "(confirmez le numero ou le panneau avant de monter)" : ""}.`,
+      ...(isStreetBus ? [`Demandez s il va a ${end}.`] : []),
+      `Payez environ ${cost} EGP en montant ou selon la demande de l operateur.`,
+      `${stopText}, en surveillant la direction vers ${end}.`,
+      `Descendez a ${end}. Condition prevue : ${crowd}.`,
+    ];
+  }
+  if (language === "de") {
+    return [
+      `Gehen Sie zum Einstiegspunkt: ${start}.`,
+      `Steigen Sie in ${name}${ln}${confirm && leg.lineNumber ? " (Nummer/Schild vor dem Einsteigen bestaetigen)" : ""}.`,
+      ...(isStreetBus ? [`Fragen Sie, ob es nach ${end} faehrt.`] : []),
+      `Zahlen Sie beim Einsteigen etwa ${cost} EGP oder wie der Betreiber verlangt.`,
+      `${stopText} und achten Sie auf die Richtung nach ${end}.`,
+      `Steigen Sie bei ${end} aus. Erwartete Lage: ${crowd}.`,
+    ];
+  }
+  if (language === "es") {
+    return [
+      `Ve al punto de subida: ${start}.`,
+      `Sube a ${name}${ln}${confirm && leg.lineNumber ? " (confirma el numero o letrero antes de subir)" : ""}.`,
+      ...(isStreetBus ? [`Pregunta si va a ${end}.`] : []),
+      `Paga unos ${cost} EGP al subir o segun indique el operador.`,
+      `${stopText}, mirando la direccion hacia ${end}.`,
+      `Baja en ${end}. Condicion esperada: ${crowd}.`,
+    ];
+  }
+  if (language === "zh") {
+    return [
+      `前往上车点：${start}。`,
+      `乘坐 ${name}${ln}${confirm && leg.lineNumber ? "（上车前确认编号或标牌）" : ""}。`,
+      ...(isStreetBus ? [`询问是否开往 ${end}。`] : []),
+      `上车时支付约 ${cost} EGP，或按运营方要求支付。`,
+      `${stopText}，注意前往 ${end} 的方向。`,
+      `在 ${end} 下车。预计情况：${crowd}。`,
+    ];
+  }
+  return [
+    `Идите к месту посадки: ${start}.`,
+    `Садитесь на ${name}${ln}${confirm && leg.lineNumber ? " (проверьте номер или табличку перед посадкой)" : ""}.`,
+    ...(isStreetBus ? [`Спросите, идет ли он до ${end}.`] : []),
+    `Заплатите около ${cost} EGP при посадке или как попросит оператор.`,
+    `${stopText}, следите за направлением к ${end}.`,
+    `Выйдите на ${end}. Ожидаемое состояние: ${crowd}.`,
+  ];
+}
+
+function legInstructions(leg: PlanLeg, type: TransportTypeInfo | null, languageOrArabic: boolean | string): string[] {
+  const language = plannerLanguage(languageOrArabic);
+  const localized = localizedLegInstructions(leg, type, language);
+  if (localized) return localized;
+  const isArabic = language === "ar";
   const name = type ? (isArabic ? type.nameAr : type.nameEn) : isArabic ? "مشي" : "Walk";
   const cost = Math.round(leg.costEgp);
   const mins = Math.max(1, Math.round(leg.timeMin));
@@ -544,10 +673,13 @@ async function buildConnectorAlternative(
   graph: TransitGraph,
   leg: PlanLeg,
   mode: ModeKey,
-  isArabic: boolean,
+  languageOrArabic: boolean | string,
 ): Promise<ApiAlternative | null> {
+  const language = plannerLanguage(languageOrArabic);
+  const isArabic = language === "ar";
   if (!isConnectorMode(mode) || mode === leg.mode) return null;
   if (mode === "walk" && leg.distanceKm > WALK_MAX_KM) return null;
+  if (mode === "tuktuk" && (!insideModeHeatmap(graph, "tuktuk", leg.startCoord) || !insideModeHeatmap(graph, "tuktuk", leg.endCoord))) return null;
   const label = connectorLabel(mode, graph, isArabic);
   if (!label) return null;
   const type = mode === "walk" ? null : pickType(graph, mode, mode === "taxi" ? /taxi app|uber|careem|تطبيق|taxi/i : undefined);
@@ -564,12 +696,14 @@ async function buildConnectorAlternative(
     line_id: null,
     line_number: null,
     info: `${Math.round(leg.distanceKm * 10) / 10} km`,
-    instructions: legInstructions(altLeg, type, isArabic),
+    instructions: legInstructions(altLeg, type, language),
     route_geometry: await onStreetGeometry(altLeg),
   };
 }
 
-async function buildAlternatives(graph: TransitGraph, leg: PlanLeg, planKey: PlanKey, isArabic: boolean): Promise<ApiAlternative[]> {
+async function buildAlternatives(graph: TransitGraph, leg: PlanLeg, planKey: PlanKey, languageOrArabic: boolean | string): Promise<ApiAlternative[]> {
+  const language = plannerLanguage(languageOrArabic);
+  const isArabic = language === "ar";
   const alternatives: ApiAlternative[] = [];
   const seen = new Set<string>([`${leg.mode}:${leg.lineId ?? leg.typeId ?? ""}`]);
   const push = (alt: ApiAlternative | null) => {
@@ -582,9 +716,9 @@ async function buildAlternatives(graph: TransitGraph, leg: PlanLeg, planKey: Pla
 
   // Always expose flexible connector swaps when physically reasonable. This is the
   // review-screen switcher: choosing one updates the stored trip and home-map drawing.
-  if (leg.distanceKm <= WALK_MAX_KM) push(await buildConnectorAlternative(graph, leg, "walk", isArabic));
-  if (planKey !== "economic" || leg.mode === "taxi") push(await buildConnectorAlternative(graph, leg, "taxi", isArabic));
-  if (planKey === "economic" && leg.distanceKm <= TUKTUK_CONNECT_KM) push(await buildConnectorAlternative(graph, leg, "tuktuk", isArabic));
+  if (leg.distanceKm <= WALK_MAX_KM) push(await buildConnectorAlternative(graph, leg, "walk", language));
+  if (planKey !== "economic" || leg.mode === "taxi") push(await buildConnectorAlternative(graph, leg, "taxi", language));
+  if (planKey === "economic" && leg.distanceKm <= TUKTUK_CONNECT_KM) push(await buildConnectorAlternative(graph, leg, "tuktuk", language));
 
   // For transit legs, offer nearby real lines that serve the same corridor. Prefer
   // non-suspect/high-resolution paths first (GTFS imports usually have dense, clean geometry).
@@ -603,6 +737,9 @@ async function buildAlternatives(graph: TransitGraph, leg: PlanLeg, planKey: Pla
       const type = graph.types.get(line.transportTypeId)!;
       const geom = sliceLinePath(line, leg.startCoord, leg.endCoord);
       const dist = Math.max(0.1, leg.distanceKm);
+      const transportName = type.mode === "microbus"
+        ? `${line.fromArea} → ${line.toArea}`
+        : `${isArabic ? type.nameAr : type.nameEn}${line.lineNumber ? ` ${line.lineNumber}` : ""}`;
       const altLeg: PlanLeg = {
         ...leg,
         mode: type.mode,
@@ -616,7 +753,7 @@ async function buildAlternatives(graph: TransitGraph, leg: PlanLeg, planKey: Pla
       };
       push({
         transport_type_id: type.id,
-        transport_name: `${isArabic ? type.nameAr : type.nameEn}${line.lineNumber ? ` ${line.lineNumber}` : ""}`,
+        transport_name: transportName,
         cost_egp: Math.round(altLeg.costEgp),
         duration_minutes: Math.max(1, Math.round(altLeg.timeMin)),
         color: type.color,
@@ -624,7 +761,7 @@ async function buildAlternatives(graph: TransitGraph, leg: PlanLeg, planKey: Pla
         line_id: line.id,
         line_number: line.lineNumber,
         info: `${Math.round(dist * 10) / 10} km · ${line.pathSuspect ? "community route" : "high-confidence route"}`,
-        instructions: legInstructions(altLeg, type, isArabic),
+        instructions: legInstructions(altLeg, type, language),
         route_geometry: geom,
       });
     }
@@ -633,13 +770,17 @@ async function buildAlternatives(graph: TransitGraph, leg: PlanLeg, planKey: Pla
   return alternatives.slice(0, 6);
 }
 
-export async function adaptPlanToApi(graph: TransitGraph, plan: EnginePlan, isArabic: boolean) {
+export async function adaptPlanToApi(graph: TransitGraph, plan: EnginePlan, languageOrArabic: boolean | string) {
+  const language = plannerLanguage(languageOrArabic);
+  const isArabic = language === "ar";
   const segments = await Promise.all(plan.legs.map(async (leg) => {
     const type = leg.typeId ? graph.types.get(leg.typeId) ?? null : null;
-    const name = type
-      ? `${isArabic ? type.nameAr : type.nameEn}${leg.lineNumber ? ` ${leg.lineNumber}` : ""}`
-      : isArabic ? "مشي" : "Walk";
-    const alternatives = await buildAlternatives(graph, leg, plan.plan, isArabic);
+    const name = leg.mode === "microbus" && leg.routeDisplayName
+      ? leg.routeDisplayName
+      : type
+        ? `${isArabic ? type.nameAr : type.nameEn}${leg.lineNumber ? ` ${leg.lineNumber}` : ""}`
+        : isArabic ? "مشي" : "Walk";
+    const alternatives = await buildAlternatives(graph, leg, plan.plan, language);
     return {
       transport_type_id: leg.typeId ?? leg.mode,
       transport_name: name,
@@ -650,7 +791,7 @@ export async function adaptPlanToApi(graph: TransitGraph, plan: EnginePlan, isAr
       color: type?.color ?? "#64748B", icon: UI_ICON[leg.mode],
       line_id: leg.lineId, line_number: leg.lineNumber,
       info: `${Math.round(leg.distanceKm * 10) / 10} km · ${leg.crowding} crowding`,
-      instructions: legInstructions(leg, type, isArabic),
+      instructions: legInstructions(leg, type, language),
       route_geometry: await onStreetGeometry(leg),
       crowding: leg.crowding, alternatives,
     };
@@ -711,5 +852,5 @@ export async function planTripApi(req: PlanRequest) {
   const graph = await buildGraph();
   const plan = await computeEnginePlan(req);
   if (!plan) return null;
-  return adaptPlanToApi(graph, plan, req.isArabic);
+  return adaptPlanToApi(graph, plan, req.language ?? req.isArabic);
 }

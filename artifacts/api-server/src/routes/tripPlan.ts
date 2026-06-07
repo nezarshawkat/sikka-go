@@ -130,6 +130,7 @@ router.post("/", requireAuth, async (req, res) => {
       dest: { lat: endLat, lng: endLng },
       planKey,
       isArabic,
+      language,
     });
     if (plan && plan.segments.length > 0) return res.json(plan);
     // Engine produced nothing verifiable. Door-to-door taxi-app travel is allowed only

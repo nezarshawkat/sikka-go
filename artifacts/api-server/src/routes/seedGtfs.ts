@@ -16,7 +16,7 @@
  *   - Bus/Serfis/Microbus: insert GTFS routes; KEEP every existing line that GTFS
  *     does NOT cover. When a GTFS route matches an existing same-type line by
  *     endpoint proximity, merge them into one line that carries BOTH route numbers
- *     ("<gtfs#> / <old#>") and prefers the authoritative GTFS geometry.
+ *     ("<gtfs#> or <old#>") and prefers the authoritative GTFS geometry.
  *   - CTA Bus type (Alexandria) and all other types are left untouched.
  *
  * POST /api/admin/seed-gtfs            — apply the import
@@ -240,7 +240,7 @@ export async function runGtfsImport(dryRun: boolean) {
       if (match) {
         consumed.add(match.id);
         const oldNum = match.lineNumber?.trim();
-        const dualNum = oldNum && oldNum !== b.shortName ? `${b.shortName} / ${oldNum}` : b.shortName;
+        const dualNum = oldNum && oldNum !== b.shortName ? `${b.shortName} or ${oldNum}` : b.shortName;
         if (!dryRun) {
           await db
             .update(transitLinesTable)

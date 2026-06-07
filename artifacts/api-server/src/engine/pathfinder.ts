@@ -163,8 +163,10 @@ export function findRoutes(
 
       if (e.mode === "tuktuk") {
         if (!allowed.has("tuktuk")) continue;
+        const sourceNode = graph.nodes.get(lab.node) ?? overlay.nodes.get(lab.node);
         const targetNode = graph.nodes.get(e.to) ?? overlay.nodes.get(e.to);
-        if (!targetNode || !isInsideHeatmap(targetNode.coord, graph.heatPoints)) continue;
+        if (!sourceNode || !targetNode) continue;
+        if (!isInsideHeatmap(sourceNode.coord, graph.heatPoints) || !isInsideHeatmap(targetNode.coord, graph.heatPoints)) continue;
       }
 
       const isWalk = e.kind === "walk";

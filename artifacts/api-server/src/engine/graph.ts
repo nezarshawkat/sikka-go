@@ -319,13 +319,15 @@ export async function buildGraph(force = false): Promise<TransitGraph> {
       });
     });
 
-    const gtfsQualityBias = line.pathSuspect ? 1.4 : (line.path?.length ?? 0) >= 50 ? 0.7 : 1;
+    const gtfsQualityBias = line.pathSuspect ? 1.4 : (line.path?.length ?? 0) >= 50 ? 0.55 : 0.95;
     for (let i = 0; i < line.stops.length - 1; i++) {
       const a = line.stops[i];
       const b = line.stops[i + 1];
       const dist = Math.max(0.05, haversineKm(a.coord, b.coord));
-      // Dense, non-suspect route_path geometry is normally from the GTFS import,
-      // so it gets a small weight advantage over hand-entered/noisy alternatives.
+      // Dense, non-suspect route_path geometry is normally from GTFS or a
+      // promoted GPS discovery, so it gets a strong weight advantage over
+      // hand-entered/noisy alternatives while still letting the shortest valid
+      // path win inside that trusted pool.
       const timeMin = ((dist / Math.max(8, type.speedKmh)) * 60) * gtfsQualityBias;
       const cost = perKm * dist;
       addEdge(edges, lsIds[i], {
