@@ -42,12 +42,11 @@ interface TripGuideSheetProps {
 }
 
 const isTaxiLike = (seg: Pick<GuideSegment, 'icon' | 'transport_name'>) =>
-  seg.icon === 'car' || /taxi|app|uber|careem|توك|تاكسي|أوبر|كريم/i.test(seg.transport_name);
+  seg.icon === 'car' || /taxi|uber|careem|توك|تاكسي|أوبر|كريم/i.test(seg.transport_name);
 
-function taxiAppUrlForSegment(seg: Pick<GuideSegment, 'start_name' | 'end_name'>) {
-  const pickup = encodeURIComponent(seg.start_name);
-  const dropoff = encodeURIComponent(seg.end_name);
-  return `uber://?action=setPickup&pickup[formatted_address]=${pickup}&dropoff[formatted_address]=${dropoff}`;
+function mapUrlForSegment(seg: Pick<GuideSegment, 'start_name' | 'end_name'>) {
+  const query = encodeURIComponent(`${seg.start_name} to ${seg.end_name}`);
+  return `https://www.google.com/maps/search/?api=1&query=${query}`;
 }
 
 function getIcon(icon: string) {
@@ -169,21 +168,21 @@ export default function TripGuideSheet({
                     <div className="space-y-2">
                       <p className="text-sm font-semibold text-foreground">{seg.start_name} → {seg.end_name}</p>
                       <Button asChild className="w-full h-11 rounded-[2rem] gap-2">
-                        <a href={taxiAppUrlForSegment(seg)}>
-                          <ExternalLink className="h-4 w-4" /> {language === 'ar' ? 'افتح في تطبيقات التاكسي' : 'Open in taxi apps'}
+                        <a href={mapUrlForSegment(seg)} target="_blank" rel="noreferrer">
+                          <ExternalLink className="h-4 w-4" /> Open in maps
                         </a>
                       </Button>
                     </div>
                   ) : seg.instructions && seg.instructions.length > 0 && (
                     <div>
                       <p className="text-xs font-semibold text-foreground mb-2">{t('instructionsHeader', language)}</p>
-                      <ol className="space-y-0.5">
+                      <ol className="space-y-2">
                         {seg.instructions.map((ins, i) => (
-                          <li key={i} className="flex items-start gap-2 text-sm text-foreground/85 rounded-[1.25rem] bg-card/45 px-3 py-1">
-                            <span className="h-5 w-5 rounded-full bg-primary/15 text-primary text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">
+                          <li key={i} className="flex items-start gap-3 text-sm text-foreground/85 rounded-[2rem] bg-card/45 px-3 py-2">
+                            <span className="h-7 w-7 rounded-full bg-primary/15 text-primary text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
                               {i + 1}
                             </span>
-                            <span className="leading-snug">{ins}</span>
+                            <span className="leading-relaxed">{ins}</span>
                           </li>
                         ))}
                       </ol>
