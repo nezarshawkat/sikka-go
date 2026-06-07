@@ -132,14 +132,14 @@ router.post("/", requireAuth, async (req, res) => {
       isArabic,
     });
     if (plan && plan.segments.length > 0) return res.json(plan);
-    // Engine produced nothing verifiable. Door-to-door Uber/Careem is allowed only
+    // Engine produced nothing verifiable. Door-to-door taxi-app travel is allowed only
     // for premium; non-premium users should not receive a full-trip taxi plan.
     if (planKey === "premium") return res.json(await generateFallbackPlan(startLat, startLng, endLat, endLng, distanceKm, taxiEst, isArabic));
-    return res.status(409).json({ error: isArabic ? "لا يوجد مسار مواصلات موثّق بدون أوبر للرحلة كلها. جرّب الخطة المميزة أو غيّر نقطة البداية/النهاية." : "No verified non-premium transit route was found without taking Uber/Careem for the whole trip. Try Premium or adjust the start/end point." });
+    return res.status(409).json({ error: isArabic ? "لا يوجد مسار مواصلات موثّق بدون تطبيق تاكسي للرحلة كلها. جرّب الخطة المميزة أو غيّر نقطة البداية/النهاية." : "No verified non-premium transit route was found without taking a taxi app for the whole trip. Try Premium or adjust the start/end point." });
   } catch (err: unknown) {
     console.error("Engine trip plan error:", err);
     if (planKey === "premium") return res.json(await generateFallbackPlan(startLat, startLng, endLat, endLng, distanceKm, taxiEst, isArabic));
-    return res.status(409).json({ error: isArabic ? "تعذر إنشاء مسار موثّق بدون جعل أوبر الرحلة كلها." : "Could not build a verified route without making Uber/Careem the whole trip." });
+    return res.status(409).json({ error: isArabic ? "تعذر إنشاء مسار موثّق بدون جعل تطبيق تاكسي الرحلة كلها." : "Could not build a verified route without making a taxi app the whole trip." });
   }
 });
 
@@ -248,7 +248,7 @@ async function buildIntercityPlan(
 
 // Last-resort fallback used ONLY when the deterministic graph engine cannot run
 // at all (e.g. it threw). It NEVER invents a transit route: a door-to-door
-// Uber/Careem ride is a real, computable option (origin → dest at a metered
+// Taxi app ride is a real, computable option (origin → dest at a metered
 // fare), not a fabricated metro/bus/serfis line with imaginary stations.
 async function generateFallbackPlan(
   startLat: number,
@@ -267,7 +267,7 @@ async function generateFallbackPlan(
   ];
   const segment = {
     transport_type_id: "car",
-    transport_name: tr("Uber / Careem", "أوبر / كريم"),
+    transport_name: tr("Taxi app", "تطبيق تاكسي"),
     government_type: "private",
     category: "premium",
     start_name: tr("Your Location", "موقعك"),
@@ -280,7 +280,7 @@ async function generateFallbackPlan(
     line_number: "",
     info: tr("Door-to-door ride.", "رحلة من الباب للباب."),
     instructions: [
-      tr("Open the Uber or Careem app.", "افتح تطبيق أوبر أو كريم."),
+      tr("Open a taxi app.", "افتح تطبيق تاكسي."),
       tr("Enter your destination and confirm pickup at your location.", "أدخل وجهتك وأكد مكان الالتقاء عند موقعك."),
       tr(`Pay in-app or cash (~${taxiEst} EGP).`, `ادفع عبر التطبيق أو نقدًا (~${taxiEst} جنيه).`),
     ],

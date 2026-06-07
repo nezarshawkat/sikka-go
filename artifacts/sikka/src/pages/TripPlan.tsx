@@ -83,14 +83,16 @@ const TripPlan = () => {
 
       <div className="p-4 space-y-6">
         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }}>
-          <Card>
-            <CardContent className="p-4 flex items-center gap-3">
+          <Card className="rounded-[2rem] overflow-hidden">
+            <CardContent className="p-4 flex items-center gap-3 min-h-[5.75rem]">
               <div className="h-10 w-10 rounded-full bg-destructive/10 flex items-center justify-center shrink-0">
                 <MapPin className="h-5 w-5 text-destructive" />
               </div>
-              <div className="flex-1">
-                <p className="text-xs text-muted-foreground">Destination</p>
-                <p className="font-medium text-foreground truncate">{destination}</p>
+              <div className="flex-1 min-w-0 overflow-hidden">
+                <p className="text-xs text-muted-foreground">{t('searchDestination', language)}</p>
+                <p className="font-medium text-foreground truncate block w-full max-w-full" title={destination}>
+                  {destination}
+                </p>
                 <p className="text-xs text-muted-foreground">{distanceKm.toFixed(1)} km away</p>
               </div>
             </CardContent>
