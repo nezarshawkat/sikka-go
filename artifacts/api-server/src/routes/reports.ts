@@ -39,6 +39,7 @@ router.get("/", requireAdmin, async (req, res) => {
 router.post("/", requireAuth, async (req, res) => {
   const {
     reportType, transitLineId, transportTypeId, description, latitude, longitude,
+    routeLabel, segmentIndex,
   } = req.body;
 
   if (typeof reportType !== "string" || !REPORT_TYPES.includes(reportType)) {
@@ -51,13 +52,19 @@ router.post("/", requireAuth, async (req, res) => {
     typeof transportTypeId === "string" && UUID_RE.test(transportTypeId) ? transportTypeId : null;
   const lat = Number(latitude);
   const lng = Number(longitude);
+  const contextLines = [
+    typeof routeLabel === "string" && routeLabel.trim() ? `Route: ${routeLabel.trim()}` : null,
+    segmentIndex !== undefined && segmentIndex !== null ? `Segment index: ${segmentIndex}` : null,
+  ].filter(Boolean);
+  const comment = typeof description === "string" && description.trim() ? description.trim() : "";
+  const fullDescription = [...contextLines, comment ? `Comment: ${comment}` : null].filter(Boolean).join("\n");
 
   const [row] = await db.insert(reportsTable).values({
     userId: req.userId!,
     reportType,
     transitLineId: resolvedTransitLineId,
     transportTypeId: resolvedTransportTypeId,
-    description: typeof description === "string" && description.length ? description : null,
+    description: fullDescription || null,
     latitude: Number.isFinite(lat) ? lat : null,
     longitude: Number.isFinite(lng) ? lng : null,
     status: "open",

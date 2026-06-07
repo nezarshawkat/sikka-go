@@ -161,7 +161,6 @@ export default function PlanSetup() {
             </div>
             <div className="space-y-2">
               <h1 className="text-2xl font-bold text-foreground">{t('settingUpPlanTitle', language)}</h1>
-              <p className="text-sm text-muted-foreground">{t('settingUpPlanBody', language)}</p>
             </div>
             <div className="min-h-[3.5rem] flex items-center justify-center">
               <AnimatePresence mode="wait">

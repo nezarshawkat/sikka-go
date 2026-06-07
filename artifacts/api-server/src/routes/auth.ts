@@ -8,6 +8,79 @@ const router = Router();
 
 const ADMIN_USER_ID = "sikka-admin";
 
+function normalizePhone(value: unknown): string | null {
+  const raw = String(value ?? "").trim();
+  if (!/^\+[1-9]\d{7,14}$/.test(raw)) return null;
+  return raw;
+}
+
+async function twilioVerify(path: string, body: URLSearchParams) {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN || process.env.TWILIO_SECRET;
+  const serviceSid = process.env.TWILIO_VERIFY_SERVICE_SID;
+  if (!accountSid || !authToken || !serviceSid) {
+    throw new Error("Twilio Verify is not configured");
+  }
+  const auth = Buffer.from(`${accountSid}:${authToken}`).toString("base64");
+  const response = await fetch(
+    `https://verify.twilio.com/v2/Services/${serviceSid}/${path}`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${auth}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+    },
+  );
+  const json = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(typeof json?.message === "string" ? json.message : "Twilio Verify request failed");
+  }
+  return json;
+}
+
+router.post("/phone/start", async (req, res) => {
+  const phone = normalizePhone(req.body.phoneNumber);
+  if (!phone) return res.status(400).json({ error: "A valid E.164 phone number is required" });
+  try {
+    await twilioVerify("Verifications", new URLSearchParams({ To: phone, Channel: "sms" }));
+    return res.json({ success: true });
+  } catch (err) {
+    return res.status(503).json({ error: err instanceof Error ? err.message : "Could not send verification code" });
+  }
+});
+
+router.post("/phone/verify", async (req, res) => {
+  const phone = normalizePhone(req.body.phoneNumber);
+  const code = String(req.body.code ?? "").trim();
+  if (!phone || !/^\d{4,10}$/.test(code)) {
+    return res.status(400).json({ error: "A valid phone number and code are required" });
+  }
+  try {
+    const result = await twilioVerify("VerificationCheck", new URLSearchParams({ To: phone, Code: code }));
+    if (result.status !== "approved") return res.status(401).json({ error: "Invalid verification code" });
+
+    const userId = `phone:${phone}`;
+    let [profile] = await db.select().from(profilesTable).where(eq(profilesTable.userId, userId)).limit(1);
+    if (!profile) {
+      [profile] = await db.insert(profilesTable).values({
+        userId,
+        phone,
+        language: "en",
+        nationality: "egyptian",
+      }).returning();
+    }
+
+    const token = crypto.randomUUID();
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    await db.insert(phoneSessionsTable).values({ userId, token, expiresAt });
+    return res.json({ token, profile });
+  } catch (err) {
+    return res.status(503).json({ error: err instanceof Error ? err.message : "Verification failed" });
+  }
+});
+
 /**
  * POST /api/auth/admin-login
  * Standalone admin login — no Clerk required.

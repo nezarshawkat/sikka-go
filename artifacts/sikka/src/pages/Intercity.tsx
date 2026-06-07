@@ -174,11 +174,16 @@ const Intercity = () => {
         return acc;
       }, {})
     : {};
+  const routeContext = fromCity && toCity
+    ? isAr
+      ? `${fromCity.nameAr} (${fromCity.governorate}) إلى ${toCity.nameAr} (${toCity.governorate})`
+      : `${fromCity.nameEn} (${fromCity.governorate}) to ${toCity.nameEn} (${toCity.governorate})`
+    : '';
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
-      <div className="sticky top-0 bg-card/95 backdrop-blur-sm border-b z-20 p-4 flex items-center gap-3 safe-area-top">
+      <div className="sticky top-0 bg-card/82 backdrop-blur-2xl border-b z-20 p-4 flex items-center gap-3 safe-area-top">
         <Button variant="ghost" size="icon" onClick={() => navigate('/')}>
           <ArrowLeft className="h-5 w-5" />
         </Button>
@@ -198,14 +203,22 @@ const Intercity = () => {
         animate={{ y: 0, opacity: 1 }}
         className="p-4 pb-0"
       >
-        <Card>
+        <Card className="glass-panel rounded-[2rem] border-primary/15">
           <CardContent className="p-4 space-y-3">
+            {routeContext && (
+              <div className="rounded-[1.5rem] border border-primary/15 bg-primary/8 p-3">
+                <p className="text-xs font-semibold text-foreground">
+                  {isAr ? 'نطاق البحث الحالي' : 'Current search corridor'}
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{routeContext}</p>
+              </div>
+            )}
             {/* From */}
             <div>
               <p className="text-xs text-muted-foreground mb-1.5">{isAr ? 'من' : 'From'}</p>
               <button
                 onClick={() => { setCityFilter(''); setShowFromPicker(true); }}
-                className="w-full h-12 px-4 rounded-xl border bg-background text-start flex items-center gap-3 hover:border-primary transition-colors"
+                className="w-full h-12 px-4 rounded-[1.5rem] border bg-background/70 text-start flex items-center gap-3 hover:border-primary transition-colors"
               >
                 <MapPin className="h-4 w-4 text-primary shrink-0" />
                 <span className={fromCity ? 'text-foreground font-medium' : 'text-muted-foreground text-sm'}>
@@ -226,7 +239,7 @@ const Intercity = () => {
               <p className="text-xs text-muted-foreground mb-1.5">{isAr ? 'إلى' : 'To'}</p>
               <button
                 onClick={() => { setCityFilter(''); setShowToPicker(true); }}
-                className="w-full h-12 px-4 rounded-xl border bg-background text-start flex items-center gap-3 hover:border-primary transition-colors"
+                className="w-full h-12 px-4 rounded-[1.5rem] border bg-background/70 text-start flex items-center gap-3 hover:border-primary transition-colors"
               >
                 <MapPin className="h-4 w-4 text-destructive shrink-0" />
                 <span className={toCity ? 'text-foreground font-medium' : 'text-muted-foreground text-sm'}>
@@ -245,12 +258,12 @@ const Intercity = () => {
                   value={date}
                   min={todayStr()}
                   onChange={(e) => setDate(e.target.value)}
-                  className="w-full h-12 pl-11 pr-4 rounded-xl border bg-background text-foreground text-sm focus:outline-none focus:border-primary transition-colors"
+                  className="w-full h-12 pl-11 pr-4 rounded-[1.5rem] border bg-background/70 text-foreground text-sm focus:outline-none focus:border-primary transition-colors"
                 />
               </div>
             </div>
 
-            <Button onClick={handleSearch} disabled={loading || !fromCity || !toCity} className="w-full h-12 rounded-xl gap-2 text-base">
+            <Button onClick={handleSearch} disabled={loading || !fromCity || !toCity} className="w-full h-12 rounded-[1.5rem] gap-2 text-base">
               {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Search className="h-5 w-5" />}
               {isAr ? 'ابحث عن رحلات' : 'Search Trips'}
             </Button>
@@ -260,7 +273,7 @@ const Intercity = () => {
 
       {/* Map showing route */}
       {fromCity?.lat && toCity?.lat && (
-        <div className="mx-4 mt-4 h-40 rounded-2xl overflow-hidden border">
+        <div className="mx-4 mt-4 h-44 rounded-[2rem] overflow-hidden border shadow-xl">
           <Map
             initialViewState={{
               ...mapCenter,
@@ -359,7 +372,7 @@ const Intercity = () => {
                         animate={{ y: 0, opacity: 1 }}
                         transition={{ delay: idx * 0.05 }}
                       >
-                        <Card className="overflow-hidden">
+                        <Card className="overflow-hidden rounded-[2rem] glass-panel">
                           <div
                             className="h-1"
                             style={{ backgroundColor: OPERATOR_COLORS[trip.operatorSlug] ?? '#6B7280' }}
@@ -401,7 +414,7 @@ const Intercity = () => {
                                   href={trip.bookingUrl}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-1.5 bg-primary text-primary-foreground text-xs font-semibold px-3 py-2 rounded-lg hover:bg-primary/90 transition-colors"
+                                  className="inline-flex items-center gap-1.5 bg-primary text-primary-foreground text-xs font-semibold px-3 py-2 rounded-[1.25rem] hover:bg-primary/90 transition-colors"
                                 >
                                   {isAr ? 'احجز' : 'Book'}
                                   <ExternalLink className="h-3 w-3" />
@@ -440,7 +453,7 @@ const Intercity = () => {
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
               transition={{ type: 'spring', damping: 25 }}
-              className="bg-card w-full rounded-t-2xl max-h-[70vh] flex flex-col"
+              className="glass-panel w-full rounded-t-[2rem] max-h-[70vh] flex flex-col"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="p-4 border-b">
@@ -454,14 +467,14 @@ const Intercity = () => {
                   value={cityFilter}
                   onChange={(e) => setCityFilter(e.target.value)}
                   placeholder={isAr ? 'ابحث عن مدينة...' : 'Search city...'}
-                  className="w-full h-10 px-4 rounded-xl border bg-background text-sm focus:outline-none focus:border-primary"
+                  className="w-full h-10 px-4 rounded-[1.5rem] border bg-background/70 text-sm focus:outline-none focus:border-primary"
                 />
               </div>
               <div className="overflow-y-auto flex-1 p-2">
                 {filteredCities.map((city) => (
                   <button
                     key={city.id}
-                    className="w-full text-start px-4 py-3 rounded-xl hover:bg-muted transition-colors flex items-center justify-between"
+                    className="w-full text-start px-4 py-3 rounded-[1.5rem] hover:bg-muted transition-colors flex items-center justify-between"
                     onClick={() => {
                       if (showFromPicker) setFromCity(city);
                       else setToCity(city);

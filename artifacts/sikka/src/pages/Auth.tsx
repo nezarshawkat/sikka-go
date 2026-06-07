@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, type KeyboardEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useUser, useSignIn } from '@clerk/react';
 import { Button } from '@/components/ui/button';
@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/contexts/AuthContext';
 import { t, Language } from '@/lib/i18n';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Phone, Shield, ArrowLeft, Users, Globe } from 'lucide-react';
+import { Phone, Shield, ArrowLeft, Users, Globe, UserRound } from 'lucide-react';
 import { toast } from 'sonner';
 import CountryCodeSelect, { countries, Country } from '@/components/auth/CountryCodeSelect';
 import { api } from '@/lib/api';
@@ -20,7 +20,7 @@ import {
 } from '@/components/ui/select';
 import { languageNames } from '@/lib/i18n';
 
-type Step = 'language' | 'phone' | 'otp' | 'nationality' | 'admin';
+type Step = 'language' | 'phone' | 'otp' | 'name' | 'nationality' | 'admin';
 
 const countriesByDialLength = [...countries].sort((a, b) => b.dial.length - a.dial.length);
 const stripNationalPrefix = (value: string) => value.replace(/^0/, '');
@@ -59,7 +59,11 @@ const Auth = () => {
   const [selectedLang, setSelectedLang] = useState<Language | ''>('');
   const [selectedCountry, setSelectedCountry] = useState<Country>(countries[0]);
   const [phoneNumber, setPhoneNumber] = useState('');
-  const [otp, setOtp] = useState('');
+  const [otpDigits, setOtpDigits] = useState<string[]>(Array(6).fill(''));
+  const [otpError, setOtpError] = useState(false);
+  const otpRefs = useRef<Array<HTMLInputElement | null>>([]);
+  const [phoneProvider, setPhoneProvider] = useState<'twilio' | 'clerk' | 'dev'>('clerk');
+  const [displayName, setDisplayName] = useState('');
   const [nationality, setNationality] = useState<'egyptian' | 'foreigner'>('egyptian');
   const [adminUsername, setAdminUsername] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
@@ -75,6 +79,71 @@ const Auth = () => {
   }, [onboard, adminParam]);
 
   const fullPhone = buildFullPhone(selectedCountry, phoneNumber);
+  const otp = otpDigits.join('');
+
+  const resetOtp = () => {
+    setOtpDigits(Array(6).fill(''));
+    setOtpError(false);
+  };
+
+  const focusOtpBox = (index: number) => {
+    const el = otpRefs.current[index];
+    if (el) {
+      el.focus();
+      el.select();
+    }
+  };
+
+  const handleOtpChange = (index: number, raw: string) => {
+    const cleaned = raw.replace(/\D/g, '');
+    setOtpError(false);
+    setOtpDigits((prev) => {
+      const next = [...prev];
+      if (!cleaned) {
+        next[index] = '';
+        return next;
+      }
+      if (cleaned.length > 1) {
+        const chars = cleaned.slice(0, 6 - index).split('');
+        chars.forEach((ch, k) => {
+          next[index + k] = ch;
+        });
+        const focusTo = Math.min(index + chars.length, 5);
+        requestAnimationFrame(() => focusOtpBox(focusTo));
+        return next;
+      }
+      next[index] = cleaned;
+      if (index < 5) requestAnimationFrame(() => focusOtpBox(index + 1));
+      return next;
+    });
+  };
+
+  const handleOtpKeyDown = (index: number, e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Backspace') {
+      setOtpError(false);
+      if (otpDigits[index]) {
+        setOtpDigits((prev) => {
+          const next = [...prev];
+          next[index] = '';
+          return next;
+        });
+      } else if (index > 0) {
+        e.preventDefault();
+        focusOtpBox(index - 1);
+        setOtpDigits((prev) => {
+          const next = [...prev];
+          next[index - 1] = '';
+          return next;
+        });
+      }
+    } else if (e.key === 'ArrowLeft' && index > 0) {
+      focusOtpBox(index - 1);
+    } else if (e.key === 'ArrowRight' && index < 5) {
+      focusOtpBox(index + 1);
+    } else if (e.key === 'Enter' && otp.length === 6) {
+      handleVerifyOtp();
+    }
+  };
 
   const handlePhoneInput = (value: string) => {
     const normalized = value.replace(/[^\d+]/g, '');
@@ -105,7 +174,17 @@ const Auth = () => {
       return;
     }
     setIsLoading(true);
+    resetOtp();
     try {
+      try {
+        await api.post('/auth/phone/start', { phoneNumber: fullPhone });
+        setPhoneProvider('twilio');
+        toast.success(language === 'ar' ? 'تم إرسال رمز التحقق!' : 'Verification code sent!');
+        setStep('otp');
+        return;
+      } catch {
+        setPhoneProvider('clerk');
+      }
       if (!signInLoaded || !signIn) throw new Error('Auth not ready');
       await signIn.create({ strategy: 'phone_code', phoneNumber: fullPhone });
       toast.success(language === 'ar' ? 'تم إرسال رمز التحقق!' : 'Verification code sent!');
@@ -113,6 +192,7 @@ const Auth = () => {
     } catch (err) {
       const msg = err instanceof Error ? err.message : '';
       if (msg.toLowerCase().includes('not enabled') || msg.toLowerCase().includes('strategy')) {
+        setPhoneProvider('dev');
         toast.info(
           language === 'ar'
             ? 'رمز التحقق: 123456 (وضع تجريبي)'
@@ -130,18 +210,32 @@ const Auth = () => {
   const handleVerifyOtp = async () => {
     if (otp.length !== 6) return;
     setIsLoading(true);
+    setOtpError(false);
     try {
+      if (phoneProvider === 'twilio') {
+        const result = await api.post<{ token: string }>('/auth/phone/verify', { phoneNumber: fullPhone, code: otp });
+        localStorage.setItem('sikka_admin_token', result.token);
+        await refreshProfile();
+        setStep('name');
+        return;
+      }
       if (!signIn) throw new Error('stub');
       const result = await signIn.attemptFirstFactor({ strategy: 'phone_code', code: otp });
       if (result.status === 'complete' && setActive) {
         await setActive({ session: result.createdSessionId });
-        setStep('nationality');
+        setStep('name');
       }
-    } catch {
+    } catch (err) {
+      if (phoneProvider === 'twilio') {
+        setOtpError(true);
+        toast.error(err instanceof Error ? err.message : (language === 'ar' ? 'رمز غير صحيح' : 'Invalid code'));
+        return;
+      }
       if (otp === '123456') {
         toast.info(language === 'ar' ? 'وضع تجريبي — جاري المتابعة' : 'Dev mode — continuing');
-        setStep('nationality');
+        setStep('name');
       } else {
+        setOtpError(true);
         toast.error(language === 'ar' ? 'رمز غير صحيح' : 'Invalid code');
       }
     } finally {
@@ -149,10 +243,26 @@ const Auth = () => {
     }
   };
 
+  const handleSetName = async () => {
+    if (!displayName.trim()) return;
+    setIsLoading(true);
+    try {
+      await api.put('/profile', { displayName: displayName.trim(), language });
+      await refreshProfile();
+    } catch {
+      // If the local dev OTP fallback is being used before a real session exists,
+      // keep the name in local storage so the app can still greet the rider later.
+      localStorage.setItem('sikka-display-name', displayName.trim());
+    } finally {
+      setIsLoading(false);
+      setStep('nationality');
+    }
+  };
+
   const handleSetNationality = async () => {
     setIsLoading(true);
     try {
-      await api.put('/profile', { nationality, language });
+      await api.put('/profile', { nationality, language, displayName: displayName.trim() || undefined });
       await refreshProfile();
       navigate('/');
     } catch {
@@ -316,17 +426,32 @@ const Auth = () => {
                     ? `تم إرسال الرمز إلى ${fullPhone}`
                     : `Code sent to ${fullPhone}`}
                 </p>
-                <Input
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={6}
-                  placeholder="000000"
-                  value={otp}
-                  onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
-                  onKeyDown={(e) => e.key === 'Enter' && otp.length === 6 && handleVerifyOtp()}
-                  dir="ltr"
-                  className="text-center text-2xl tracking-widest"
-                />
+                <div className="flex justify-center gap-2" dir="ltr">
+                  {otpDigits.map((digit, i) => (
+                    <input
+                      key={i}
+                      ref={(el) => { otpRefs.current[i] = el; }}
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      maxLength={1}
+                      value={digit}
+                      autoFocus={i === 0}
+                      onChange={(e) => handleOtpChange(i, e.target.value)}
+                      onKeyDown={(e) => handleOtpKeyDown(i, e)}
+                      onFocus={(e) => e.target.select()}
+                      aria-label={`Digit ${i + 1}`}
+                      aria-invalid={otpError}
+                      className={`h-14 w-12 rounded-lg border-2 text-center text-2xl font-semibold outline-none transition-colors focus:ring-2 focus:ring-primary/40 ${
+                        otpError
+                          ? 'border-destructive bg-destructive/10 text-destructive'
+                          : digit
+                            ? 'border-primary bg-primary/5 text-primary'
+                            : 'border-input bg-background text-foreground'
+                      }`}
+                    />
+                  ))}
+                </div>
                 <Button
                   onClick={handleVerifyOtp}
                   disabled={isLoading || otp.length !== 6}
@@ -335,11 +460,46 @@ const Auth = () => {
                   {isLoading ? '...' : t('verifyOtp', language)}
                 </Button>
                 <button
-                  onClick={() => { setOtp(''); setStep('phone'); }}
+                  onClick={() => { resetOtp(); setStep('phone'); }}
                   className="w-full text-sm text-muted-foreground hover:text-primary transition-colors"
                 >
                   {language === 'ar' ? 'تغيير رقم الهاتف' : 'Change phone number'}
                 </button>
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
+
+        {step === 'name' && (
+          <motion.div
+            key="name"
+            variants={slideVariants}
+            initial="enter" animate="center" exit="exit"
+            transition={{ duration: 0.2 }}
+            className="w-full max-w-sm"
+          >
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  <UserRound className="h-5 w-5 text-primary" />
+                  {t('whatShouldWeCallYou', language)}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <Input
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && displayName.trim() && handleSetName()}
+                  placeholder={t('namePlaceholder', language)}
+                  className="text-base"
+                />
+                <Button
+                  onClick={handleSetName}
+                  disabled={isLoading || !displayName.trim()}
+                  className="w-full"
+                >
+                  {isLoading ? '...' : t('continue', language)}
+                </Button>
               </CardContent>
             </Card>
           </motion.div>

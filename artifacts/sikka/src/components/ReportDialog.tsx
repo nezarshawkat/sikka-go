@@ -30,6 +30,12 @@ interface ReportDialogProps {
   transportTypeId?: string;
   /** Optional transit line id to attach. */
   transitLineId?: string;
+  segments?: {
+    index: number;
+    label: string;
+    transportTypeId?: string | null;
+    transitLineId?: string | null;
+  }[];
 }
 
 export default function ReportDialog({
@@ -38,14 +44,17 @@ export default function ReportDialog({
   language,
   transportTypeId,
   transitLineId,
+  segments = [],
 }: ReportDialogProps) {
   const [reportType, setReportType] = useState<string>('');
+  const [segmentValue, setSegmentValue] = useState<string>('trip');
   const [description, setDescription] = useState('');
   const [attachLocation, setAttachLocation] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const reset = () => {
     setReportType('');
+    setSegmentValue('trip');
     setDescription('');
     setAttachLocation(false);
   };
@@ -73,11 +82,20 @@ export default function ReportDialog({
     setSubmitting(true);
     try {
       const loc = await getLocation();
+      const selectedSegment = segmentValue === 'trip'
+        ? null
+        : segments.find((seg) => String(seg.index) === segmentValue) ?? null;
       await api.post('/reports', {
         reportType,
         description: description || null,
-        transportTypeId: transportTypeId && UUID_RE.test(transportTypeId) ? transportTypeId : null,
-        transitLineId: transitLineId && UUID_RE.test(transitLineId) ? transitLineId : null,
+        routeLabel: selectedSegment?.label ?? t('reportWholeTrip', language),
+        segmentIndex: selectedSegment?.index ?? null,
+        transportTypeId: (selectedSegment?.transportTypeId || transportTypeId) && UUID_RE.test(selectedSegment?.transportTypeId || transportTypeId || '')
+          ? selectedSegment?.transportTypeId || transportTypeId
+          : null,
+        transitLineId: (selectedSegment?.transitLineId || transitLineId) && UUID_RE.test(selectedSegment?.transitLineId || transitLineId || '')
+          ? selectedSegment?.transitLineId || transitLineId
+          : null,
         latitude: loc?.latitude ?? null,
         longitude: loc?.longitude ?? null,
       });
@@ -99,6 +117,25 @@ export default function ReportDialog({
         </DialogHeader>
 
         <div className="space-y-4">
+          {segments.length > 0 && (
+            <div>
+              <p className="text-sm font-medium mb-2">{t('reportRouteSegment', language)}</p>
+              <Select value={segmentValue} onValueChange={setSegmentValue}>
+                <SelectTrigger>
+                  <SelectValue placeholder={t('reportWholeTrip', language)} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="trip">{t('reportWholeTrip', language)}</SelectItem>
+                  {segments.map((seg) => (
+                    <SelectItem key={seg.index} value={String(seg.index)}>
+                      {seg.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
           <div>
             <p className="text-sm font-medium mb-2">{t('reportCategory', language)}</p>
             <Select value={reportType} onValueChange={setReportType}>
@@ -116,7 +153,7 @@ export default function ReportDialog({
           </div>
 
           <Textarea
-            placeholder={t('reportDescription', language)}
+            placeholder={t('reportCommentOptional', language)}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             rows={3}
