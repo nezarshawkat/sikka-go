@@ -1,11 +1,13 @@
 import { defineConfig } from "drizzle-kit";
 import path from "path";
 
-const databaseUrl =
-  process.env.DATABASE_URL_OVERRIDE || process.env.DATABASE_URL;
+const override = process.env.DATABASE_URL_OVERRIDE?.trim();
+const databaseUrl = override || process.env.DATABASE_URL;
 
 if (!databaseUrl) {
-  throw new Error("DATABASE_URL, ensure the database is provisioned");
+  throw new Error(
+    "No database connection string found. Set DATABASE_URL_OVERRIDE (preferred) or DATABASE_URL.",
+  );
 }
 
 export default defineConfig({

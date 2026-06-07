@@ -4,12 +4,12 @@ import * as schema from "./schema";
 
 const { Pool } = pg;
 
-const connectionString =
-  process.env.DATABASE_URL_OVERRIDE || process.env.DATABASE_URL;
+const override = process.env.DATABASE_URL_OVERRIDE?.trim();
+const connectionString = override || process.env.DATABASE_URL;
 
 if (!connectionString) {
   throw new Error(
-    "DATABASE_URL must be set. Did you forget to provision a database?",
+    "No database connection string found. Set DATABASE_URL_OVERRIDE (preferred, e.g. external Neon) or DATABASE_URL (Replit built-in DB).",
   );
 }
 

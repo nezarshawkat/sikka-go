@@ -147,6 +147,7 @@ All Drizzle columns use camelCase in JS/TS. API responses are camelCase.
 - `VITE_CLERK_PUBLISHABLE_KEY` — Clerk publishable key for Vite frontend (Replit Secret)
 - `ADMIN_USERNAME` — Admin setup username (Replit Secret)
 - `ADMIN_PASSWORD` — Admin setup password (Replit Secret)
-- `DATABASE_URL` — Replit PostgreSQL connection string (auto-provided)
+- `DATABASE_URL` — Replit PostgreSQL connection string (auto-provided, runtime-managed by Replit's built-in DB; cannot be reassigned via tooling)
+- `DATABASE_URL_OVERRIDE` — optional external Postgres connection string (e.g. Neon). When set, `lib/db` and `drizzle.config.ts` prefer it over `DATABASE_URL`. The app currently runs on Neon via this override; remove the secret to fall back to Replit's built-in DB.
 - `VITE_MAPBOX_TOKEN` — Mapbox access token
 - `OPENAI_API_KEY` — OpenAI key for trip planning (optional, falls back gracefully)
