@@ -48,3 +48,4 @@ MAPBOX_TOKEN = "pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0e
 
 [nix]
 channel = "stable-25_05"
+packages = ["psmisc"]
