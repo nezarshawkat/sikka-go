@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { t } from '@/lib/i18n';
@@ -30,8 +30,91 @@ interface TripPlanData {
   tripType: string; startLat: number; startLng: number; destLat: number; destLng: number;
 }
 
+type LngLat = [number, number];
+type RouteCoords = { segIndex: number; coords: LngLat[] }[];
+
 const ICONS: Record<string, string> = {
   bus: '🚌', train: '🚆', car: '🚕', bike: '🛺', ship: '🚢', plane: '✈️', metro: '🚇', monorail: '🚝', walk: '🚶',
+};
+
+const toRad = (deg: number) => deg * Math.PI / 180;
+const toDeg = (rad: number) => rad * 180 / Math.PI;
+const clamp = (value: number, min = 0, max = 1) => Math.max(min, Math.min(max, value));
+
+const bearingDegrees = (from: LngLat, to: LngLat) => {
+  const fromLat = toRad(from[1]);
+  const toLat = toRad(to[1]);
+  const dLng = toRad(to[0] - from[0]);
+  const y = Math.sin(dLng) * Math.cos(toLat);
+  const x = Math.cos(fromLat) * Math.sin(toLat) - Math.sin(fromLat) * Math.cos(toLat) * Math.cos(dLng);
+  return (toDeg(Math.atan2(y, x)) + 360) % 360;
+};
+
+const projectOntoSegment = (point: LngLat, start: LngLat, end: LngLat) => {
+  const metersPerLat = 111132;
+  const metersPerLng = Math.max(Math.cos(toRad(point[1])) * 111320, 0.000001);
+  const sx = (start[0] - point[0]) * metersPerLng;
+  const sy = (start[1] - point[1]) * metersPerLat;
+  const ex = (end[0] - point[0]) * metersPerLng;
+  const ey = (end[1] - point[1]) * metersPerLat;
+  const dx = ex - sx;
+  const dy = ey - sy;
+  const lenSq = dx * dx + dy * dy;
+  const t = lenSq ? clamp(((-sx) * dx + (-sy) * dy) / lenSq) : 0;
+  const snapped: LngLat = [
+    start[0] + (end[0] - start[0]) * t,
+    start[1] + (end[1] - start[1]) * t,
+  ];
+  const snappedX = sx + dx * t;
+  const snappedY = sy + dy * t;
+  return { snapped, distance: Math.sqrt(snappedX * snappedX + snappedY * snappedY) };
+};
+
+const getRouteProgress = (routeCoords: RouteCoords, userPos: { lat: number; lng: number }) => {
+  const userCoord: LngLat = [userPos.lng, userPos.lat];
+  let best: {
+    segIndex: number;
+    coordIndex: number;
+    snapped: LngLat;
+    bearing: number;
+    distance: number;
+  } | null = null;
+
+  routeCoords.forEach(({ segIndex, coords }) => {
+    for (let i = 0; i < coords.length - 1; i += 1) {
+      const start = coords[i];
+      const end = coords[i + 1];
+      const projected = projectOntoSegment(userCoord, start, end);
+      if (!best || projected.distance < best.distance) {
+        best = {
+          segIndex,
+          coordIndex: i,
+          snapped: projected.snapped,
+          bearing: bearingDegrees(start, end),
+          distance: projected.distance,
+        };
+      }
+    }
+  });
+
+  if (!best) return null;
+
+  const remainingRouteCoords = routeCoords
+    .map(({ segIndex, coords }) => {
+      if (!best || segIndex < best.segIndex) return null;
+      if (segIndex > best.segIndex) return { segIndex, coords };
+      const trimmed = [best.snapped, ...coords.slice(best.coordIndex + 1)];
+      return { segIndex, coords: trimmed.length >= 2 ? trimmed : [best.snapped, best.snapped] as LngLat[] };
+    })
+    .filter((route): route is { segIndex: number; coords: LngLat[] } => !!route && route.coords.length >= 2);
+
+  return {
+    segIndex: best.segIndex,
+    snapped: best.snapped,
+    bearing: best.bearing,
+    distanceFromRouteMeters: best.distance,
+    remainingRouteCoords,
+  };
 };
 
 const TripResult = () => {
@@ -43,7 +126,7 @@ const TripResult = () => {
   const [isTracking, setIsTracking] = useState(false);
   const [userPos, setUserPos] = useState<{ lat: number; lng: number } | null>(null);
   const [currentSegIndex, setCurrentSegIndex] = useState(0);
-  const [routeCoords, setRouteCoords] = useState<{ segIndex: number; coords: [number, number][] }[]>([]);
+  const [routeCoords, setRouteCoords] = useState<RouteCoords>([]);
   const [isLoadingRoutes, setIsLoadingRoutes] = useState(false);
   const [popupSegIndex, setPopupSegIndex] = useState<number | null>(null);
   const watchRef = useRef<number | null>(null);
@@ -103,8 +186,20 @@ const TripResult = () => {
     return () => { if (watchRef.current) navigator.geolocation.clearWatch(watchRef.current); };
   }, []);
 
+  const routeProgress = useMemo(
+    () => (isTracking && userPos ? getRouteProgress(routeCoords, userPos) : null),
+    [isTracking, routeCoords, userPos]
+  );
+  const displayedRouteCoords = routeProgress?.remainingRouteCoords.length ? routeProgress.remainingRouteCoords : routeCoords;
+  const trackingLngLat = routeProgress?.snapped ?? (userPos ? [userPos.lng, userPos.lat] as LngLat : null);
+  const trackingBearing = routeProgress?.bearing ?? 0;
+
   useEffect(() => {
-    if (!routeCoords.length || !mapRef.current) return;
+    if (routeProgress) setCurrentSegIndex(routeProgress.segIndex);
+  }, [routeProgress]);
+
+  useEffect(() => {
+    if (isTracking || !routeCoords.length || !mapRef.current) return;
     let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
     routeCoords.forEach(({ coords }) => coords.forEach(([lng, lat]) => {
       minLng = Math.min(minLng, lng); maxLng = Math.max(maxLng, lng);
@@ -113,7 +208,20 @@ const TripResult = () => {
     if (Number.isFinite(minLng)) {
       try { mapRef.current.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 48, duration: 600 }); } catch {}
     }
-  }, [routeCoords]);
+  }, [isTracking, routeCoords]);
+
+  useEffect(() => {
+    if (!isTracking || !trackingLngLat || !mapRef.current) return;
+    const map = mapRef.current.getMap();
+    map.easeTo({
+      center: trackingLngLat,
+      zoom: 17,
+      bearing: trackingBearing,
+      pitch: 55,
+      duration: 700,
+      essential: true,
+    });
+  }, [isTracking, trackingBearing, trackingLngLat]);
 
   const stopTracking = () => {
     setIsTracking(false);
@@ -155,7 +263,7 @@ const TripResult = () => {
 
   const routeGeoJSON = {
     type: 'FeatureCollection' as const,
-    features: routeCoords.map(({ segIndex, coords }) => ({
+    features: displayedRouteCoords.map(({ segIndex, coords }) => ({
       type: 'Feature' as const,
       properties: { color: plan.segments[segIndex]?.color || '#3B82F6', name: plan.segments[segIndex]?.line_number || plan.segments[segIndex]?.transport_name },
       geometry: { type: 'LineString' as const, coordinates: coords },
@@ -232,7 +340,7 @@ const TripResult = () => {
           <motion.div initial={{ height: 0 }} animate={{ height: isTracking ? 420 : 320 }} exit={{ height: 0 }} className="overflow-hidden">
             <Map
               ref={mapRef}
-              initialViewState={{ latitude: userPos?.lat || midLat, longitude: userPos?.lng || midLng, zoom: isTracking ? 14 : 11 }}
+              initialViewState={{ latitude: trackingLngLat?.[1] || userPos?.lat || midLat, longitude: trackingLngLat?.[0] || userPos?.lng || midLng, zoom: isTracking ? 17 : 11, pitch: isTracking ? 55 : 0, bearing: isTracking ? trackingBearing : 0 }}
               mapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
               style={{ width: '100%', height: isTracking ? 420 : 320 }}
               attributionControl={false}
@@ -246,7 +354,7 @@ const TripResult = () => {
               <RouteLayers id="route" data={routeGeoJSON} />
 
               {/* Segment icon markers — clickable to open popup */}
-              {routeCoords.map(({ segIndex, coords }) => {
+              {!isTracking && routeCoords.map(({ segIndex, coords }) => {
                 if (!coords.length) return null;
                 const mid = coords[Math.floor(coords.length / 2)];
                 const seg = plan.segments[segIndex];
@@ -301,14 +409,22 @@ const TripResult = () => {
               <Marker latitude={plan.startLat} longitude={plan.startLng}>
                 <div className="h-4 w-4 rounded-full bg-primary border-2 border-primary-foreground shadow" />
               </Marker>
-              <Marker latitude={plan.destLat} longitude={plan.destLng}>
-                <div className="h-4 w-4 rounded-full bg-destructive border-2 border-primary-foreground shadow" />
+              <Marker latitude={plan.destLat} longitude={plan.destLng} anchor="bottom">
+                <MapPin className="h-8 w-8 text-destructive drop-shadow-lg" fill="currentColor" strokeWidth={1.5} />
               </Marker>
-              {userPos && isTracking && (
-                <Marker latitude={userPos.lat} longitude={userPos.lng}>
-                  <div className="relative">
-                    <div className="h-5 w-5 rounded-full bg-blue-500 border-2 border-white shadow-lg" />
-                    <div className="absolute inset-0 h-5 w-5 rounded-full bg-blue-500 animate-ping opacity-30" />
+              {trackingLngLat && isTracking && currentSeg && (
+                <Marker latitude={trackingLngLat[1]} longitude={trackingLngLat[0]} anchor="center">
+                  <div className="relative flex h-14 w-14 items-center justify-center">
+                    <div className="absolute h-12 w-12 rounded-full bg-blue-500/25 animate-ping" />
+                    <div
+                      className="relative flex h-10 w-10 items-center justify-center rounded-full bg-blue-600 border-2 border-white shadow-xl"
+                      style={{ transform: `rotate(${trackingBearing}deg)` }}
+                    >
+                      <Navigation className="h-5 w-5 text-white" fill="currentColor" />
+                    </div>
+                    <div className="absolute -bottom-0.5 flex h-6 min-w-6 items-center justify-center rounded-full border-2 border-white bg-background px-1 text-xs shadow-md">
+                      {getIcon(currentSeg.icon)}
+                    </div>
                   </div>
                 </Marker>
               )}
