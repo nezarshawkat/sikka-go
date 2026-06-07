@@ -49,9 +49,12 @@ const appearance = {
 const SignUpPage = () => (
   <div className="min-h-screen flex flex-col items-center justify-center bg-background px-4">
     <div className="mb-8 text-center">
-      <h1 className="text-4xl font-bold text-primary tracking-tight">سكة</h1>
-      <p className="text-lg font-semibold text-foreground mt-1">Sikka</p>
-      <p className="text-sm text-muted-foreground mt-2">Your intelligent transport companion in Egypt</p>
+      <img
+        src={`${import.meta.env.BASE_URL}sikka-logo.svg`}
+        alt="Sikka"
+        className="h-20 w-auto mx-auto"
+      />
+      <p className="text-sm text-muted-foreground mt-3">Your intelligent transport companion in Egypt</p>
     </div>
     <SignUp
       routing="path"

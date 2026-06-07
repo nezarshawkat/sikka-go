@@ -315,9 +315,12 @@ const Auth = () => {
         animate={{ y: 0, opacity: 1 }}
         className="mb-8 text-center"
       >
-        <h1 className="text-4xl font-bold text-primary tracking-tight">سكة</h1>
-        <p className="text-lg font-semibold text-foreground mt-1">Sikka</p>
-        <p className="text-sm text-muted-foreground mt-2">{t('tagline', language)}</p>
+        <img
+          src={`${import.meta.env.BASE_URL}sikka-logo.svg`}
+          alt="Sikka"
+          className="h-20 w-auto mx-auto"
+        />
+        <p className="text-sm text-muted-foreground mt-3">{t('tagline', language)}</p>
       </motion.div>
 
       <AnimatePresence mode="wait">
